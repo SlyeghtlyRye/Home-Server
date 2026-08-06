@@ -107,6 +107,7 @@ export function showGrid() {
   runCleanup(null);
   document.getElementById('grid-view').style.display = 'block';
   document.getElementById('detail-view').style.display = 'none';
+  updateActiveNav('grid');
 }
 
 export function showDetail(appKey) {
@@ -121,6 +122,7 @@ export function showDetail(appKey) {
   }
   content.innerHTML = `<h1>${info.title}</h1>${info.bodyHtml || ''}`;
   if (info.onRender) info.onRender(content);
+  updateActiveNav(appKey);
 }
 
 export function escapeHtml(s) {
@@ -136,6 +138,12 @@ export function isoOf(d) {
   return `${y}-${m}-${day}`;
 }
 
+function updateActiveNav(appKey) {
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.classList.toggle('active', link.dataset.nav === appKey);
+  });
+}
+
 function initShellListeners() {
   document.querySelectorAll('#grid-view .card').forEach(card => {
     const appKey = card.dataset.app;
@@ -143,6 +151,17 @@ function initShellListeners() {
   });
   document.querySelector('#detail-view .back-btn').addEventListener('click', showGrid);
   document.getElementById('status-dismiss').addEventListener('click', hideStatusModal);
+
+  document.getElementById('app-header').addEventListener('click', (e) => {
+    const navEl = e.target.closest('[data-nav]');
+    if (!navEl) return;
+    const target = navEl.dataset.nav;
+    if (target === 'grid') {
+      showGrid();
+    } else {
+      showDetail(target);
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', initShellListeners);

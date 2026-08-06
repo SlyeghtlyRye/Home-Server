@@ -36,7 +36,7 @@
     .card h2 { margin-top: 0; font-size: 24px; margin-bottom: 10px; }
     .card p { margin: 0; font-size: 16px; color: var(--color-text-dim); }
     #detail-view { display: none; }
-    .back-btn { background: var(--color-surface); color: white; border: 1px solid var(--color-border); padding: 10px 18px; border-radius: 6px; cursor: pointer; margin-bottom: 20px; font-size: 15px; }
+    .back-btn { background: var(--color-surface); color: white; border: 1px solid var(--color-border); padding: 10px 18px; border-radius: 6px; cursor: pointer; margin: 20px 0; font-size: 15px; }
     .back-btn:hover { border-color: var(--color-accent); }
     .goto-btn { display: inline-block; background: var(--color-accent); color: var(--color-bg); font-weight: bold; padding: 12px 20px; border-radius: 6px; text-decoration: none; margin-top: 15px; }
     .btn-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin: 15px 0; }
@@ -264,6 +264,46 @@
       cursor: pointer;
     }
 
+    #app-header {
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border-soft);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .app-header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 12px 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .app-header-brand {
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .app-header-brand:hover { color: var(--color-accent); }
+    #app-nav {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .nav-link {
+      background: transparent;
+      color: var(--color-text-dim);
+      border: 1px solid transparent;
+      padding: 6px 12px;
+      border-radius: var(--radius-xs);
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .nav-link:hover { border-color: var(--color-border); color: white; }
+    .nav-link.active { background: var(--color-selected-bg); color: white; border-color: var(--color-accent); }
     @media (max-width: 600px) {
       body { padding: 10px; }
       h1 { font-size: 24px; margin-bottom: 20px; }
@@ -273,6 +313,18 @@
   </style>
 </head>
 <body>
+  <header id="app-header">
+    <div class="app-header-inner">
+      <div class="app-header-brand" data-nav="grid">&#x1F3E0; Home Management</div>
+      <nav id="app-nav">
+        <button class="nav-link" data-nav="pihole">Pi-hole</button>
+        <button class="nav-link" data-nav="mealie">Mealie</button>
+        <button class="nav-link" data-nav="kanboard">Kanboard</button>
+        <button class="nav-link" data-nav="audiobooks">Streams</button>
+        <button class="nav-link" data-nav="docs">Docs</button>
+      </nav>
+    </div>
+  </header>
   <div class="container">
     <div id="grid-view">
       <h1>&#x1F3E0; Home Management</h1>
