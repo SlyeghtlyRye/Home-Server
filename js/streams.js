@@ -1,7 +1,7 @@
 // streams.js -- multi-profile media player: YouTube links + local uploads,
 // unified player abstraction, resume tracking, checkpoints, sleep timer.
 import { registerApp, onViewLeave, showStatusModal, hideStatusModal,
-         showConfirmModal, escapeHtml } from './core.js';
+         showConfirmModal, showErrorBanner, clearErrorBanner, escapeHtml } from './core.js';
 
 let audiobookProfiles = [];
 let activeProfile = localStorage.getItem('audiobook_profile') || null;
@@ -55,9 +55,11 @@ async function loadAudiobookProfiles() {
     if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
     audiobookProfiles = data.profiles || [];
+    clearErrorBanner();
   } catch (err) {
     console.error('Failed to load profiles', err);
     audiobookProfiles = [];
+    showErrorBanner("Couldn't reach the server to load profiles. Check that it's running and try again.");
   }
 
   if (activeProfile && !audiobookProfiles.includes(activeProfile)) {
@@ -275,10 +277,10 @@ async function loadAudiobookLibrary() {
     renderBookSection('recent-panel', 'Recently Played', recent, true);
     renderBookSection('local-panel', 'Local Files', localLibrary, false, 'No local files uploaded yet. Drop one above to share it with everyone.');
     renderBookSection('history-panel', 'History', [...youtubeLibrary].reverse(), false, 'No streams added yet.');
+    clearErrorBanner();
   } catch (err) {
     console.error('Failed to load audiobook library', err);
-    document.getElementById('recent-panel').innerHTML =
-      `<div class="week-block"><p style="color:var(--color-text-muted);">Couldn't load stream data.</p></div>`;
+    showErrorBanner("Couldn't reach the server to load your streams. Check that it's running and try again.");
   }
 }
 
@@ -799,7 +801,7 @@ let listenersWired = false;
 
 registerApp('audiobooks', {
   title: '&#x1F3A7; Streams',
-  bodyHtml: `<div id="audiobooks-root"></div>`,
+  bodyHtml: `<div id="conn-error-banner" class="error-banner"></div><div id="audiobooks-root"></div>`,
   onRender: () => {
     if (!listenersWired) {
       wireDelegatedListeners();
