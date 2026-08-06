@@ -40,7 +40,6 @@ services:
       - ./nginx/templates:/etc/nginx/templates:ro
       - ./dashboard.html:/usr/share/nginx/html/index.html:ro
       - ./js:/usr/share/nginx/html/js:ro
-      - ./js:/usr/share/nginx/html/js:ro
     depends_on:
       - pihole
       - mealie

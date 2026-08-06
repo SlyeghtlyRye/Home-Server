@@ -32,7 +32,9 @@ nginx (Docker, port 80)
 └──► trigger_server.py (host, port 9001)
 │
 ├──► mealie_weekly_plan.py — Mealie automation logic
-└──► audiobook_lib.py — Streams backend logic
+├──► audiobook_lib.py — Streams backend logic
+├──► system_status.py — container/service health
+└──► reset_manager.py — setup wizard, factory reset
 **Why `trigger_server.py` runs on the host, not in Docker:** it needs to do
 things (YouTube metadata fetching via `yt-dlp`, filesystem access for
 uploaded local media) that are simpler to manage directly on the host than
@@ -81,16 +83,46 @@ needs a machine-specific value (`HOST_IP`, `TRIGGER_SECRET`,
 `MEALIE_TOKEN_FILE`, etc.) imports from here rather than hardcoding it.
 
 ### `scripts/reset_manager.py`
-Shared logic for both first-time setup and factory reset. A single list of
-actions (write `.env`, remove personal data, bring up the Docker stack,
-restart the trigger service) runs for real or in `--dry-run` mode — dry-run
-walks the exact same code path but only prints what it would do, so the
-simulator can never drift out of sync with what a real run actually does.
+Shared logic for first-time setup, factory reset, and the in-browser setup
+wizard. A single list of actions (write `.env`, generate `js/config.js`,
+install the systemd service, remove personal data, bring up the Docker
+stack) runs for real or in `--dry-run` mode — dry-run walks the exact same
+code path but only prints what it would do, so the preview can never drift
+out of sync with what a real run actually does. `setup.sh` calls this
+directly over SSH; the dashboard's System panel calls it indirectly via
+`trigger_server.py`.
+
+### `scripts/system_status.py`
+Single source of truth for system/container health (uptime, memory, disk,
+Docker container status, host systemd services). Used by both the CLI
+report (`status.py`) and the dashboard's `/data/system-status` endpoint.
 
 ### `dashboard.html`
-The frontend. Currently one file containing all CSS and JS for every
-feature (this is actively being split into ES modules — see
-`docs/` once that lands).
+The frontend shell — HTML structure, CSS (with a `:root` custom-properties
+design system), and the `<script type="module">` tags that load each
+feature module below. No feature-specific logic lives here directly
+anymore; each feature is its own ES module.
+
+### `js/core.js`
+Application shell: the app registry (`registerApp`), view switching,
+the shared status/confirm modal, error banner helpers, and the persistent
+header/nav. Feature modules register themselves here rather than this file
+knowing about any specific feature — adding a new integration never
+requires editing `core.js`.
+
+### `js/mealie.js`, `js/streams.js`, `js/docs.js`, `js/system.js`
+One ES module per feature (meal planning, media player, documentation
+browser, system status/reset), each following the same pattern: register
+with `core.js`, render into its own container, use event delegation for
+anything that re-renders (calendar days, book cards, etc.) rather than
+rebinding listeners on every update.
+
+### `js/wizard.js`
+First-time setup wizard. Runs once on page load, checks
+`/data/setup-status`; if incomplete, injects a dismissible banner above the
+grid guiding the person through pasting a Mealie API token (verified live
+against Mealie's API before being accepted) and creating their first
+Streams profile. Deliberately self-contained — doesn't modify `core.js`.
 
 ## How the dashboard talks to the backend
 
@@ -140,14 +172,32 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 ├── nginx.conf
 ├── nginx/templates/default.conf.template
 ├── dashboard.html
+├── js/
+│ ├── core.js (shell, registry, modals, nav)
+│ ├── config.js (generated — browser-side HOST_IP)
+│ ├── static-apps.js (Pi-hole, Kanboard)
+│ ├── mealie.js
+│ ├── streams.js
+│ ├── docs.js
+│ ├── system.js (status + factory reset)
+│ └── wizard.js (first-time setup banner)
 ├── scripts/
 │ ├── config.py
 │ ├── reset_manager.py
+│ ├── system_status.py
+│ ├── generate_docs_index.py
 │ ├── trigger_server.py
 │ └── mealie_weekly_plan.py
 ├── audiobooks/
 │ ├── audiobook_lib.py
 │ └── add_book.py
+├── docs/
+│ ├── mealie.md
+│ ├── streams.md
+│ ├── config-and-setup.md
+│ ├── nginx-and-networking.md
+│ ├── system-panel.md
+│ └── index.md (generated — do not hand-edit)
 ├── status.py
 ├── SETUP.md
 └── README.md
