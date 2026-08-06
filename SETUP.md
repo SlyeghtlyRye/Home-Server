@@ -68,38 +68,20 @@ The installer will then:
    from the original developer's instance is reused)
 2. Write these into a local `.env` file (never committed to git, never
    shared)
-3. Bring up all Docker containers
-4. Restart the host-level trigger service
+3. Generate `js/config.js` (the browser-side counterpart) with your real IP
+4. Install and start the host-level trigger service as a systemd service
+   (`mealie-trigger.service`) -- this is a small Python process that runs
+   directly on the host, not in Docker, so it can reach things a container
+   can't easily reach
+5. Bring up all Docker containers
 
-## Step 4 — Set up the host-level trigger service
-
-The installer brings up Docker containers, but one small Python service runs
-directly on the host (not in Docker) so it can access things Docker
-containers can't easily reach. Set it up as a systemd service:
-
+Confirm the trigger service came up correctly:
 ```bash
-cat > /etc/systemd/system/mealie-trigger.service << 'SERVICE'
-[Unit]
-Description=Mealie Meal Plan Trigger
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/python3 /root/scripts/trigger_server.py
-Restart=always
-WorkingDirectory=/root/scripts
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-systemctl daemon-reload
-systemctl enable --now mealie-trigger.service
 systemctl status mealie-trigger.service
 ```
-
 You should see `active (running)`.
 
-## Step 5 — Get a Mealie API token
+## Step 4 — Get a Mealie API token
 
 1. Visit `http://<your-ip>:9000`, create an account through Mealie's own
    setup flow
@@ -109,7 +91,7 @@ You should see `active (running)`.
    echo "paste-your-token-here" > /root/scripts/mealie_token.txt
 ```
 
-## Step 6 — Verify everything is connected
+## Step 5 — Verify everything is connected
 
 ```bash
 curl "http://<your-ip>/data/status"
