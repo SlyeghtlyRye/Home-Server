@@ -26,6 +26,15 @@ server {
     location /data/docs-content {
             proxy_pass http://172.17.0.1:9001/data/docs-content?key=${TRIGGER_SECRET}&filename=$arg_filename;
     }
+    location /data/system-status {
+            proxy_pass http://172.17.0.1:9001/data/system-status?key=${TRIGGER_SECRET};
+    }
+    location /api/reset-preview {
+            proxy_pass http://172.17.0.1:9001/api/reset-preview?key=${TRIGGER_SECRET};
+    }
+    location /api/reset-execute {
+            proxy_pass http://172.17.0.1:9001/api/reset-execute?key=${TRIGGER_SECRET};
+    }
     location /data/range-mealplan {
             proxy_pass http://172.17.0.1:9001/data/range-mealplan?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
     }

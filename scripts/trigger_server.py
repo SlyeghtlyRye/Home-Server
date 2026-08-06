@@ -18,6 +18,8 @@ import audiobook_lib as alib
 
 from config import TRIGGER_SECRET as SECRET
 DOCS_DIR = "/root/docs"
+import system_status
+import reset_manager
 
 current_process = None
 
@@ -100,6 +102,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(filepath) as f:
                 content = f.read()
             self._send_json(200, {"filename": filename, "content": content})
+            return
+        if parsed.path == "/data/system-status":
+            try:
+                self._send_json(200, system_status.collect_status())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/api/reset-preview":
+            host_ip = reset_manager.read_current_host_ip()
+            timezone = reset_manager.read_current_timezone()
+            log_lines = reset_manager.run_reset(host_ip, timezone, dry_run=True, return_log=True)
+            self._send_json(200, {"log": log_lines})
             return
 
         if parsed.path == "/data/local-audio":
@@ -257,6 +271,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self._check_key(params):
             self.send_response(403)
             self.end_headers()
+            return
+        if parsed.path == "/api/reset-execute":
+            body = self._read_json_body()
+            confirm_text = body.get("confirm", "")
+            if confirm_text != "RESET":
+                self._send_json(400, {"error": "confirmation text did not match"})
+                return
+            host_ip = reset_manager.read_current_host_ip()
+            timezone = reset_manager.read_current_timezone()
+            try:
+                reset_manager.run_reset(host_ip, timezone, dry_run=False, skip_service_restart=True)
+                self._send_json(200, {
+                    "status": "ok",
+                    "message": "Personal data cleared and new secrets generated. "
+                               "SSH in and run: docker compose up -d --force-recreate "
+                               "(or reboot the device) to finish applying the reset."
+                })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/audiobook-upload-local":

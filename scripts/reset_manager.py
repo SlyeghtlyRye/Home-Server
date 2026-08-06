@@ -3,9 +3,9 @@ reset_manager.py -- shared logic for first-time setup and factory reset.
 
 Both real setup/reset and the dry-run simulator ("Fake Factory Reset") walk
 the exact same list of actions below, so the simulator can never drift out
-of sync with what a real run actually does. Each action is (description,
-function). In dry-run mode, functions are not called -- only descriptions
-are printed.
+of sync with what a real run actually does. Each action logs a line
+(returned as a list when return_log=True, for the dashboard's preview UI)
+and always prints too, for CLI usage via setup.sh.
 """
 import argparse
 import os
@@ -17,7 +17,6 @@ ROOT = "/root"
 ENV_FILE = os.path.join(ROOT, ".env")
 ENV_EXAMPLE = os.path.join(ROOT, ".env.example")
 
-# Files considered "personal data" -- removed on a real Factory Reset.
 RESET_TARGETS = [
     "scripts/mealie_token.txt",
     "scripts/meal_history.json",
@@ -32,11 +31,35 @@ RESET_TARGETS = [
 ]
 
 
+def _log(log_lines, message):
+    log_lines.append(message)
+    print(message)
+
+
+def _read_env_value(key, default=None):
+    if not os.path.exists(ENV_FILE):
+        return default
+    with open(ENV_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return default
+
+
+def read_current_host_ip():
+    return _read_env_value("HOST_IP", "192.168.0.201")
+
+
+def read_current_timezone():
+    return _read_env_value("TIMEZONE", "UTC")
+
+
 def generate_secret():
     return secrets_module.token_hex(24)
 
 
-def write_env(host_ip, timezone, dry_run):
+def write_env(host_ip, timezone, dry_run, log_lines):
     secret = generate_secret()
     pihole_pw = secrets_module.token_urlsafe(12)
     content = (
@@ -47,22 +70,22 @@ def write_env(host_ip, timezone, dry_run):
         f"MEALIE_TOKEN_FILE=/root/scripts/mealie_token.txt\n"
     )
     if dry_run:
-        print(f"[dry-run] would write {ENV_FILE} with a freshly generated "
-              f"TRIGGER_SECRET and PIHOLE_WEBPASSWORD (values hidden)")
+        _log(log_lines, f"[dry-run] would write {ENV_FILE} with a freshly generated "
+                         f"TRIGGER_SECRET and PIHOLE_WEBPASSWORD (values hidden)")
         return
     with open(ENV_FILE, "w") as f:
         f.write(content)
     os.chmod(ENV_FILE, 0o600)
-    print(f"Wrote {ENV_FILE}")
+    _log(log_lines, f"Wrote {ENV_FILE}")
 
 
-def remove_personal_data(dry_run):
+def remove_personal_data(dry_run, log_lines):
     for rel_path in RESET_TARGETS:
         full = os.path.join(ROOT, rel_path)
         exists = os.path.exists(full)
         if dry_run:
             state = "would delete" if exists else "would skip (not present)"
-            print(f"[dry-run] {state}: {rel_path}")
+            _log(log_lines, f"[dry-run] {state}: {rel_path}")
             continue
         if not exists:
             continue
@@ -70,43 +93,57 @@ def remove_personal_data(dry_run):
             shutil.rmtree(full)
         else:
             os.remove(full)
-        print(f"Removed {rel_path}")
+        _log(log_lines, f"Removed {rel_path}")
 
 
-def bring_up_stack(dry_run):
+def bring_up_stack(dry_run, log_lines):
     if dry_run:
-        print("[dry-run] would run: docker compose up -d --force-recreate")
+        _log(log_lines, "[dry-run] would run: docker compose up -d --force-recreate")
         return
     subprocess.run(
         ["docker", "compose", "up", "-d", "--force-recreate"],
         cwd=ROOT, check=True,
     )
+    _log(log_lines, "Ran: docker compose up -d --force-recreate")
 
 
-def restart_trigger_service(dry_run):
+def restart_trigger_service(dry_run, log_lines):
     if dry_run:
-        print("[dry-run] would run: systemctl restart mealie-trigger.service")
+        _log(log_lines, "[dry-run] would run: systemctl restart mealie-trigger.service")
         return
     subprocess.run(
         ["systemctl", "restart", "mealie-trigger.service"], check=True,
     )
+    _log(log_lines, "Ran: systemctl restart mealie-trigger.service")
 
 
-def run_setup(host_ip, timezone, dry_run):
-    print(f"{'[DRY RUN] ' if dry_run else ''}Setting up...")
-    write_env(host_ip, timezone, dry_run)
-    bring_up_stack(dry_run)
-    restart_trigger_service(dry_run)
-    print(f"{'[DRY RUN] ' if dry_run else ''}Setup complete.")
+def run_setup(host_ip, timezone, dry_run, skip_service_restart=False, return_log=False):
+    log_lines = []
+    _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Setting up...")
+    write_env(host_ip, timezone, dry_run, log_lines)
+    if skip_service_restart:
+        _log(log_lines, "Skipping automatic service restart -- SSH in and run "
+                         "'docker compose up -d --force-recreate' to finish.")
+    else:
+        bring_up_stack(dry_run, log_lines)
+        restart_trigger_service(dry_run, log_lines)
+    _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Setup complete.")
+    return log_lines if return_log else None
 
 
-def run_reset(host_ip, timezone, dry_run):
-    print(f"{'[DRY RUN] ' if dry_run else ''}Factory reset starting...")
-    remove_personal_data(dry_run)
-    write_env(host_ip, timezone, dry_run)
-    bring_up_stack(dry_run)
-    restart_trigger_service(dry_run)
-    print(f"{'[DRY RUN] ' if dry_run else ''}Factory reset complete.")
+def run_reset(host_ip, timezone, dry_run, skip_service_restart=False, return_log=False):
+    log_lines = []
+    _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Factory reset starting...")
+    remove_personal_data(dry_run, log_lines)
+    write_env(host_ip, timezone, dry_run, log_lines)
+    if skip_service_restart:
+        _log(log_lines, "Skipping automatic service restart -- SSH in and run "
+                         "'docker compose up -d --force-recreate' (or reboot) to finish.")
+    else:
+        bring_up_stack(dry_run, log_lines)
+        restart_trigger_service(dry_run, log_lines)
+    _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Factory reset complete.")
+    return log_lines if return_log else None
 
 
 if __name__ == "__main__":
