@@ -161,7 +161,7 @@ function renderActionPanel() {
   el.innerHTML = `
     <div class="week-block">
       <h3>Selected Days</h3>
-      <p style="color:#bbb; font-size:14px;">
+      <p style="color:var(--color-text-dim); font-size:14px;">
         Click an empty day to add another 7-day block onto your selection. Click a selected day again to include/exclude it.
         ${included.length} of ${totalSelected} selected day(s) will be planned.
       </p>
@@ -328,7 +328,7 @@ function renderPreviewPanel(conflicts) {
   el.innerHTML = `
     <div class="week-block">
       <h3>Preview</h3>
-      <p style="color:#888; font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>
+      <p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>
       ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
       ${previewPicks.map(p => `
         <div class="preview-row">
@@ -489,7 +489,7 @@ async function loadShoppingListsForRange(startIso, endIso) {
     const lists = data.lists || [];
     clearErrorBanner();
     if (lists.length === 0) {
-      el.innerHTML = '<div class="week-block"><h3>Shopping Lists</h3><p style="color:#888;">No shopping lists for this range.</p></div>';
+      el.innerHTML = '<div class="week-block"><h3>Shopping Lists</h3><p style="color:var(--color-text-muted);">No shopping lists for this range.</p></div>';
       return;
     }
     el.innerHTML = `
@@ -506,7 +506,7 @@ async function loadShoppingListsForRange(startIso, endIso) {
       </div>
     `;
   } catch (err) {
-    el.innerHTML = `<div class="week-block"><h3>Shopping Lists</h3><p style="color:#888;">Couldn't load shopping lists.</p></div>`;
+    el.innerHTML = `<div class="week-block"><h3>Shopping Lists</h3><p style="color:var(--color-text-muted);">Couldn't load shopping lists.</p></div>`;
     showErrorBanner("Couldn't reach the server to load shopping lists. Check that it's running and try again.");
   }
 }

@@ -181,7 +181,7 @@ function renderAudiobooksMain() {
         &#x1F4C1; Drag & drop a local audio or video file here, or click to browse
         <input type="file" id="local-file-input" accept="audio/*,video/*">
       </div>
-      <p style="color:#ffd479; font-size:12px; margin-top:6px;">&#x26A0; Local uploads are shared with everyone — every profile can see and play them, but each person's watch progress is tracked separately.</p>
+      <p style="color:var(--color-warning); font-size:12px; margin-top:6px;">&#x26A0; Local uploads are shared with everyone — every profile can see and play them, but each person's watch progress is tracked separately.</p>
       <div class="upload-progress" id="upload-progress"></div>
     </div>
     <div id="recent-panel"></div>
@@ -278,7 +278,7 @@ async function loadAudiobookLibrary() {
   } catch (err) {
     console.error('Failed to load audiobook library', err);
     document.getElementById('recent-panel').innerHTML =
-      `<div class="week-block"><p style="color:#888;">Couldn't load stream data.</p></div>`;
+      `<div class="week-block"><p style="color:var(--color-text-muted);">Couldn't load stream data.</p></div>`;
   }
 }
 
@@ -311,7 +311,7 @@ function renderBookCard(b) {
           ? `<div class="book-thumb-local">${b.media_type === 'video' ? '&#x1F3AC;' : '&#x1F3A7;'}</div>`
           : (thumb ? `<img class="book-thumb" src="${thumb}">` : `<div class="book-thumb"></div>`)}
         <div class="book-card-info">
-          <div class="btitle">${escapeHtml(b.title)}${isLocal ? ' <span style="color:#888; font-weight:normal; font-size:11px;">(Local)</span>' : ''}</div>
+          <div class="btitle">${escapeHtml(b.title)}${isLocal ? ' <span style="color:var(--color-text-muted); font-weight:normal; font-size:11px;">(Local)</span>' : ''}</div>
           <div class="bmeta" id="bmeta-${b.id}">${posLabel}${stopLabel}</div>
         </div>
         <div class="book-card-expand-icon" id="expand-icon-${b.id}">&#x25BC;</div>

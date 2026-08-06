@@ -45,7 +45,7 @@ function renderMarkdown(text) {
 
 async function loadDocsList() {
   const root = document.getElementById('docs-root');
-  root.innerHTML = '<p style="color:#888;">Loading docs...</p>';
+  root.innerHTML = '<p style="color:var(--color-text-muted);">Loading docs...</p>';
   try {
     const res = await fetch('/data/docs-list');
     if (!res.ok) throw new Error('server responded ' + res.status);
@@ -54,14 +54,14 @@ async function loadDocsList() {
     renderDocsIndex();
   } catch (err) {
     console.error('Failed to load docs list', err);
-    root.innerHTML = '<p style="color:#888;">Couldn\'t load documentation.</p>';
+    root.innerHTML = '<p style="color:var(--color-text-muted);">Couldn\'t load documentation.</p>';
   }
 }
 
 function renderDocsIndex() {
   const root = document.getElementById('docs-root');
   if (docsList.length === 0) {
-    root.innerHTML = '<p style="color:#888;">No documentation found.</p>';
+    root.innerHTML = '<p style="color:var(--color-text-muted);">No documentation found.</p>';
     return;
   }
   root.innerHTML = `
@@ -71,7 +71,7 @@ function renderDocsIndex() {
         ${docsList.map(d => `
           <div class="profile-card" data-action="open-doc" data-filename="${d.filename}" style="text-align:left; display:block; font-weight:normal;">
             <div style="font-weight:bold; margin-bottom:6px;">${escapeHtml(d.title)}</div>
-            <div style="font-size:11px; color:#888;">${d.tags.map(t => escapeHtml(t)).join(', ')}</div>
+            <div style="font-size:11px; color:var(--color-text-muted);">${d.tags.map(t => escapeHtml(t)).join(', ')}</div>
           </div>
         `).join('')}
       </div>
@@ -81,7 +81,7 @@ function renderDocsIndex() {
 
 async function openDoc(filename) {
   const root = document.getElementById('docs-root');
-  root.innerHTML = '<p style="color:#888;">Loading...</p>';
+  root.innerHTML = '<p style="color:var(--color-text-muted);">Loading...</p>';
   try {
     const res = await fetch(`/data/docs-content?filename=${encodeURIComponent(filename)}`);
     if (!res.ok) throw new Error('server responded ' + res.status);
@@ -92,7 +92,7 @@ async function openDoc(filename) {
     `;
   } catch (err) {
     console.error('Failed to load doc', err);
-    root.innerHTML = '<p style="color:#888;">Couldn\'t load this document.</p>';
+    root.innerHTML = '<p style="color:var(--color-text-muted);">Couldn\'t load this document.</p>';
   }
 }
 
