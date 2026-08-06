@@ -10,13 +10,18 @@ from config import HOST_IP, MEALIE_TOKEN_FILE
 MEALIE_URL = f"http://{HOST_IP}:9000"
 HISTORY_FILE = "/root/scripts/meal_history.json"
 
-with open(MEALIE_TOKEN_FILE) as f:
-    TOKEN = f.read().strip()
 
-headers = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json",
-}
+def get_headers():
+    """Reads the token fresh from disk on every call, rather than once at
+    import time. This means: (1) the backend can start up even before a
+    token exists yet (first-time setup wizard), and (2) a newly-pasted
+    token takes effect immediately, no service restart needed."""
+    with open(MEALIE_TOKEN_FILE) as f:
+        token = f.read().strip()
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
 
 def get_week_range(which):
@@ -33,17 +38,19 @@ def canonical_week_start(d):
 def list_name_for(start):
     return f"Week of {start.isoformat()}"
 
+
 def create_recipe(name):
-    resp = requests.post(f"{MEALIE_URL}/api/recipes", headers=headers, json={"name": name})
+    resp = requests.post(f"{MEALIE_URL}/api/recipes", headers=get_headers(), json={"name": name})
     resp.raise_for_status()
     slug = resp.json()
-    detail = requests.get(f"{MEALIE_URL}/api/recipes/{slug}", headers=headers)
+    detail = requests.get(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
     detail.raise_for_status()
     data = detail.json()
     return data["id"], data["name"]
 
+
 def get_recipe_ids():
-    resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=headers, params={"perPage": 100})
+    resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=get_headers(), params={"perPage": 100})
     resp.raise_for_status()
     return [(r["id"], r["name"]) for r in resp.json()["items"]]
 
@@ -56,7 +63,7 @@ def create_mealplan_entry(entry_date, recipe_id):
         "text": "",
         "recipeId": recipe_id,
     }
-    resp = requests.post(f"{MEALIE_URL}/api/households/mealplans", headers=headers, json=body)
+    resp = requests.post(f"{MEALIE_URL}/api/households/mealplans", headers=get_headers(), json=body)
     if not resp.ok:
         print(f"  FAILED creating entry for {entry_date}: {resp.status_code} {resp.text}")
     resp.raise_for_status()
@@ -65,7 +72,7 @@ def create_mealplan_entry(entry_date, recipe_id):
 def get_mealplan_entries(start, end):
     resp = requests.get(
         f"{MEALIE_URL}/api/households/mealplans",
-        headers=headers,
+        headers=get_headers(),
         params={"start_date": start.isoformat(), "end_date": end.isoformat(), "perPage": 100},
     )
     resp.raise_for_status()
@@ -78,20 +85,20 @@ def get_planned_dates_in_range(start, end):
 
 
 def delete_mealplan_entry(entry_id):
-    resp = requests.delete(f"{MEALIE_URL}/api/households/mealplans/{entry_id}", headers=headers)
+    resp = requests.delete(f"{MEALIE_URL}/api/households/mealplans/{entry_id}", headers=get_headers())
     if not resp.ok:
         print(f"  FAILED deleting entry {entry_id}: {resp.status_code} {resp.text}")
 
 
 def create_shopping_list(name, extras=None):
     body = {"name": name, "extras": extras or {}}
-    resp = requests.post(f"{MEALIE_URL}/api/households/shopping/lists", headers=headers, json=body)
+    resp = requests.post(f"{MEALIE_URL}/api/households/shopping/lists", headers=get_headers(), json=body)
     resp.raise_for_status()
     return resp.json()["id"]
 
 
 def find_shopping_list(name):
-    resp = requests.get(f"{MEALIE_URL}/api/households/shopping/lists", headers=headers, params={"perPage": 100})
+    resp = requests.get(f"{MEALIE_URL}/api/households/shopping/lists", headers=get_headers(), params={"perPage": 100})
     resp.raise_for_status()
     for item in resp.json()["items"]:
         if item["name"] == name:
@@ -100,14 +107,14 @@ def find_shopping_list(name):
 
 
 def delete_shopping_list(list_id):
-    resp = requests.delete(f"{MEALIE_URL}/api/households/shopping/lists/{list_id}", headers=headers)
+    resp = requests.delete(f"{MEALIE_URL}/api/households/shopping/lists/{list_id}", headers=get_headers())
     if not resp.ok:
         print(f"  FAILED deleting list {list_id}: {resp.status_code} {resp.text}")
 
 
 def add_recipe_to_list(list_id, recipe_id):
     body = [{"recipeId": recipe_id, "recipeIncrementQuantity": 1}]
-    resp = requests.post(f"{MEALIE_URL}/api/households/shopping/lists/{list_id}/recipe", headers=headers, json=body)
+    resp = requests.post(f"{MEALIE_URL}/api/households/shopping/lists/{list_id}/recipe", headers=get_headers(), json=body)
     if not resp.ok:
         print(f"  FAILED adding recipe {recipe_id}: {resp.status_code} {resp.text}")
 
@@ -236,7 +243,7 @@ def clear_dates(dates):
 
 
 def cleanup_stale_lists(days=21):
-    resp = requests.get(f"{MEALIE_URL}/api/households/shopping/lists", headers=headers, params={"perPage": 100})
+    resp = requests.get(f"{MEALIE_URL}/api/households/shopping/lists", headers=get_headers(), params={"perPage": 100})
     resp.raise_for_status()
     cutoff = date.today() - timedelta(days=days)
     removed = []
