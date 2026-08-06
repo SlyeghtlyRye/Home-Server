@@ -1,0 +1,123 @@
+upstream pihole {
+    server pihole:80;
+}
+upstream mealie {
+    server mealie:9000;
+}
+upstream kanboard {
+    server kanboard:80;
+}
+server {
+    listen 80;
+    server_name home.dashboard.local;
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+    location /trigger/mealplan {
+            proxy_pass http://172.17.0.1:9001/?key=${TRIGGER_SECRET}&action=$arg_action;
+    }
+    location /data/status {
+            proxy_pass http://172.17.0.1:9001/status?key=${TRIGGER_SECRET};
+    }
+    location /data/range-mealplan {
+            proxy_pass http://172.17.0.1:9001/data/range-mealplan?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
+    }
+    location /data/recipes {
+            proxy_pass http://172.17.0.1:9001/data/recipes?key=${TRIGGER_SECRET};
+    }
+    location /data/shopping-list-for-day {
+            proxy_pass http://172.17.0.1:9001/data/shopping-list-for-day?key=${TRIGGER_SECRET}&date=$arg_date;
+    }
+    location /data/shopping-list-for-week {
+            proxy_pass http://172.17.0.1:9001/data/shopping-list-for-week?key=${TRIGGER_SECRET}&start=$arg_start;
+    }
+    location /data/shopping-lists-for-range {
+            proxy_pass http://172.17.0.1:9001/data/shopping-lists-for-range?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
+    }
+    location /api/preview {
+            proxy_pass http://172.17.0.1:9001/preview?key=${TRIGGER_SECRET};
+    }
+    location /api/reroll {
+            proxy_pass http://172.17.0.1:9001/reroll?key=${TRIGGER_SECRET};
+    }
+    location /api/commit {
+            proxy_pass http://172.17.0.1:9001/commit?key=${TRIGGER_SECRET};
+    }
+    location /api/create-recipe {
+            proxy_pass http://172.17.0.1:9001/create-recipe?key=${TRIGGER_SECRET};
+    }
+    location /api/clear-dates {
+            proxy_pass http://172.17.0.1:9001/clear-dates?key=${TRIGGER_SECRET};
+    }
+    location /data/audiobook-library {
+            proxy_pass http://172.17.0.1:9001/data/audiobook-library?key=${TRIGGER_SECRET}&profile=$arg_profile;
+    }
+    location /data/audiobook-profiles {
+            proxy_pass http://172.17.0.1:9001/data/audiobook-profiles?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-add-profile {
+            proxy_pass http://172.17.0.1:9001/audiobook-add-profile?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-rename-profile {
+            proxy_pass http://172.17.0.1:9001/audiobook-rename-profile?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-delete-profile {
+            proxy_pass http://172.17.0.1:9001/audiobook-delete-profile?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-upload-local {
+            proxy_pass http://172.17.0.1:9001/audiobook-upload-local?key=${TRIGGER_SECRET}&profile=$arg_profile&title=$arg_title&ext=$arg_ext;
+            proxy_request_buffering off;
+    }
+    location /data/local-audio {
+            proxy_pass http://172.17.0.1:9001/data/local-audio?key=${TRIGGER_SECRET}&id=$arg_id;
+    }
+    location /api/audiobook-record-checkpoint {
+            proxy_pass http://172.17.0.1:9001/audiobook-record-checkpoint?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-revert-resume {
+            proxy_pass http://172.17.0.1:9001/audiobook-revert-resume?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-add {
+            proxy_pass http://172.17.0.1:9001/audiobook-add?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-set-stop {
+            proxy_pass http://172.17.0.1:9001/audiobook-set-stop?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-update-resume {
+            proxy_pass http://172.17.0.1:9001/audiobook-update-resume?key=${TRIGGER_SECRET};
+    }
+    location /api/audiobook-delete {
+            proxy_pass http://172.17.0.1:9001/audiobook-delete?key=${TRIGGER_SECRET};
+    }
+}
+server {
+    listen 80;
+    server_name home.pihole.local;
+    location / {
+        proxy_pass http://pihole;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+server {
+    listen 80;
+    server_name home.meals.local;
+    location / {
+        proxy_pass http://mealie;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+server {
+    listen 80;
+    server_name home.chores.local;
+    location / {
+        proxy_pass http://kanboard;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}

@@ -1,0 +1,40 @@
+# Secrets and machine-specific config
+.env
+
+# Personal data - Mealie
+scripts/mealie_token.txt
+scripts/meal_history.json
+
+# Personal data - Streams
+audiobooks/library.json
+audiobooks/profiles.json
+audiobooks/local_files/
+
+# Personal artifacts
+mealie-backup.tar.gz
+dnsmasq-custom.conf
+
+# OS/editor cruft
+*.pyc
+__pycache__/
+.DS_Store
+*.swp
+
+# Shell/OS/home-directory files - not part of the project
+.bash_history
+.bashrc
+.bash_aliases
+.profile
+.selected_editor
+.lesshst
+.cache/
+.config/
+.local/
+.docker/
+
+# Personal data - Streams (additional runtime state)
+audiobooks/config.json
+audiobooks/local_progress.json
+audiobooks/local_shared.json
+audiobooks/state.json
+audiobooks/scheduler.log
