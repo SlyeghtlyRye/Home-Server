@@ -38,3 +38,7 @@ audiobooks/local_progress.json
 audiobooks/local_shared.json
 audiobooks/state.json
 audiobooks/scheduler.log
+
+# Git credentials and machine-specific git config
+.git-credentials
+.gitconfig
