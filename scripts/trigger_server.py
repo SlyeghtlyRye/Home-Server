@@ -16,7 +16,7 @@ import mealie_weekly_plan as mwp
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
 
-from config import TRIGGER_SECRET as SECRET
+from config import TRIGGER_SECRET as SECRET, MEALIE_TOKEN_FILE as MEALIE_TOKEN_FILE_PATH
 DOCS_DIR = "/root/docs"
 import system_status
 import reset_manager
@@ -114,6 +114,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             timezone = reset_manager.read_current_timezone()
             log_lines = reset_manager.run_reset(host_ip, timezone, dry_run=True, return_log=True)
             self._send_json(200, {"log": log_lines})
+            return
+        if parsed.path == "/data/setup-status":
+            token_exists = os.path.exists(MEALIE_TOKEN_FILE_PATH)
+            mealie_ok = False
+            if token_exists:
+                try:
+                    mwp.get_recipe_ids()
+                    mealie_ok = True
+                except Exception:
+                    mealie_ok = False
+            try:
+                has_profile = len(alib.load_profiles()) > 0
+            except Exception:
+                has_profile = False
+            self._send_json(200, {
+                "mealie_token_exists": token_exists,
+                "mealie_token_valid": mealie_ok,
+                "has_streams_profile": has_profile,
+                "setup_complete": mealie_ok and has_profile,
+            })
             return
 
         if parsed.path == "/data/local-audio":
@@ -290,6 +310,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 })
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/api/save-mealie-token":
+            body = self._read_json_body()
+            token = (body.get("token") or "").strip()
+            if not token:
+                self._send_json(400, {"error": "missing token"})
+                return
+            with open(MEALIE_TOKEN_FILE_PATH, "w") as f:
+                f.write(token)
+            try:
+                mwp.get_recipe_ids()
+                self._send_json(200, {"status": "ok", "valid": True})
+            except Exception as e:
+                self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
             return
 
         if parsed.path == "/audiobook-upload-local":

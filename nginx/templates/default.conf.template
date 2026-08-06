@@ -35,6 +35,12 @@ server {
     location /api/reset-execute {
             proxy_pass http://172.17.0.1:9001/api/reset-execute?key=${TRIGGER_SECRET};
     }
+    location /data/setup-status {
+            proxy_pass http://172.17.0.1:9001/data/setup-status?key=${TRIGGER_SECRET};
+    }
+    location /api/save-mealie-token {
+            proxy_pass http://172.17.0.1:9001/api/save-mealie-token?key=${TRIGGER_SECRET};
+    }
     location /data/range-mealplan {
             proxy_pass http://172.17.0.1:9001/data/range-mealplan?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
     }
