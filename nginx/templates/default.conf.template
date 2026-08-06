@@ -20,6 +20,12 @@ server {
     location /data/status {
             proxy_pass http://172.17.0.1:9001/status?key=${TRIGGER_SECRET};
     }
+    location /data/docs-list {
+            proxy_pass http://172.17.0.1:9001/data/docs-list?key=${TRIGGER_SECRET};
+    }
+    location /data/docs-content {
+            proxy_pass http://172.17.0.1:9001/data/docs-content?key=${TRIGGER_SECRET}&filename=$arg_filename;
+    }
     location /data/range-mealplan {
             proxy_pass http://172.17.0.1:9001/data/range-mealplan?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
     }

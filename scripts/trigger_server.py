@@ -17,6 +17,7 @@ sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
 
 from config import TRIGGER_SECRET as SECRET
+DOCS_DIR = "/root/docs"
 
 current_process = None
 
@@ -67,6 +68,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/status":
             running = current_process is not None and current_process.poll() is None
             self._send_json(200, {"running": running})
+            return
+        if parsed.path == "/data/docs-list":
+            docs = []
+            for filename in sorted(os.listdir(DOCS_DIR)):
+                if not filename.endswith(".md") or filename == "index.md":
+                    continue
+                filepath = os.path.join(DOCS_DIR, filename)
+                title = filename
+                tags = []
+                with open(filepath) as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped.startswith("tags:"):
+                            tags = [t.strip() for t in stripped[len("tags:"):].split(",") if t.strip()]
+                        elif stripped.startswith("# "):
+                            title = stripped[2:].strip()
+                            break
+                docs.append({"filename": filename, "title": title, "tags": tags})
+            self._send_json(200, {"docs": docs})
+            return
+        if parsed.path == "/data/docs-content":
+            filename = params.get("filename", [None])[0]
+            if not filename or "/" in filename or ".." in filename:
+                self._send_json(400, {"error": "invalid filename"})
+                return
+            filepath = os.path.join(DOCS_DIR, filename)
+            if not os.path.exists(filepath) or not filename.endswith(".md"):
+                self._send_json(404, {"error": "not found"})
+                return
+            with open(filepath) as f:
+                content = f.read()
+            self._send_json(200, {"filename": filename, "content": content})
             return
 
         if parsed.path == "/data/local-audio":
