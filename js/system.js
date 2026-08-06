@@ -7,6 +7,7 @@ import { registerApp, showStatusModal, hideStatusModal, showErrorBanner,
 
 async function loadSystemStatus() {
   const root = document.getElementById('system-root');
+  root.innerHTML = '<p style="color:var(--color-text-muted);">Loading system status...</p>';
   try {
     const res = await fetch('/data/system-status');
     if (!res.ok) throw new Error('server responded ' + res.status);

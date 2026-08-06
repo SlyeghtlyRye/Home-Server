@@ -91,7 +91,7 @@ You should see `active (running)`.
    echo "paste-your-token-here" > /root/scripts/mealie_token.txt
 ```
 
-## Step 5 — Verify everything is connected
+## Step 5 — Verify the backend is connected
 
 ```bash
 curl "http://<your-ip>/data/status"
@@ -101,7 +101,12 @@ Should return `{"running": false}` or similar JSON — not a connection error
 or empty response. This confirms the full chain (nginx → trigger server →
 Mealie) is wired correctly.
 
-Visit `http://<your-ip>/` in a browser — you should see the dashboard.
+## Step 6 — Open the dashboard
+
+Visit **`http://<your-ip>/`** in a browser. This is the finished dashboard —
+you should see the app grid (Pi-hole, Mealie, Kanboard, Streams, Docs,
+System). Click into **System** to confirm every container and service
+shows healthy.
 
 ## Testing setup without affecting a real install
 

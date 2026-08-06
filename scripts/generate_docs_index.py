@@ -21,6 +21,7 @@ EXPECTED_TOPICS = {
     "streams": "Streams media player",
     "config-and-setup": "Configuration & setup system",
     "nginx-and-networking": "nginx & networking",
+    "system-panel": "System panel (status & factory reset)",
 }
 
 
