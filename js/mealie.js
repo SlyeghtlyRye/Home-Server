@@ -2,7 +2,7 @@
 // shopping lists. Uses event delegation on stable containers since their
 // contents (calendar days, preview rows) re-render frequently.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
-         showErrorBanner, clearErrorBanner, escapeHtml, isoOf } from './core.js';
+         showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf } from './core.js';
 import { HOST_IP } from './config.js';
 
 let calendarMonth = new Date();
@@ -197,12 +197,12 @@ async function loadRecipes() {
 
 async function planSelected() {
   const dates = includedDates();
-  if (dates.length === 0) { alert('Select at least one day first.'); return; }
+  if (dates.length === 0) { showStatusModal('Select at least one day first.', 'error'); return; }
 
   const conflicts = dates.filter(d => plannedMap[d]);
   if (conflicts.length > 0) {
     const list = conflicts.map(d => `${d} (${plannedMap[d]})`).join('\n');
-    const proceed = confirm(
+    const proceed = await showConfirmModal(
       `${conflicts.length} of your selected day(s) already have a meal planned:\n\n${list}\n\nContinuing will replace them. Proceed?`
     );
     if (!proceed) return;
@@ -423,10 +423,10 @@ async function commitPreview() {
   if (!previewPicks || previewPicks.length === 0) return;
   const emptyDays = previewPicks.filter(p => !p.recipeId && !(p.isNew && p.recipeName && p.recipeName.trim()));
   if (emptyDays.length > 0) {
-    alert(`These days still need a recipe before saving: ${emptyDays.map(p => p.date).join(', ')}`);
+    showStatusModal(`These days still need a recipe before saving: ${emptyDays.map(p => p.date).join(', ')}`, 'error');
     return;
   }
-  if (!confirm(`Save these ${previewPicks.length} meal(s) to your calendar?`)) return;
+  if (!(await showConfirmModal(`Save these ${previewPicks.length} meal(s) to your calendar?`))) return;
   showStatusModal('Preparing recipes...', 'loading');
   try {
     await resolveNewRecipes();
@@ -457,8 +457,8 @@ async function commitPreview() {
 
 async function clearSelectedDays() {
   const dates = includedDates();
-  if (dates.length === 0) { alert('Select at least one day first.'); return; }
-  if (!confirm(`Clear meals for ${dates.length} day(s)? This cannot be undone.`)) return;
+  if (dates.length === 0) { showStatusModal('Select at least one day first.', 'error'); return; }
+  if (!(await showConfirmModal(`Clear meals for ${dates.length} day(s)? This cannot be undone.`))) return;
   showStatusModal('Clearing meals...', 'loading');
   try {
     const res = await fetch('/api/clear-dates', {

@@ -1,7 +1,7 @@
 // streams.js -- multi-profile media player: YouTube links + local uploads,
 // unified player abstraction, resume tracking, checkpoints, sleep timer.
 import { registerApp, onViewLeave, showStatusModal, hideStatusModal,
-         escapeHtml } from './core.js';
+         showConfirmModal, escapeHtml } from './core.js';
 
 let audiobookProfiles = [];
 let activeProfile = localStorage.getItem('audiobook_profile') || null;
@@ -103,10 +103,10 @@ async function addAudiobookProfilePrompt() {
       body: JSON.stringify({ name: name.trim() })
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Failed to add profile.'); return; }
+    if (!res.ok) { showStatusModal(data.error || 'Failed to add profile.', 'error'); return; }
     await loadAudiobookProfiles();
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
@@ -120,19 +120,19 @@ async function renameAudiobookProfile(oldName) {
       body: JSON.stringify({ old: oldName, new: newName.trim() })
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Failed to rename.'); return; }
+    if (!res.ok) { showStatusModal(data.error || 'Failed to rename.', 'error'); return; }
     if (activeProfile === oldName) {
       activeProfile = newName.trim();
       localStorage.setItem('audiobook_profile', activeProfile);
     }
     await loadAudiobookProfiles();
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
 async function deleteAudiobookProfile(name) {
-  if (!confirm(`Delete "${name}" and all of their streaming history? This cannot be undone.`)) return;
+  if (!(await showConfirmModal(`Delete "${name}" and all of their streaming history? This cannot be undone.`))) return;
   try {
     const res = await fetch('/api/audiobook-delete-profile', {
       method: 'POST',
@@ -140,14 +140,14 @@ async function deleteAudiobookProfile(name) {
       body: JSON.stringify({ name })
     });
     const data = await res.json();
-    if (!res.ok) { alert(data.error || 'Failed to delete.'); return; }
+    if (!res.ok) { showStatusModal(data.error || 'Failed to delete.', 'error'); return; }
     if (activeProfile === name) {
       activeProfile = null;
       localStorage.removeItem('audiobook_profile');
     }
     await loadAudiobookProfiles();
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
@@ -251,13 +251,13 @@ function uploadLocalFile(file, title) {
     } else {
       let msg = 'Upload failed.';
       try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-      alert(msg);
+      showStatusModal(msg, 'error');
     }
   };
 
   xhr.onerror = () => {
     progressEl.style.display = 'none';
-    alert('Upload failed due to a network error.');
+    showStatusModal('Upload failed due to a network error.', 'error');
   };
 
   xhr.send(file);
@@ -580,7 +580,7 @@ async function autosaveBookPosition(bookId) {
 async function manualSaveNow(bookId) {
   const player = ytPlayers[bookId];
   if (!player || !player.getCurrentTime) {
-    alert('Start playing this stream first, then you can save your position.');
+    showStatusModal('Start playing this stream first, then you can save your position.', 'error');
     return;
   }
   const seconds = Math.floor(player.getCurrentTime());
@@ -590,10 +590,10 @@ async function manualSaveNow(bookId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: bookId, resume_seconds: seconds })
     });
-    if (!res.ok) { alert('Failed to save.'); return; }
+    if (!res.ok) { showStatusModal('Failed to save.', 'error'); return; }
     updateSaveUI(bookId, seconds);
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
@@ -601,7 +601,7 @@ async function manualSaveTyped(bookId) {
   const input = document.getElementById('manual-save-input-' + bookId);
   const seconds = parseTimeToSeconds(input.value);
   if (seconds === null) {
-    alert('Enter a time like 45, 12:30, or 1:23:45');
+    showStatusModal('Enter a time like 45, 12:30, or 1:23:45', 'error');
     return;
   }
   try {
@@ -610,7 +610,7 @@ async function manualSaveTyped(bookId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: bookId, resume_seconds: seconds, profile: activeProfile })
     });
-    if (!res.ok) { alert('Failed to save.'); return; }
+    if (!res.ok) { showStatusModal('Failed to save.', 'error'); return; }
     updateSaveUI(bookId, seconds);
     const player = ytPlayers[bookId];
     if (player && player.seekTo) {
@@ -618,7 +618,7 @@ async function manualSaveTyped(bookId) {
     }
     input.value = '';
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
@@ -630,21 +630,21 @@ function seekToChapter(bookId, startSeconds) {
 }
 
 async function revertCheckpoint(bookId, seconds) {
-  if (!confirm(`Revert to ${formatSeconds(seconds)}? This will replace your current saved spot.`)) return;
+  if (!(await showConfirmModal(`Revert to ${formatSeconds(seconds)}? This will replace your current saved spot.`))) return;
   try {
     const res = await fetch('/api/audiobook-revert-resume', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: bookId, seconds, profile: activeProfile })
     });
-    if (!res.ok) { alert('Failed to revert.'); return; }
+    if (!res.ok) { showStatusModal('Failed to revert.', 'error'); return; }
     const player = ytPlayers[bookId];
     if (player && player.seekTo) {
       player.seekTo(seconds, true);
     }
     await loadAudiobookLibrary();
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 
@@ -652,7 +652,7 @@ function setCustomSleepTimer(bookId) {
   const input = document.getElementById('custom-timer-' + bookId);
   const minutes = parseInt(input.value, 10);
   if (!minutes || minutes <= 0) {
-    alert('Enter a number of minutes greater than 0.');
+    showStatusModal('Enter a number of minutes greater than 0.', 'error');
     return;
   }
   setSleepTimer(bookId, minutes);
@@ -661,7 +661,7 @@ function setCustomSleepTimer(bookId) {
 function setSleepTimer(bookId, minutes) {
   const player = ytPlayers[bookId];
   if (!player || !player.getCurrentTime) {
-    alert('Start playing first, then set a sleep timer.');
+    showStatusModal('Start playing first, then set a sleep timer.', 'error');
     return;
   }
   const currentSeconds = Math.floor(player.getCurrentTime());
@@ -720,7 +720,7 @@ async function cancelSleepTimer(bookId) {
 async function addAudiobook() {
   const input = document.getElementById('new-book-url');
   const url = input.value.trim();
-  if (!url) { alert('Paste a YouTube link first.'); return; }
+  if (!url) { showStatusModal('Paste a YouTube link first.', 'error'); return; }
   showStatusModal('Fetching video info (title, chapters, comments)...', 'loading');
   try {
     const res = await fetch('/api/audiobook-add', {
@@ -739,7 +739,7 @@ async function addAudiobook() {
 }
 
 async function deleteAudiobook(bookId) {
-  if (!confirm('Remove this stream from your history?')) return;
+  if (!(await showConfirmModal('Remove this stream from your history?'))) return;
   stopBookPlayer(bookId);
   try {
     const res = await fetch('/api/audiobook-delete', {
@@ -747,10 +747,10 @@ async function deleteAudiobook(bookId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: bookId, profile: activeProfile })
     });
-    if (!res.ok) { alert('Failed to delete.'); return; }
+    if (!res.ok) { showStatusModal('Failed to delete.', 'error'); return; }
     await loadAudiobookLibrary();
   } catch (err) {
-    alert('Error: ' + err);
+    showStatusModal('Error: ' + err, 'error');
   }
 }
 

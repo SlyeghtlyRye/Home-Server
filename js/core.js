@@ -46,6 +46,44 @@ export function hideStatusModal() {
   document.getElementById('status-overlay').style.display = 'none';
 }
 
+export function showConfirmModal(message) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('status-overlay');
+    const modal = document.getElementById('status-modal');
+    const spinner = document.getElementById('status-spinner');
+    const dismiss = document.getElementById('status-dismiss');
+    document.getElementById('status-message').textContent = message;
+    modal.classList.remove('error', 'success');
+    spinner.style.display = 'none';
+    dismiss.style.display = 'none';
+
+    let row = document.getElementById('status-confirm-row');
+    if (!row) {
+      row = document.createElement('div');
+      row.id = 'status-confirm-row';
+      row.style.marginTop = '18px';
+      row.style.display = 'flex';
+      row.style.gap = '10px';
+      row.style.justifyContent = 'center';
+      modal.appendChild(row);
+    }
+    row.innerHTML = `
+      <button class="btn small clear" id="status-confirm-cancel">Cancel</button>
+      <button class="btn small" id="status-confirm-ok">Confirm</button>
+    `;
+    row.style.display = 'flex';
+    overlay.style.display = 'flex';
+
+    const finish = (result) => {
+      row.style.display = 'none';
+      overlay.style.display = 'none';
+      resolve(result);
+    };
+    document.getElementById('status-confirm-ok').onclick = () => finish(true);
+    document.getElementById('status-confirm-cancel').onclick = () => finish(false);
+  });
+}
+
 export function showSuccessThenClose(message, delay) {
   showStatusModal(message, 'success');
   setTimeout(hideStatusModal, delay || 1500);
