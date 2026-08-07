@@ -27,7 +27,75 @@ Everything runs in Docker except two lightweight host-level Python services.
 - The machine should have a **static local IP** on your network — DHCP
   reservations work fine, it just needs to not change after setup
 
-## Step 1 — Install Docker (if not already installed)
+## Step 1 — Get the OS onto the device and find it on your network
+
+If you already have SSH access to a device with Debian/Ubuntu installed,
+skip to Step 2.
+
+**Flashing the OS.** Use
+[Raspberry Pi Imager](https://www.raspberrypi.com/software/) (works for
+many ARM boards, not just official Raspberry Pi hardware) or your board's
+own flashing tool to write a Debian- or Ubuntu-based image to the SD
+card/eMMC. Do this from another computer, not the device itself.
+
+**If your device has Ethernet:** just plug it into your router with a
+cable. Skip the Wi-Fi setup below entirely -- this is the simplest path.
+
+**If your device only has Wi-Fi (e.g. a Pi Zero W) and no Ethernet port:**
+you need to get your Wi-Fi credentials onto the SD card *before* first
+boot, since there's no screen or keyboard involved.
+
+- **Raspberry Pi Imager** has a built-in option for this: click the gear
+  icon (or "Edit Settings" on newer versions) before writing the image,
+  and fill in your Wi-Fi network name/password and enable SSH there. The
+  imager writes both directly to the card.
+- **If you're not using that tool,** after flashing, the SD card's boot
+  partition (visible from any computer, appears as a small "boot" drive)
+  needs two files added by hand:
+  - A file named `wpa_supplicant.conf` containing:
+
+country=US
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+
+network={
+    ssid="YourWifiName"
+    psk="YourWifiPassword"
+}
+
+
+(replace `US` with your actual country code if different, and fill in
+    your real network name/password)
+  - An empty file named `ssh` (no extension, no content) -- this is what
+    enables SSH access on first boot; without it, SSH is disabled by
+    default on most images for security.
+
+**Power it on**, plugged into power and (if using Ethernet) your router.
+Wait 1-2 minutes for first boot.
+
+**Finding the device on your network.** From another computer on the same
+network:
+```bash
+ping raspberrypi.local
+```
+(or whatever hostname your image uses -- check its documentation if
+`raspberrypi.local` doesn't respond). If that resolves, note the IP
+address it shows. If it doesn't work, check your router's admin page for
+a list of connected devices/DHCP leases -- the new device should appear
+there by name or as an unfamiliar entry.
+
+**First SSH connection:**
+```bash
+ssh username@<device-ip>
+```
+using whatever username your image sets up (`pi` is common on Raspberry
+Pi OS). You'll be prompted for the password you set during flashing (or
+the image's default -- check its documentation, and change it
+immediately if so).
+
+Once you're in, you have a working SSH session and can continue below.
+
+## Step 2 — Install Docker (if not already installed)
 
 ```bash
 curl -fsSL https://get.docker.com | sh
@@ -38,7 +106,7 @@ Verify:
 docker compose version
 ```
 
-## Step 2 — Clone this repository
+## Step 3 — Clone this repository
 
 ```bash
 cd /root
@@ -50,7 +118,7 @@ a subfolder. This repo *is* the live working directory — every path in the
 config, Docker Compose file, and systemd service assumes it lives at
 `/root`.
 
-## Step 3 — Run the installer
+## Step 4 — Run the installer
 
 ```bash
 chmod +x setup.sh
@@ -81,7 +149,7 @@ systemctl status mealie-trigger.service
 ```
 You should see `active (running)`.
 
-## Step 4 — Get a Mealie API token
+## Step 5 — Get a Mealie API token
 
 1. Visit `http://<your-ip>:9000`, create an account through Mealie's own
    setup flow
@@ -91,7 +159,7 @@ You should see `active (running)`.
    echo "paste-your-token-here" > /root/scripts/mealie_token.txt
 ```
 
-## Step 5 — Verify the backend is connected
+## Step 6 — Verify the backend is connected
 
 ```bash
 curl "http://<your-ip>/data/status"
@@ -101,7 +169,7 @@ Should return `{"running": false}` or similar JSON — not a connection error
 or empty response. This confirms the full chain (nginx → trigger server →
 Mealie) is wired correctly.
 
-## Step 6 — Open the dashboard
+## Step 7 — Open the dashboard
 
 Visit **`http://<your-ip>/`** in a browser. This is the finished dashboard —
 you should see the app grid (Pi-hole, Mealie, Kanboard, Streams, Docs,

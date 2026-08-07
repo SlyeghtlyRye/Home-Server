@@ -9,16 +9,20 @@ install guide. Quick summary of what that involves:
 
 ## Quick start
 
-1. **One short SSH session** to install Docker, clone this repo, and run
+1. **Get the device on your network and find its IP** -- flash the OS,
+   set up Wi-Fi credentials before first boot if there's no Ethernet
+   port, then locate it (SETUP.md covers this in detail, including the
+   no-Ethernet Wi-Fi case).
+2. **One short SSH session** to install Docker, clone this repo, and run
    `./setup.sh` -- it asks two questions (your device's IP, your timezone)
    and handles everything else automatically: secrets, config files, the
    background service, and bringing up all containers.
-2. **Everything after that happens in a browser.** Open
+3. **Everything after that happens in a browser.** Open
    `http://<your-device-ip>/` and you'll land on a working dashboard. A
    banner walks you through the two things that can't be automated --
    pasting a Mealie API token and creating your first Streams profile --
    right there in the browser, with live verification, no more SSH needed.
-3. **What you end up with:** ad-blocking (Pi-hole), automated meal
+4. **What you end up with:** ad-blocking (Pi-hole), automated meal
    planning with shopping lists (Mealie), a task board (Kanboard), a
    multi-profile media player (Streams), self-updating documentation, and
    a System panel for live status checks and factory reset -- all on one
