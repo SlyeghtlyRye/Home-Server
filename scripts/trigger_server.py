@@ -45,7 +45,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _fetch_list_detail(self, list_id):
         resp = mwp.requests.get(
             f"{mwp.MEALIE_URL}/api/households/shopping/lists/{list_id}",
-            headers=mwp.headers,
+            headers=mwp.get_headers(),
         )
         resp.raise_for_status()
         data = resp.json()
@@ -413,10 +413,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "missing name"})
                 return
             try:
-                resp = mwp.requests.post(f"{mwp.MEALIE_URL}/api/recipes", headers=mwp.headers, json={"name": name})
+                resp = mwp.requests.post(f"{mwp.MEALIE_URL}/api/recipes", headers=mwp.get_headers(), json={"name": name})
                 resp.raise_for_status()
                 slug = resp.json()
-                detail = mwp.requests.get(f"{mwp.MEALIE_URL}/api/recipes/{slug}", headers=mwp.headers)
+                detail = mwp.requests.get(f"{mwp.MEALIE_URL}/api/recipes/{slug}", headers=mwp.get_headers())
                 detail.raise_for_status()
                 data = detail.json()
                 self._send_json(200, {"id": data["id"], "name": data["name"]})
