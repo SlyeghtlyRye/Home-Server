@@ -4,9 +4,29 @@ A self-hosted home dashboard combining network ad-blocking, meal planning,
 task management, and a custom media player — designed to run on genuinely
 low-resource hardware (built and tested on a device with 1GB RAM).
 
-New here? Start with [SETUP.md](./SETUP.md) instead — this document assumes
-setup is already done and is meant as a reference for understanding and
-extending the system afterward.
+New here? Start with [SETUP.md](./SETUP.md) for the full step-by-step
+install guide. Quick summary of what that involves:
+
+## Quick start
+
+1. **One short SSH session** to install Docker, clone this repo, and run
+   `./setup.sh` -- it asks two questions (your device's IP, your timezone)
+   and handles everything else automatically: secrets, config files, the
+   background service, and bringing up all containers.
+2. **Everything after that happens in a browser.** Open
+   `http://<your-device-ip>/` and you'll land on a working dashboard. A
+   banner walks you through the two things that can't be automated --
+   pasting a Mealie API token and creating your first Streams profile --
+   right there in the browser, with live verification, no more SSH needed.
+3. **What you end up with:** ad-blocking (Pi-hole), automated meal
+   planning with shopping lists (Mealie), a task board (Kanboard), a
+   multi-profile media player (Streams), self-updating documentation, and
+   a System panel for live status checks and factory reset -- all on one
+   dashboard, all running locally, no cloud dependency.
+
+This document (README.md) is the reference for *after* setup --
+architecture, what each piece does, and how to extend it. SETUP.md has
+the full walkthrough with troubleshooting for known rough edges.
 
 ## Design principles
 
@@ -21,20 +41,23 @@ Every piece of this system was built around a few non-negotiable priorities:
 
 ## Architecture overview
 
+```
 Browser
-│
-▼
+|
+v
 nginx (Docker, port 80)
-│
-├──► Pi-hole (Docker) — DNS / ad-blocking admin UI
-├──► Mealie (Docker) — meal planning UI + API
-├──► Kanboard (Docker) — task board UI
-└──► trigger_server.py (host, port 9001)
-│
-├──► mealie_weekly_plan.py — Mealie automation logic
-├──► audiobook_lib.py — Streams backend logic
-├──► system_status.py — container/service health
-└──► reset_manager.py — setup wizard, factory reset
+|
++--> Pi-hole (Docker) -- DNS / ad-blocking admin UI
++--> Mealie (Docker) -- meal planning UI + API
++--> Kanboard (Docker) -- task board UI
++--> trigger_server.py (host, port 9001)
+|
++--> mealie_weekly_plan.py -- Mealie automation logic
++--> audiobook_lib.py -- Streams backend logic
++--> system_status.py -- container/service health
++--> reset_manager.py -- setup wizard, factory reset
+```
+
 **Why `trigger_server.py` runs on the host, not in Docker:** it needs to do
 things (YouTube metadata fetching via `yt-dlp`, filesystem access for
 uploaded local media) that are simpler to manage directly on the host than
@@ -168,6 +191,7 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
    shareable repo stay accurate.
 
 ## Repository structure
+```
 /root
 ├── .env (gitignored — real secrets)
 ├── .env.example (committed — placeholder template)
@@ -211,6 +235,8 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 ├── status.py
 ├── SETUP.md
 └── README.md
+```
+
 Personal/generated data (Mealie token, meal history, Streams library and
 profiles, uploaded local media) lives alongside the code but is excluded
 from git via `.gitignore` — see `scripts/reset_manager.py`'s
