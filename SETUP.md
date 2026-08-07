@@ -1,7 +1,7 @@
 # Setup Guide
 
 This guide walks through setting up your own instance of this home dashboard
-system on a lightweight ARM single-board computer (SBC). It assumes no prior
+system on a lightweight device. It assumes no prior
 experience with this project.
 
 ## What you're setting up
@@ -18,7 +18,7 @@ Everything runs in Docker except two lightweight host-level Python services.
 
 ## Prerequisites
 
-- An ARM (or x86_64) single-board computer or small server running a Debian-
+- A device (ARM or x86_64) running a Debian-
   or Ubuntu-based Linux distribution, with **at least 1GB RAM** (this was
   built and tested on 1GB — it works, but there's no headroom to spare)
 - Docker and the Docker Compose v2 plugin installed

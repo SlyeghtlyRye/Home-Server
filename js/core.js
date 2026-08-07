@@ -108,6 +108,7 @@ export function showGrid() {
   document.getElementById('grid-view').style.display = 'block';
   document.getElementById('detail-view').style.display = 'none';
   updateActiveNav('grid');
+  setHeaderTitle('&#x1F3E0; Home Management');
 }
 
 export function showDetail(appKey) {
@@ -117,12 +118,19 @@ export function showDetail(appKey) {
   const info = apps[appKey];
   const content = document.getElementById('detail-content');
   if (!info) {
-    content.innerHTML = `<h1>Unknown app</h1>`;
+    content.innerHTML = `Unknown app`;
+    setHeaderTitle('Unknown app');
     return;
   }
-  content.innerHTML = `<h1>${info.title}</h1>${info.bodyHtml || ''}`;
+  content.innerHTML = info.bodyHtml || '';
   if (info.onRender) info.onRender(content);
   updateActiveNav(appKey);
+  setHeaderTitle(info.title);
+}
+
+function setHeaderTitle(html) {
+  const brand = document.querySelector('.app-header-brand');
+  if (brand) brand.innerHTML = html;
 }
 
 export function escapeHtml(s) {

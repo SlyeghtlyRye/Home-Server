@@ -797,16 +797,11 @@ function wireDelegatedListeners() {
   });
 }
 
-let listenersWired = false;
-
 registerApp('audiobooks', {
   title: '&#x1F3A7; Streams',
   bodyHtml: `<div id="conn-error-banner" class="error-banner"></div><div id="audiobooks-root"></div>`,
   onRender: () => {
-    if (!listenersWired) {
-      wireDelegatedListeners();
-      listenersWired = true;
-    }
+    wireDelegatedListeners();
     loadAudiobookProfiles();
   },
 });

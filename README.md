@@ -2,7 +2,7 @@
 
 A self-hosted home dashboard combining network ad-blocking, meal planning,
 task management, and a custom media player — designed to run on genuinely
-low-resource hardware (built and tested on a 1GB RAM ARM SBC).
+low-resource hardware (built and tested on a device with 1GB RAM).
 
 New here? Start with [SETUP.md](./SETUP.md) instead — this document assumes
 setup is already done and is meant as a reference for understanding and
@@ -152,13 +152,18 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 3. **Add nginx routes** — new `location` blocks in
    `nginx/templates/default.conf.template` proxying to the new endpoints,
    same `${TRIGGER_SECRET}` pattern as everything else.
-4. **Frontend module** — a new `notes.js` ES module (once the dashboard
-   modularization lands), following the shared player/status-modal patterns
-   established by the existing modules rather than introducing a new UI
-   pattern.
+4. **Frontend module** — a new `notes.js` ES module, following the
+   `registerApp()` pattern in `core.js` and the shared status-modal/
+   error-banner/event-delegation patterns established by the existing
+   modules rather than introducing a new UI pattern.
 5. **Document it** — add a tagged markdown file under `docs/` (see the
    self-documentation system) describing what it does and why.
-6. **Add any new personal-data files to `.gitignore`** and to
+6. **Add it to the architecture map** — one entry in
+   `docs/architecture-map.py` (what it is, its layer, what it connects
+   to), then run `python3 scripts/generate_architecture_map.py`. If you
+   forget, the completeness check will flag it the next time anyone runs
+   that script.
+7. **Add any new personal-data files to `.gitignore`** and to
    `reset_manager.py`'s `RESET_TARGETS` list, so factory reset and the
    shareable repo stay accurate.
 
@@ -186,6 +191,7 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── reset_manager.py
 │ ├── system_status.py
 │ ├── generate_docs_index.py
+│ ├── generate_architecture_map.py
 │ ├── trigger_server.py
 │ └── mealie_weekly_plan.py
 ├── audiobooks/
@@ -197,6 +203,10 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── config-and-setup.md
 │ ├── nginx-and-networking.md
 │ ├── system-panel.md
+│ ├── architecture-map.py (data — edit this, not the .svg)
+│ ├── architecture-map.svg (generated — do not hand-edit)
+│ ├── architecture-map.md
+│ ├── security.md
 │ └── index.md (generated — do not hand-edit)
 ├── status.py
 ├── SETUP.md

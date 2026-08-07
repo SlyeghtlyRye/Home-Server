@@ -23,7 +23,15 @@ function renderMarkdown(text) {
   for (const rawLine of lines) {
     const line = rawLine;
     if (line.startsWith('tags:')) continue;
-    if (/^# /.test(line)) {
+    const imgMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      closeList();
+      const alt = imgMatch[1];
+      const src = imgMatch[2];
+      if (/^docs\/[\w.-]+\.svg$/.test(src)) {
+        html += `<div class="svg-embed" data-svg-src="/${src}" data-svg-alt="${escapeHtml(alt)}" style="background:white; border-radius:6px; padding:10px; margin:10px 0; overflow:auto;"><p style="color:#888; margin:0;">Loading diagram...</p></div>`;
+      }
+    } else if (/^# /.test(line)) {
       closeList();
       html += `<h1>${inlineFormat(line.slice(2))}</h1>`;
     } else if (/^## /.test(line)) {
@@ -90,9 +98,118 @@ async function openDoc(filename) {
       <button class="btn small" data-action="back-to-index" style="margin-bottom:15px;">&larr; All docs</button>
       <div class="week-block">${renderMarkdown(data.content)}</div>
     `;
+    await inlineEmbeddedSvgs(root);
   } catch (err) {
     console.error('Failed to load doc', err);
     root.innerHTML = '<p style="color:var(--color-text-muted);">Couldn\'t load this document.</p>';
+  }
+}
+
+async function inlineEmbeddedSvgs(container) {
+  const placeholders = container.querySelectorAll('.svg-embed');
+  for (const el of placeholders) {
+    const src = el.dataset.svgSrc;
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error('server responded ' + res.status);
+      const svgText = await res.text();
+      el.innerHTML = svgText;
+      const svgEl = el.querySelector('svg');
+      if (svgEl) makeSvgDraggable(svgEl);
+    } catch (err) {
+      console.error('Failed to load diagram', err);
+      el.innerHTML = '<p style="color:#888; margin:0;">Couldn\'t load the diagram.</p>';
+    }
+  }
+}
+
+function makeSvgDraggable(svgEl) {
+  const nodes = svgEl.querySelectorAll('rect[data-node-id]');
+  let dragTarget = null;
+  let offsetX = 0, offsetY = 0;
+
+  const toSvgPoint = (evt) => {
+    const pt = svgEl.createSVGPoint();
+    pt.x = evt.clientX;
+    pt.y = evt.clientY;
+    const ctm = svgEl.getScreenCTM();
+    return ctm ? pt.matrixTransform(ctm.inverse()) : pt;
+  };
+
+  const updateEdgesFor = (nodeId, newX, newY, width, height) => {
+    svgEl.querySelectorAll(`[data-src="${nodeId}"], [data-dst="${nodeId}"]`).forEach(edge => {
+      const isSrc = edge.dataset.src === nodeId;
+      const attrPrefix = isSrc ? '1' : '2';
+      edge.dataset[isSrc ? 'srcCx' : 'dstCx'] = newX + width / 2;
+      edge.dataset[isSrc ? 'srcCy' : 'dstCy'] = newY + height / 2;
+    });
+  };
+
+  nodes.forEach(rect => {
+    const nodeId = rect.dataset.nodeId;
+    const group = rect.closest('g.node-group');
+    if (!group) return;
+    rect.style.cursor = 'grab';
+    rect.addEventListener('pointerdown', (evt) => {
+      dragTarget = group;
+      const pt = toSvgPoint(evt);
+      const currentTransform = group.getAttribute('data-x-y') || '0,0';
+      const [gx, gy] = currentTransform.split(',').map(Number);
+      offsetX = pt.x - gx;
+      offsetY = pt.y - gy;
+      rect.style.cursor = 'grabbing';
+      evt.preventDefault();
+    });
+  });
+
+  svgEl.addEventListener('pointermove', (evt) => {
+    if (!dragTarget) return;
+    const pt = toSvgPoint(evt);
+    const newX = pt.x - offsetX;
+    const newY = pt.y - offsetY;
+    dragTarget.setAttribute('transform', `translate(${newX}, ${newY})`);
+    dragTarget.setAttribute('data-x-y', `${newX},${newY}`);
+    const nodeId = dragTarget.dataset.nodeId;
+    const rect = dragTarget.querySelector('rect');
+    const w = parseFloat(rect.getAttribute('width'));
+    const h = parseFloat(rect.getAttribute('height'));
+    const cx = newX + w / 2;
+    const cy = newY + h / 2;
+    svgEl.querySelectorAll(`path[data-src="${nodeId}"], line[data-src="${nodeId}"]`).forEach(edge => {
+      edge.dataset.srcCx = cx; edge.dataset.srcCy = cy;
+      redrawEdge(edge);
+    });
+    svgEl.querySelectorAll(`path[data-dst="${nodeId}"], line[data-dst="${nodeId}"]`).forEach(edge => {
+      edge.dataset.dstCx = cx; edge.dataset.dstCy = cy;
+      redrawEdge(edge);
+    });
+  });
+
+  const endDrag = () => {
+    if (dragTarget) {
+      const rect = dragTarget.querySelector('rect');
+      if (rect) rect.style.cursor = 'grab';
+    }
+    dragTarget = null;
+  };
+  svgEl.addEventListener('pointerup', endDrag);
+  svgEl.addEventListener('pointerleave', endDrag);
+}
+
+function redrawEdge(edge) {
+  const srcCx = parseFloat(edge.dataset.srcCx);
+  const srcCy = parseFloat(edge.dataset.srcCy);
+  const dstCx = parseFloat(edge.dataset.dstCx);
+  const dstCy = parseFloat(edge.dataset.dstCy);
+  if (edge.tagName === 'line') {
+    edge.setAttribute('x1', srcCx);
+    edge.setAttribute('y1', srcCy);
+    edge.setAttribute('x2', dstCx);
+    edge.setAttribute('y2', dstCy);
+  } else if (edge.tagName === 'path') {
+    const midX = (srcCx + dstCx) / 2;
+    const midY = (srcCy + dstCy) / 2;
+    edge.setAttribute('d', `M ${srcCx},${srcCy} Q ${midX},${midY} ${dstCx},${dstCy}`);
   }
 }
 
@@ -106,16 +223,11 @@ function wireDelegatedListeners() {
   });
 }
 
-let listenersWired = false;
-
 registerApp('docs', {
   title: '&#x1F4DA; Docs',
   bodyHtml: `<div id="docs-root"></div>`,
   onRender: () => {
-    if (!listenersWired) {
-      wireDelegatedListeners();
-      listenersWired = true;
-    }
+    wireDelegatedListeners();
     loadDocsList();
   },
 });

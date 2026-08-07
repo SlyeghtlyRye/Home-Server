@@ -22,6 +22,8 @@ EXPECTED_TOPICS = {
     "config-and-setup": "Configuration & setup system",
     "nginx-and-networking": "nginx & networking",
     "system-panel": "System panel (status & factory reset)",
+    "architecture-map": "Architecture map",
+    "security": "Security",
 }
 
 

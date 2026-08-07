@@ -574,8 +574,6 @@ function wireDelegatedListeners() {
   });
 }
 
-let listenersWired = false;
-
 registerApp('mealie', {
   title: '&#x1F374; Mealie',
   bodyHtml: `
@@ -589,10 +587,7 @@ registerApp('mealie', {
     <a class="goto-btn" href="http://${HOST_IP}:9000" target="_blank">Open Mealie &rarr;</a>
   `,
   onRender: () => {
-    if (!listenersWired) {
-      wireDelegatedListeners();
-      listenersWired = true;
-    }
+    wireDelegatedListeners();
     calendarMonth = new Date();
     weekSelection = null;
     previewPicks = null;

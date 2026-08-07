@@ -132,16 +132,11 @@ function wireDelegatedListeners() {
   });
 }
 
-let listenersWired = false;
-
 registerApp('system', {
   title: '&#x2699;&#xFE0F; System',
   bodyHtml: `<div id="conn-error-banner" class="error-banner"></div><div id="system-root"></div>`,
   onRender: () => {
-    if (!listenersWired) {
-      wireDelegatedListeners();
-      listenersWired = true;
-    }
+    wireDelegatedListeners();
     loadSystemStatus();
   },
 });
