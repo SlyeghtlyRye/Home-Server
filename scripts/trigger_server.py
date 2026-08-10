@@ -20,6 +20,7 @@ from config import TRIGGER_SECRET as SECRET, MEALIE_TOKEN_FILE as MEALIE_TOKEN_F
 DOCS_DIR = "/root/docs"
 import system_status
 import reset_manager
+import updater
 
 current_process = None
 
@@ -134,6 +135,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "has_streams_profile": has_profile,
                 "setup_complete": mealie_ok and has_profile,
             })
+            return
+        if parsed.path == "/api/check-update":
+            try:
+                self._send_json(200, updater.check_for_update())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/data/local-audio":
@@ -308,6 +315,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                "SSH in and run: docker compose up -d --force-recreate "
                                "(or reboot the device) to finish applying the reset."
                 })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/api/apply-update":
+            try:
+                self._send_json(200, updater.apply_update())
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

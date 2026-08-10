@@ -170,13 +170,13 @@ def preview_dates(dates, avoid_repeats=True, overrides=None):
 
 
 def reroll_pick(target_date, avoid_repeats=True, exclude_ids=None):
+    # Reroll intentionally ignores the "avoid repeats" history filter --
+    # that setting shapes the initial week generation, but a manual reroll
+    # on one day should just offer any recipe not already shown elsewhere
+    # in the current preview, no history-based narrowing.
     exclude_ids = set(exclude_ids or [])
     recipes = get_recipe_ids()
-    history = load_history() if avoid_repeats else {}
-    pool = filter_recent(recipes, history) if avoid_repeats else recipes
-    candidates = [r for r in pool if r[0] not in exclude_ids]
-    if not candidates:
-        candidates = [r for r in recipes if r[0] not in exclude_ids]
+    candidates = [r for r in recipes if r[0] not in exclude_ids]
     if not candidates:
         candidates = recipes
     rid, name = random.choice(candidates)

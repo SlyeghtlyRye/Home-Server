@@ -52,6 +52,18 @@ function renderSystemStatus(data) {
       `).join('')}
     </div>
     <div class="week-block">
+      <h3>Software Update</h3>
+      <p style="color:var(--color-text-dim); font-size:14px;">
+        Check for the latest version of this project on GitHub. Installing
+        pulls the update and restarts everything automatically in the
+        background -- no SSH needed. Give it about 15 seconds, then refresh.
+      </p>
+      <div id="update-status"></div>
+      <div class="btn-grid">
+        <button class="btn small" data-action="check-update">Check for Update</button>
+      </div>
+    </div>
+    <div class="week-block">
       <h3>Factory Reset</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
         Use this to wipe personal data (Mealie token, Streams library/profiles,
@@ -122,6 +134,49 @@ async function startResetFlow() {
   }
 }
 
+async function checkUpdate() {
+  const statusEl = document.getElementById('update-status');
+  statusEl.innerHTML = '<p style="color:var(--color-text-muted); font-size:13px;">Checking...</p>';
+  try {
+    const res = await fetch('/api/check-update');
+    if (!res.ok) throw new Error('server responded ' + res.status);
+    const data = await res.json();
+    if (data.update_available) {
+      statusEl.innerHTML = `
+        <div class="warning-box">
+          Update available (${data.current_commit} &rarr; ${data.remote_commit}):
+          <ul style="margin:8px 0 0; padding-left:20px; font-size:13px;">
+            ${data.commits.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
+          </ul>
+        </div>
+        <div class="btn-grid" style="margin-top:10px;">
+          <button class="btn small" data-action="install-update">Install Update</button>
+        </div>
+      `;
+    } else {
+      statusEl.innerHTML = `<p style="color:var(--color-text-muted); font-size:13px;">Up to date (${data.current_commit}).</p>`;
+    }
+  } catch (err) {
+    statusEl.innerHTML = `<p style="color:var(--color-warning); font-size:13px;">Couldn't check for updates: ${escapeHtml(String(err))}</p>`;
+  }
+}
+
+async function installUpdate() {
+  showStatusModal('Installing update...', 'loading');
+  try {
+    const res = await fetch('/api/apply-update', { method: 'POST' });
+    const data = await res.json();
+    if (data.status !== 'ok') {
+      showStatusModal(data.message || 'Update failed.', 'error');
+      return;
+    }
+    showResetLog(data.log || [data.message], 'Services are restarting in the background. Refresh in about 15 seconds.', false);
+    checkUpdate();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
 function wireDelegatedListeners() {
   const root = document.getElementById('system-root');
   root.addEventListener('click', (e) => {
@@ -129,6 +184,10 @@ function wireDelegatedListeners() {
     if (previewBtn) { previewReset(); return; }
     const resetBtn = e.target.closest('[data-action="start-reset"]');
     if (resetBtn) { startResetFlow(); return; }
+    const checkBtn = e.target.closest('[data-action="check-update"]');
+    if (checkBtn) { checkUpdate(); return; }
+    const installBtn = e.target.closest('[data-action="install-update"]');
+    if (installBtn) { installUpdate(); return; }
   });
 }
 

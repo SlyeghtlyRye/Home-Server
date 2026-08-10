@@ -35,6 +35,12 @@ server {
     location /api/reset-execute {
             proxy_pass http://172.17.0.1:9001/api/reset-execute?key=${TRIGGER_SECRET};
     }
+    location /api/check-update {
+            proxy_pass http://172.17.0.1:9001/api/check-update?key=${TRIGGER_SECRET};
+    }
+    location /api/apply-update {
+            proxy_pass http://172.17.0.1:9001/api/apply-update?key=${TRIGGER_SECRET};
+    }
     location /data/setup-status {
             proxy_pass http://172.17.0.1:9001/data/setup-status?key=${TRIGGER_SECRET};
     }
