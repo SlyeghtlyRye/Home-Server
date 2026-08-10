@@ -201,6 +201,7 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 ├── .env.example (committed — placeholder template)
 ├── .gitignore
 ├── setup.sh (installer / factory reset / dry-run)
+├── update.sh (pulls latest, checks config, restarts services)
 ├── docker-compose.yml
 ├── nginx.conf
 ├── nginx/templates/default.conf.template
@@ -212,11 +213,13 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── mealie.js
 │ ├── streams.js
 │ ├── docs.js
-│ ├── system.js (status + factory reset)
+│ ├── system.js (status, factory reset, software updates)
 │ └── wizard.js (first-time setup banner)
 ├── scripts/
 │ ├── config.py
 │ ├── reset_manager.py
+│ ├── updater.py
+│ ├── check_env_updates.py
 │ ├── system_status.py
 │ ├── generate_docs_index.py
 │ ├── generate_architecture_map.py

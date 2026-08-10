@@ -29,15 +29,41 @@ does.
   `RESET` to confirm (a plain `prompt()`, not the shared confirm-modal,
   since it needs free-text input rather than a yes/no choice).
 
-## Why the dashboard-triggered reset doesn't restart services itself
+## Why Factory Reset doesn't restart services itself
 
 Calling `docker compose up -d --force-recreate` on nginx *from* a request
 being served *through* nginx is fragile -- the connection would likely drop
 mid-restart on weak hardware. So `/api/reset-execute` deliberately skips
 that step (`skip_service_restart=True`) and instead returns a clear message
 telling the person to SSH in and run
-`docker compose up -d --force-recreate` (or reboot) to finish. The CLI path
-via `setup.sh` doesn't have this problem and restarts services automatically.
+`docker compose up -d --force-recreate` (or reboot) to finish. Given how
+destructive a real reset is, staying conservative here is deliberate.
+
+## Software updates (`scripts/updater.py`)
+
+Same shared-logic pattern as reset: one module both a CLI flow and the
+dashboard call, so they can't drift apart.
+
+- **Check for Update** (`/api/check-update`, GET) -- fetches from the git
+  remote, reports whether the local commit differs and what changed.
+  Always safe, changes nothing.
+- **Install Update** (`/api/apply-update`, POST) -- refuses if there are
+  uncommitted local changes (to avoid a merge conflict on a live device),
+  otherwise does a fast-forward-only `git pull`, backfills any new `.env`
+  keys with sensible defaults from `.env.example` (non-interactively,
+  since a web request can't wait on terminal input), regenerates the docs
+  index and architecture map, then **restarts services automatically in
+  the background** -- no SSH needed.
+
+**How the automatic restart avoids the same self-referential problem as
+Factory Reset:** it doesn't restart synchronously inside the request.
+`_schedule_background_restart()` spawns a fully detached background
+process (`setsid` + a 5-second delay) that survives after the HTTP
+response has already been sent back to the browser. By the time the
+restart actually runs, the request that triggered it is long finished, so
+there's no connection to drop mid-restart. This is a more capable, but
+also more carefully engineered, version of the same idea Factory Reset
+deliberately avoided -- worth understanding both before changing either.
 
 ## Extending this feature
 
