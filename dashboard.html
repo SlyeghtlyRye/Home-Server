@@ -118,7 +118,7 @@
       background: var(--color-surface);
       border: 1px solid var(--color-border-soft);
       border-radius: 10px;
-      padding: 16px 44px 14px 18px;
+      padding: 16px 24px 42px 18px;
       box-shadow: 0 8px 30px rgba(0,0,0,0.5);
       display: flex;
       flex-direction: column;
@@ -142,22 +142,22 @@
     .mode-panel-badge.mode-edit { color: var(--color-warning); border-color: var(--color-warning-border); }
     .mode-panel-badge.mode-edit .mode-panel-dot { background: var(--color-warning); }
     .mode-panel-inner .vdf-close {
-      position: absolute; top: 12px; right: 12px; background: transparent; border: none;
+      position: absolute; bottom: 10px; right: 14px; background: transparent; border: none;
       color: var(--color-text-muted); font-size: 16px; cursor: pointer; line-height: 1;
     }
     .mode-panel-inner .vdf-close:hover { color: white; }
     .mode-panel-handle {
-      position: absolute; top: 8px; right: 40px; width: 30px; height: 18px;
-      display: flex; align-items: center; justify-content: center;
-      cursor: ns-resize; border-radius: 4px; touch-action: none;
+      position: absolute; top: 0; right: 0; width: 30px; height: 30px;
+      display: flex; align-items: flex-start; justify-content: flex-end;
+      cursor: nesw-resize; touch-action: none;
     }
-    .mode-panel-handle:hover { background: var(--color-border-soft); }
-    .mode-panel-handle-grip { width: 20px; height: 2px; background: var(--color-text-muted); position: relative; border-radius: 2px; }
-    .mode-panel-handle-grip::before, .mode-panel-handle-grip::after {
-      content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--color-text-muted); border-radius: 2px;
+    .mode-panel-handle-curve {
+      width: 13px; height: 13px; margin: 7px 7px 0 0;
+      border-top: 2px solid var(--color-text-muted);
+      border-right: 2px solid var(--color-text-muted);
+      border-top-right-radius: 8px;
     }
-    .mode-panel-handle-grip::before { top: -5px; }
-    .mode-panel-handle-grip::after { top: 5px; }
+    .mode-panel-handle:hover .mode-panel-handle-curve { border-color: white; }
 
     .week-select-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
     .week-select-row select { background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }

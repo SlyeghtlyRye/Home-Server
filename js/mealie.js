@@ -23,9 +23,11 @@ let editPick = null;
 
 // Plan/View/Edit all share one floating panel docked to the bottom of the
 // screen (renderModePanel below) -- which of these three is non-null/set
-// decides what it shows. A user-dragged height (via the resize handle)
-// persists across renders and modes until they drag it again.
+// decides what it shows. A user-dragged size (via the corner resize handle,
+// width and/or height independently) persists across renders and modes
+// until they drag it again.
 let modePanelHeight = parseInt(localStorage.getItem('mealie_modePanelHeight'), 10) || null;
+let modePanelWidth = parseInt(localStorage.getItem('mealie_modePanelWidth'), 10) || null;
 
 let availableWeeks = [];
 let selectedWeekStart = null;
@@ -207,12 +209,13 @@ function renderModePanel() {
 
   el.innerHTML = `
     <div class="mode-panel-inner" ${modePanelHeight ? `style="height:${modePanelHeight}px;"` : ''}>
-      <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-grip"></span></div>
-      <button class="vdf-close" data-action="close-mode-panel" title="Close">&#x2716;</button>
+      <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-curve"></span></div>
       <div class="mode-panel-badge mode-${calendarMode}"><span class="mode-panel-dot"></span>${calendarMode} mode</div>
       <div class="mode-panel-body">${contentHtml}</div>
+      <button class="vdf-close" data-action="close-mode-panel" title="Close">&#x2716;</button>
     </div>`;
   el.classList.add('show');
+  el.style.width = modePanelWidth ? `${modePanelWidth}px` : '';
 }
 
 function closeModePanel() {
@@ -228,17 +231,34 @@ function closeModePanel() {
 
 function startModePanelResize(e) {
   e.preventDefault();
-  const inner = document.querySelector('#mode-panel .mode-panel-inner');
-  if (!inner) return;
-  const startY = e.touches ? e.touches[0].clientY : e.clientY;
+  const panelEl = document.getElementById('mode-panel');
+  const inner = panelEl && panelEl.querySelector('.mode-panel-inner');
+  if (!panelEl || !inner) return;
+
+  const point = e.touches ? e.touches[0] : e;
+  const startX = point.clientX;
+  const startY = point.clientY;
+  const startWidth = panelEl.getBoundingClientRect().width;
   const startHeight = inner.getBoundingClientRect().height;
+  const minWidth = 320;
+  const maxWidth = window.innerWidth - 32; // matches #mode-panel's CSS width cap: calc(100% - 32px)
   const minHeight = 120;
   const maxHeight = window.innerHeight * 0.7; // matches .mode-panel-inner's CSS max-height: 70vh
 
   function onMove(ev) {
-    const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
-    const newHeight = Math.round(Math.max(minHeight, Math.min(maxHeight, startHeight + (startY - y))));
+    const p = ev.touches ? ev.touches[0] : ev;
+    const dx = p.clientX - startX;
+    const dy = startY - p.clientY;
+    // The panel stays horizontally centered (left:50% + transform), so
+    // growing its width by 2*dx moves the right edge -- where the handle
+    // sits -- by exactly dx, tracking the cursor while both sides expand
+    // symmetrically. A pure vertical or horizontal drag only moves the
+    // matching dimension, so the handle supports any direction fluidly.
+    const newWidth = Math.round(Math.max(minWidth, Math.min(maxWidth, startWidth + dx * 2)));
+    const newHeight = Math.round(Math.max(minHeight, Math.min(maxHeight, startHeight + dy)));
+    panelEl.style.width = newWidth + 'px';
     inner.style.height = newHeight + 'px';
+    modePanelWidth = newWidth;
     modePanelHeight = newHeight;
   }
   function onUp() {
@@ -246,6 +266,7 @@ function startModePanelResize(e) {
     document.removeEventListener('mouseup', onUp);
     document.removeEventListener('touchmove', onMove);
     document.removeEventListener('touchend', onUp);
+    if (modePanelWidth) localStorage.setItem('mealie_modePanelWidth', String(modePanelWidth));
     if (modePanelHeight) localStorage.setItem('mealie_modePanelHeight', String(modePanelHeight));
   }
   document.addEventListener('mousemove', onMove);
