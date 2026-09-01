@@ -23,18 +23,26 @@ The Mealie tab renders, top to bottom:
 
 1. **Meal of the day** -- today's planned meal (if any), with a link to
    its full recipe (ingredients + steps) via the recipe detail modal.
-2. **Calendar**, with a Plan/View/Edit toggle:
+2. **Calendar**, with a Plan/View/Edit toggle. All three modes share one
+   floating panel docked to the bottom of the screen (`#mode-panel` /
+   `renderModePanel()` in `js/mealie.js`) instead of each having its own
+   inline block or centered modal -- it floats above the page (fixed
+   position) so it stays on screen while the calendar and rest of the
+   dashboard scroll underneath it. A small colored badge in the panel
+   (blue/green/amber) names the active mode, and a grip handle in its
+   top-right corner lets you drag it taller (persisted across sessions via
+   `localStorage`); a close button, or each mode's own Cancel action,
+   dismisses it.
    - *Plan* is the original flow -- click a day to select a 7-day block,
-     preview random picks, reroll/override, then commit.
+     which opens the panel showing selection controls (avoid-repeats,
+     exclude Fridays, Plan/Clear/Cancel); "Plan Selected Days" swaps the
+     panel to a preview of random picks per day, with reroll/override,
+     then commit.
    - *View* is read-only -- click a single day to highlight it and open its
-     meal (if any) in a panel docked to the bottom of the screen, with a
-     link to the same recipe detail modal. The panel floats above the page
-     (fixed position) so it stays on screen while the calendar and rest of
-     the dashboard scroll underneath it; a close button (or picking the
-     same day again) dismisses it.
-   - *Edit* opens a modal for a single day: change its recipe (same
+     meal (if any) in the panel, with a link to the recipe detail modal.
+   - *Edit* opens the panel for a single day: change its recipe (same
      search/reroll combo as Plan's preview row), or swap it with another
-     day via a date field in the same modal. A swap only rearranges the
+     day via a date field in the same panel. A swap only rearranges the
      meal plan -- it never touches the shopping list, since that list can
      only grow (see `add_recipe_to_list`) and has no way to subtract a
      recipe's ingredients, so re-adding both sides on every swap would
@@ -42,7 +50,9 @@ The Mealie tab renders, top to bottom:
      day acts as a move (the source day clears). Changing a day's recipe
      to something new *does* update the shopping list, same as Plan.
    Switching modes clears any in-progress plan selection and closes the
-   edit modal.
+   panel; which mode's body renders is decided purely by which piece of
+   state is currently set (`previewPicks`/`weekSelection` for Plan,
+   `viewSelectedIso` for View, `editPick` for Edit).
 3. **Meals of the week** -- a week picker (populated from
    `/data/available-weeks`, which lists any week with a planned meal plus
    the current week) driving a day-by-day list. Clicking a day with a

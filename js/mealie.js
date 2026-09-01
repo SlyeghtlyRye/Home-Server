@@ -10,6 +10,7 @@ let calendarMonth = new Date();
 let plannedMap = {};
 let weekSelection = null;
 let previewPicks = null;
+let previewConflicts = [];
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
 
@@ -19,6 +20,12 @@ let viewSelectedIso = null;
 
 let editSelectedIso = null;
 let editPick = null;
+
+// Plan/View/Edit all share one floating panel docked to the bottom of the
+// screen (renderModePanel below) -- which of these three is non-null/set
+// decides what it shows. A user-dragged height (via the resize handle)
+// persists across renders and modes until they drag it again.
+let modePanelHeight = parseInt(localStorage.getItem('mealie_modePanelHeight'), 10) || null;
 
 let availableWeeks = [];
 let selectedWeekStart = null;
@@ -80,7 +87,7 @@ async function loadMonthMealplan() {
   }
   renderCalendar();
   renderMealOfDay();
-  renderViewDayDetail();
+  renderModePanel();
   refreshShoppingPanel();
 }
 
@@ -100,15 +107,13 @@ function setCalendarMode(mode) {
   localStorage.setItem('mealie_calendarMode', mode);
   weekSelection = null;
   previewPicks = null;
+  previewConflicts = [];
   viewSelectedIso = null;
   editSelectedIso = null;
   editPick = null;
-  const editOverlay = document.getElementById('edit-modal-overlay');
-  if (editOverlay) editOverlay.style.display = 'none';
   renderModeToggle();
   renderCalendar();
-  renderActionPanel();
-  renderViewDayDetail();
+  renderModePanel();
 }
 
 function renderCalendar() {
@@ -158,34 +163,117 @@ function renderCalendar() {
   document.getElementById('calendar-container').innerHTML = html;
 }
 
-function renderViewDayDetail() {
-  const el = document.getElementById('view-day-detail');
+// ---------- Shared floating mode panel (Plan / View / Edit) ----------
+//
+// All three calendar modes show their day-level UI in the same
+// bottom-docked floating panel rather than each having its own inline
+// block or centered modal -- which body renders is decided purely by
+// which piece of state is currently set (previewPicks/weekSelection for
+// Plan, viewSelectedIso for View, editPick for Edit). Closing the panel
+// (the X, or its own Cancel button) always clears exactly that state.
+
+function renderModePanel() {
+  const el = document.getElementById('mode-panel');
   if (!el) return;
-  if (calendarMode !== 'view' || !viewSelectedIso) {
+
+  let contentHtml = '';
+  let visible = false;
+
+  if (calendarMode === 'plan') {
+    if (previewPicks) {
+      contentHtml = previewPanelBodyHtml();
+      visible = true;
+    } else if (weekSelection) {
+      contentHtml = actionPanelBodyHtml();
+      visible = true;
+    }
+  } else if (calendarMode === 'view') {
+    if (viewSelectedIso) {
+      contentHtml = viewDayDetailBodyHtml();
+      visible = true;
+    }
+  } else if (calendarMode === 'edit') {
+    if (editPick) {
+      contentHtml = editPanelBodyHtml();
+      visible = true;
+    }
+  }
+
+  if (!visible) {
     el.classList.remove('show');
     el.innerHTML = '';
     return;
   }
-  const meal = plannedMap[viewSelectedIso];
+
   el.innerHTML = `
-    <div class="view-day-detail-inner">
-      <button class="vdf-close" data-action="close-view-detail" title="Close">&#x2716;</button>
-      <div class="vd-date">${viewSelectedIso}</div>
-      ${meal
-        ? `<div class="vd-meal">${escapeHtml(meal.name)}</div>
-           ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}`
-        : `<div class="meal-empty">No meal planned this day.</div>`}
+    <div class="mode-panel-inner" ${modePanelHeight ? `style="height:${modePanelHeight}px;"` : ''}>
+      <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-grip"></span></div>
+      <button class="vdf-close" data-action="close-mode-panel" title="Close">&#x2716;</button>
+      <div class="mode-panel-badge mode-${calendarMode}"><span class="mode-panel-dot"></span>${calendarMode} mode</div>
+      <div class="mode-panel-body">${contentHtml}</div>
     </div>`;
   el.classList.add('show');
+}
+
+function closeModePanel() {
+  if (calendarMode === 'view') {
+    closeViewDayDetail();
+  } else if (calendarMode === 'edit') {
+    closeEditPanel();
+  } else if (calendarMode === 'plan') {
+    if (previewPicks) cancelPreview();
+    else if (weekSelection) clearSelection();
+  }
+}
+
+function startModePanelResize(e) {
+  e.preventDefault();
+  const inner = document.querySelector('#mode-panel .mode-panel-inner');
+  if (!inner) return;
+  const startY = e.touches ? e.touches[0].clientY : e.clientY;
+  const startHeight = inner.getBoundingClientRect().height;
+  const minHeight = 120;
+  const maxHeight = window.innerHeight * 0.7; // matches .mode-panel-inner's CSS max-height: 70vh
+
+  function onMove(ev) {
+    const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+    const newHeight = Math.round(Math.max(minHeight, Math.min(maxHeight, startHeight + (startY - y))));
+    inner.style.height = newHeight + 'px';
+    modePanelHeight = newHeight;
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onUp);
+    if (modePanelHeight) localStorage.setItem('mealie_modePanelHeight', String(modePanelHeight));
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+  document.addEventListener('touchmove', onMove, { passive: false });
+  document.addEventListener('touchend', onUp);
+}
+
+// ---------- View mode body ----------
+
+function viewDayDetailBodyHtml() {
+  const meal = plannedMap[viewSelectedIso];
+  return `
+    <div class="vd-date">${viewSelectedIso}</div>
+    ${meal
+      ? `<div class="vd-meal">${escapeHtml(meal.name)}</div>
+         ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}`
+      : `<div class="meal-empty">No meal planned this day.</div>`}
+  `;
 }
 
 function closeViewDayDetail() {
   viewSelectedIso = null;
   renderCalendar();
-  renderViewDayDetail();
+  renderModePanel();
 }
 
-// ---------- Edit mode (single-day change / swap, in a modal) ----------
+// ---------- Edit mode (single-day change / swap) ----------
 
 function onEditDayClick(iso) {
   editSelectedIso = iso;
@@ -194,26 +282,19 @@ function onEditDayClick(iso) {
     ? { date: iso, recipeId: current.id, recipeName: current.name, isNew: false }
     : { date: iso, recipeId: null, recipeName: '', isNew: false };
   renderCalendar();
-  openEditModal();
+  renderModePanel();
 }
 
-function openEditModal() {
-  renderEditModalBody();
-  document.getElementById('edit-modal-overlay').style.display = 'flex';
-}
-
-function closeEditModal() {
-  document.getElementById('edit-modal-overlay').style.display = 'none';
+function closeEditPanel() {
   editSelectedIso = null;
   editPick = null;
   renderCalendar();
+  renderModePanel();
 }
 
-function renderEditModalBody() {
-  const body = document.getElementById('edit-modal-body');
-  if (!body || !editPick) return;
-  body.innerHTML = `
-    <h2>Edit ${editPick.date}</h2>
+function editPanelBodyHtml() {
+  return `
+    <h3 style="margin-top:0;">Edit ${editPick.date}</h3>
     <div class="preview-row">
       <div class="combo-wrap">
         <input
@@ -265,7 +346,7 @@ async function doEditSwap() {
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal('Swap failed: ' + (data.error || res.status), 'error'); return; }
-    closeEditModal();
+    closeEditPanel();
     await loadMonthMealplan();
     await loadAvailableWeeks();
     showSuccessThenClose('Swapped!');
@@ -341,7 +422,7 @@ async function editReroll() {
     editPick.recipeId = data.pick.recipeId;
     editPick.recipeName = data.pick.recipeName;
     editPick.isNew = false;
-    renderEditModalBody();
+    renderModePanel();
   } catch (err) {
     showStatusModal('Reroll error: ' + err, 'error');
   }
@@ -369,7 +450,7 @@ async function saveEditPick() {
     });
     if (!res.ok) { showStatusModal('Failed to start save.', 'error'); return; }
     await pollUntilDone();
-    closeEditModal();
+    closeEditPanel();
     await loadMonthMealplan();
     await loadAvailableWeeks();
     showSuccessThenClose('Saved!');
@@ -382,7 +463,7 @@ function onDayClick(iso) {
   if (calendarMode === 'view') {
     viewSelectedIso = (viewSelectedIso === iso) ? null : iso;
     renderCalendar();
-    renderViewDayDetail();
+    renderModePanel();
     return;
   }
   if (calendarMode === 'edit') {
@@ -412,7 +493,7 @@ function onDayClick(iso) {
   }
   previewPicks = null;
   renderCalendar();
-  renderActionPanel();
+  renderModePanel();
   refreshShoppingPanel();
 }
 
@@ -420,7 +501,7 @@ function clearSelection() {
   weekSelection = null;
   previewPicks = null;
   renderCalendar();
-  renderActionPanel();
+  renderModePanel();
   refreshShoppingPanel();
 }
 
@@ -434,7 +515,7 @@ function excludeAllFridays() {
   });
   previewPicks = null;
   renderCalendar();
-  renderActionPanel();
+  renderModePanel();
   refreshShoppingPanel();
 }
 
@@ -448,34 +529,26 @@ function toggleAvoidRepeats(checked) {
   localStorage.setItem('mealie_avoidRepeats', checked ? 'true' : 'false');
 }
 
-function renderActionPanel() {
-  const el = document.getElementById('action-panel');
-  document.getElementById('preview-panel').innerHTML = '';
-  if (calendarMode !== 'plan' || !weekSelection) {
-    el.innerHTML = '';
-    return;
-  }
+function actionPanelBodyHtml() {
   const included = includedDates();
   const totalSelected = Object.keys(weekSelection.days).length;
-  el.innerHTML = `
-    <div class="week-block">
-      <h3>Selected Days</h3>
-      <p style="color:var(--color-text-dim); font-size:14px;">
-        Click an empty day to add another 7-day block onto your selection. Click a selected day again to include/exclude it.
-        ${included.length} of ${totalSelected} selected day(s) will be planned.
-      </p>
-      <label class="check-row">
-        <input type="checkbox" id="avoid-repeats-check" ${avoidRepeats ? 'checked' : ''}>
-        Avoid recipes used in the last week
-      </label>
-      <div class="btn-grid">
-        <button class="btn small" data-action="exclude-fridays">Exclude All Fridays</button>
-      </div>
-      <div class="btn-grid">
-        <button class="btn" data-action="plan-selected">Plan Selected Days</button>
-        <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
-        <button class="btn" data-action="cancel-selection">Cancel Selection</button>
-      </div>
+  return `
+    <h3 style="margin-top:0;">Selected Days</h3>
+    <p style="color:var(--color-text-dim); font-size:14px;">
+      Click an empty day to add another 7-day block onto your selection. Click a selected day again to include/exclude it.
+      ${included.length} of ${totalSelected} selected day(s) will be planned.
+    </p>
+    <label class="check-row">
+      <input type="checkbox" id="avoid-repeats-check" ${avoidRepeats ? 'checked' : ''}>
+      Avoid recipes used in the last week
+    </label>
+    <div class="btn-grid">
+      <button class="btn small" data-action="exclude-fridays">Exclude All Fridays</button>
+    </div>
+    <div class="btn-grid">
+      <button class="btn" data-action="plan-selected">Plan Selected Days</button>
+      <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
+      <button class="btn" data-action="cancel-selection">Cancel Selection</button>
     </div>
   `;
 }
@@ -517,8 +590,9 @@ async function planSelected() {
     const data = await res.json();
     if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
     previewPicks = data.picks;
+    previewConflicts = conflicts;
     hideStatusModal();
-    renderPreviewPanel(conflicts);
+    renderModePanel();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -530,7 +604,7 @@ function removePreviewDay(dateStr) {
   if (previewPicks.length === 0) {
     previewPicks = null;
   }
-  renderPreviewPanel();
+  renderModePanel();
 }
 
 function clearPreviewDay(dateStr) {
@@ -540,7 +614,7 @@ function clearPreviewDay(dateStr) {
   entry.recipeId = null;
   entry.recipeName = '';
   entry.isNew = false;
-  renderPreviewPanel();
+  renderModePanel();
 }
 
 function getFilteredRecipes(term) {
@@ -620,46 +694,43 @@ function onComboBlur(dateStr) {
   }, 150);
 }
 
-function renderPreviewPanel(conflicts) {
-  conflicts = conflicts || [];
-  const el = document.getElementById('preview-panel');
-  if (!previewPicks) { el.innerHTML = ''; return; }
-  el.innerHTML = `
-    <div class="week-block">
-      <h3>Preview</h3>
-      <p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>
-      ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
-      ${previewPicks.map(p => `
-        <div class="preview-row">
-          <span class="date">${p.date}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}</span>
-          <div class="combo-wrap">
-            <input
-              id="input-${p.date}"
-              class="recipe-combo ${p.isNew ? 'is-new' : ''}"
-              type="text"
-              autocomplete="off"
-              value="${escapeHtml(p.recipeName)}"
-              data-date="${p.date}"
-            >
-            <div class="combo-dropdown" id="dropdown-${p.date}" style="display:none;"></div>
-            <div class="new-hint ${p.isNew ? 'show' : ''}" id="hint-${p.date}">Will be created as a new recipe on save</div>
-          </div>
-          <button class="btn small" data-action="reroll" data-date="${p.date}">Reroll</button>
-          <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe">&#x2716;</button>
-          <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day">&#x1F5D1;</button>
+function previewPanelBodyHtml() {
+  const conflicts = previewConflicts || [];
+  return `
+    <h3 style="margin-top:0;">Preview</h3>
+    <p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>
+    ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
+    ${previewPicks.map(p => `
+      <div class="preview-row">
+        <span class="date">${p.date}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}</span>
+        <div class="combo-wrap">
+          <input
+            id="input-${p.date}"
+            class="recipe-combo ${p.isNew ? 'is-new' : ''}"
+            type="text"
+            autocomplete="off"
+            value="${escapeHtml(p.recipeName)}"
+            data-date="${p.date}"
+          >
+          <div class="combo-dropdown" id="dropdown-${p.date}" style="display:none;"></div>
+          <div class="new-hint ${p.isNew ? 'show' : ''}" id="hint-${p.date}">Will be created as a new recipe on save</div>
         </div>
-      `).join('')}
-      <div class="btn-grid" style="margin-top:15px;">
-        <button class="btn" data-action="commit">Confirm & Save</button>
-        <button class="btn clear" data-action="cancel-preview">Cancel</button>
+        <button class="btn small" data-action="reroll" data-date="${p.date}">Reroll</button>
+        <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe">&#x2716;</button>
+        <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day">&#x1F5D1;</button>
       </div>
+    `).join('')}
+    <div class="btn-grid" style="margin-top:15px;">
+      <button class="btn" data-action="commit">Confirm & Save</button>
+      <button class="btn clear" data-action="cancel-preview">Cancel</button>
     </div>
   `;
 }
 
 function cancelPreview() {
   previewPicks = null;
-  renderPreviewPanel();
+  previewConflicts = [];
+  renderModePanel();
 }
 
 async function rerollDay(dateStr) {
@@ -678,7 +749,7 @@ async function rerollDay(dateStr) {
       entry.recipeName = data.pick.recipeName;
       entry.isNew = false;
     }
-    renderPreviewPanel();
+    renderModePanel();
   } catch (err) {
     showStatusModal('Reroll error: ' + err, 'error');
   }
@@ -745,9 +816,10 @@ async function commitPreview() {
     await pollUntilDone();
     weekSelection = null;
     previewPicks = null;
+    previewConflicts = [];
     await loadMonthMealplan();
     await loadAvailableWeeks();
-    renderActionPanel();
+    renderModePanel();
     showSuccessThenClose('Saved!');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -769,9 +841,10 @@ async function clearSelectedDays() {
     await pollUntilDone();
     weekSelection = null;
     previewPicks = null;
+    previewConflicts = [];
     await loadMonthMealplan();
     await loadAvailableWeeks();
-    renderActionPanel();
+    renderModePanel();
     showSuccessThenClose('Cleared!');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -1127,36 +1200,8 @@ function wireDelegatedListeners() {
     if (modeBtn) return setCalendarMode(modeBtn.dataset.mode);
     const viewLink = e.target.closest('[data-action="view-recipe"]');
     if (viewLink) return openRecipeModal(viewLink.dataset.recipeId);
-    if (e.target.closest('[data-action="close-view-detail"]')) return closeViewDayDetail();
     if (e.target.id === 'recipe-modal-close') return closeRecipeModal();
     if (e.target.id === 'recipe-modal-overlay') return closeRecipeModal();
-    if (e.target.id === 'edit-modal-close') return closeEditModal();
-    if (e.target.id === 'edit-modal-overlay') return closeEditModal();
-  });
-
-  const editModal = document.getElementById('edit-modal-body');
-  editModal.addEventListener('mousedown', (e) => {
-    const item = e.target.closest('.combo-item[data-recipe-id]');
-    if (!item) return;
-    e.preventDefault();
-    selectEditComboItem(item.dataset.recipeId, item.closest('.combo-dropdown'));
-  });
-  editModal.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    if (btn.dataset.action === 'edit-reroll') editReroll();
-    else if (btn.dataset.action === 'edit-save') saveEditPick();
-    else if (btn.dataset.action === 'edit-cancel') closeEditModal();
-    else if (btn.dataset.action === 'edit-swap') doEditSwap();
-  });
-  editModal.addEventListener('focusin', (e) => {
-    if (e.target.id === 'edit-input') onEditComboFocus(e.target);
-  });
-  editModal.addEventListener('input', (e) => {
-    if (e.target.id === 'edit-input') onEditComboType(e.target);
-  });
-  editModal.addEventListener('focusout', (e) => {
-    if (e.target.id === 'edit-input') onEditComboBlur();
   });
 
   const calendarContainer = document.getElementById('calendar-container');
@@ -1168,44 +1213,62 @@ function wireDelegatedListeners() {
     if (dayEl && dayEl.dataset.iso) return onDayClick(dayEl.dataset.iso);
   });
 
-  const actionPanel = document.getElementById('action-panel');
-  actionPanel.addEventListener('change', (e) => {
+  // Plan's selection summary / preview, View's day detail, and Edit's form
+  // all render into the same #mode-panel (see renderModePanel), so one set
+  // of listeners here covers every data-action any of them can produce --
+  // only the mode currently rendered will actually have matching markup.
+  const modePanel = document.getElementById('mode-panel');
+  modePanel.addEventListener('mousedown', (e) => {
+    const item = e.target.closest('.combo-item[data-recipe-id]');
+    if (item) {
+      e.preventDefault();
+      const dropdown = item.closest('.combo-dropdown');
+      if (dropdown && dropdown.id === 'edit-dropdown') {
+        selectEditComboItem(item.dataset.recipeId, dropdown);
+      } else {
+        selectComboItem(item.dataset.recipeId, dropdown);
+      }
+      return;
+    }
+    if (e.target.closest('.mode-panel-handle')) startModePanelResize(e);
+  });
+  modePanel.addEventListener('touchstart', (e) => {
+    if (e.target.closest('.mode-panel-handle')) startModePanelResize(e);
+  }, { passive: false });
+  modePanel.addEventListener('change', (e) => {
     if (e.target.id === 'avoid-repeats-check') toggleAvoidRepeats(e.target.checked);
   });
-  actionPanel.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    if (btn.dataset.action === 'exclude-fridays') excludeAllFridays();
-    else if (btn.dataset.action === 'plan-selected') planSelected();
-    else if (btn.dataset.action === 'clear-selected-days') clearSelectedDays();
-    else if (btn.dataset.action === 'cancel-selection') clearSelection();
-  });
-
-  const previewPanel = document.getElementById('preview-panel');
-  previewPanel.addEventListener('mousedown', (e) => {
-    const item = e.target.closest('.combo-item[data-recipe-id]');
-    if (!item) return;
-    e.preventDefault();
-    const dropdown = item.closest('.combo-dropdown');
-    selectComboItem(item.dataset.recipeId, dropdown);
-  });
-  previewPanel.addEventListener('click', (e) => {
+  modePanel.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const date = btn.dataset.date;
-    if (btn.dataset.action === 'reroll') rerollDay(date);
-    else if (btn.dataset.action === 'clear-day') clearPreviewDay(date);
-    else if (btn.dataset.action === 'remove-day') removePreviewDay(date);
-    else if (btn.dataset.action === 'commit') commitPreview();
-    else if (btn.dataset.action === 'cancel-preview') cancelPreview();
+    switch (btn.dataset.action) {
+      case 'close-mode-panel': return closeModePanel();
+      case 'exclude-fridays': return excludeAllFridays();
+      case 'plan-selected': return planSelected();
+      case 'clear-selected-days': return clearSelectedDays();
+      case 'cancel-selection': return clearSelection();
+      case 'reroll': return rerollDay(date);
+      case 'clear-day': return clearPreviewDay(date);
+      case 'remove-day': return removePreviewDay(date);
+      case 'commit': return commitPreview();
+      case 'cancel-preview': return cancelPreview();
+      case 'edit-reroll': return editReroll();
+      case 'edit-save': return saveEditPick();
+      case 'edit-cancel': return closeEditPanel();
+      case 'edit-swap': return doEditSwap();
+    }
   });
-  previewPanel.addEventListener('focusin', (e) => {
+  modePanel.addEventListener('focusin', (e) => {
+    if (e.target.id === 'edit-input') return onEditComboFocus(e.target);
     if (e.target.classList.contains('recipe-combo')) onComboFocus(e.target.dataset.date, e.target);
   });
-  previewPanel.addEventListener('input', (e) => {
+  modePanel.addEventListener('input', (e) => {
+    if (e.target.id === 'edit-input') return onEditComboType(e.target);
     if (e.target.classList.contains('recipe-combo')) onComboType(e.target.dataset.date, e.target);
   });
-  previewPanel.addEventListener('focusout', (e) => {
+  modePanel.addEventListener('focusout', (e) => {
+    if (e.target.id === 'edit-input') return onEditComboBlur();
     if (e.target.classList.contains('recipe-combo')) onComboBlur(e.target.dataset.date);
   });
 
@@ -1272,9 +1335,7 @@ registerApp('mealie', {
         <div class="mode-toggle" id="calendar-mode-toggle"></div>
         <div id="calendar-container" style="margin-top:12px;"><div class="cal-loading">Loading calendar...</div></div>
       </div>
-      <div id="view-day-detail"></div>
-      <div id="action-panel"></div>
-      <div id="preview-panel"></div>
+      <div id="mode-panel"></div>
 
       <div id="week-meals-panel"></div>
 
@@ -1287,13 +1348,6 @@ registerApp('mealie', {
         </div>
       </div>
 
-      <div class="recipe-modal-overlay" id="edit-modal-overlay">
-        <div class="recipe-modal">
-          <button class="recipe-modal-close" id="edit-modal-close">&#x2716;</button>
-          <div id="edit-modal-body"></div>
-        </div>
-      </div>
-
       <a class="goto-btn" href="http://${HOST_IP}:9000" target="_blank">Open Mealie &rarr;</a>
     </div>
   `,
@@ -1302,6 +1356,7 @@ registerApp('mealie', {
     calendarMonth = new Date();
     weekSelection = null;
     previewPicks = null;
+    previewConflicts = [];
     viewSelectedIso = null;
     editSelectedIso = null;
     editPick = null;
@@ -1309,7 +1364,7 @@ registerApp('mealie', {
     renderMealOfDay();
     loadRecipes();
     loadMonthMealplan();
-    renderActionPanel();
+    renderModePanel();
     loadAvailableWeeks();
   },
 });

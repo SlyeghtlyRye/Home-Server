@@ -103,31 +103,61 @@
     .meal-link { color: var(--color-accent); font-size: 14px; cursor: pointer; }
     .meal-link:hover { text-decoration: underline; }
 
-    #view-day-detail {
+    #mode-panel {
       display: none;
       position: fixed;
       left: 50%;
       bottom: 16px;
       transform: translateX(-50%);
-      width: min(560px, calc(100% - 32px));
+      width: min(680px, calc(100% - 32px));
       z-index: 200;
     }
-    #view-day-detail.show { display: block; }
-    .view-day-detail-inner {
+    #mode-panel.show { display: block; }
+    .mode-panel-inner {
       position: relative;
       background: var(--color-surface);
       border: 1px solid var(--color-border-soft);
       border-radius: 10px;
-      padding: 14px 40px 14px 18px;
+      padding: 16px 44px 14px 18px;
       box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      min-height: 90px;
+      max-height: 70vh;
     }
-    .view-day-detail-inner .vd-date { color: var(--color-text-muted); font-size: 13px; }
-    .view-day-detail-inner .vd-meal { font-size: 16px; font-weight: bold; margin: 4px 0 8px; }
-    .view-day-detail-inner .vdf-close {
-      position: absolute; top: 10px; right: 12px; background: transparent; border: none;
+    .mode-panel-body { overflow-y: auto; margin-top: 10px; flex: 1 1 auto; min-height: 0; }
+    .mode-panel-body .vd-date { color: var(--color-text-muted); font-size: 13px; }
+    .mode-panel-body .vd-meal { font-size: 16px; font-weight: bold; margin: 4px 0 8px; }
+    .mode-panel-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: bold; letter-spacing: .5px; text-transform: uppercase;
+      padding: 3px 10px 3px 8px; border-radius: 999px;
+      background: var(--color-bg); border: 1px solid var(--color-border-soft);
+    }
+    .mode-panel-badge .mode-panel-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .mode-panel-badge.mode-plan { color: var(--color-accent); border-color: var(--color-accent); }
+    .mode-panel-badge.mode-plan .mode-panel-dot { background: var(--color-accent); }
+    .mode-panel-badge.mode-view { color: #7cb87c; border-color: #7cb87c; }
+    .mode-panel-badge.mode-view .mode-panel-dot { background: #7cb87c; }
+    .mode-panel-badge.mode-edit { color: var(--color-warning); border-color: var(--color-warning-border); }
+    .mode-panel-badge.mode-edit .mode-panel-dot { background: var(--color-warning); }
+    .mode-panel-inner .vdf-close {
+      position: absolute; top: 12px; right: 12px; background: transparent; border: none;
       color: var(--color-text-muted); font-size: 16px; cursor: pointer; line-height: 1;
     }
-    .view-day-detail-inner .vdf-close:hover { color: white; }
+    .mode-panel-inner .vdf-close:hover { color: white; }
+    .mode-panel-handle {
+      position: absolute; top: 8px; right: 40px; width: 30px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: ns-resize; border-radius: 4px; touch-action: none;
+    }
+    .mode-panel-handle:hover { background: var(--color-border-soft); }
+    .mode-panel-handle-grip { width: 20px; height: 2px; background: var(--color-text-muted); position: relative; border-radius: 2px; }
+    .mode-panel-handle-grip::before, .mode-panel-handle-grip::after {
+      content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--color-text-muted); border-radius: 2px;
+    }
+    .mode-panel-handle-grip::before { top: -5px; }
+    .mode-panel-handle-grip::after { top: 5px; }
 
     .week-select-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
     .week-select-row select { background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
