@@ -95,6 +95,9 @@ server {
     location /api/shopping-item-check {
             proxy_pass http://172.17.0.1:9001/api/shopping-item-check?key=${TRIGGER_SECRET};
     }
+    location /api/swap-days {
+            proxy_pass http://172.17.0.1:9001/api/swap-days?key=${TRIGGER_SECRET};
+    }
     location /data/audiobook-library {
             proxy_pass http://172.17.0.1:9001/data/audiobook-library?key=${TRIGGER_SECRET}&profile=$arg_profile;
     }

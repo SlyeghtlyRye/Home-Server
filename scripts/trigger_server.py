@@ -425,6 +425,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/api/swap-days":
+            body = self._read_json_body()
+            try:
+                date_a = date.fromisoformat(body.get("dateA"))
+                date_b = date.fromisoformat(body.get("dateB"))
+            except Exception:
+                self._send_json(400, {"error": "invalid dateA/dateB"})
+                return
+            try:
+                self._send_json(200, mwp.swap_meals(date_a, date_b))
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         if parsed.path == "/audiobook-upload-local":
             profile = params.get("profile", [None])[0]
             title = params.get("title", [None])[0]

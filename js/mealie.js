@@ -13,8 +13,12 @@ let previewPicks = null;
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
 
-let calendarMode = localStorage.getItem('mealie_calendarMode') === 'view' ? 'view' : 'plan';
+const CALENDAR_MODES = ['plan', 'view', 'edit'];
+let calendarMode = CALENDAR_MODES.includes(localStorage.getItem('mealie_calendarMode')) ? localStorage.getItem('mealie_calendarMode') : 'plan';
 let viewSelectedIso = null;
+
+let editSelectedIso = null;
+let editPick = null;
 
 let availableWeeks = [];
 let selectedWeekStart = null;
@@ -86,6 +90,7 @@ function renderModeToggle() {
   el.innerHTML = `
     <button data-mode="plan" class="${calendarMode === 'plan' ? 'active' : ''}">Plan</button>
     <button data-mode="view" class="${calendarMode === 'view' ? 'active' : ''}">View</button>
+    <button data-mode="edit" class="${calendarMode === 'edit' ? 'active' : ''}">Edit</button>
   `;
 }
 
@@ -96,6 +101,10 @@ function setCalendarMode(mode) {
   weekSelection = null;
   previewPicks = null;
   viewSelectedIso = null;
+  editSelectedIso = null;
+  editPick = null;
+  const editOverlay = document.getElementById('edit-modal-overlay');
+  if (editOverlay) editOverlay.style.display = 'none';
   renderModeToggle();
   renderCalendar();
   renderActionPanel();
@@ -137,6 +146,7 @@ function renderCalendar() {
       cls += weekSelection.days[iso] ? ' included' : ' excluded';
     }
     if (calendarMode === 'view' && iso === viewSelectedIso) cls += ' view-selected';
+    if (calendarMode === 'edit' && iso === editSelectedIso) cls += ' edit-selected';
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
@@ -163,12 +173,208 @@ function renderViewDayDetail() {
     </div>`;
 }
 
+// ---------- Edit mode (single-day change / swap, in a modal) ----------
+
+function onEditDayClick(iso) {
+  editSelectedIso = iso;
+  const current = plannedMap[iso];
+  editPick = current
+    ? { date: iso, recipeId: current.id, recipeName: current.name, isNew: false }
+    : { date: iso, recipeId: null, recipeName: '', isNew: false };
+  renderCalendar();
+  openEditModal();
+}
+
+function openEditModal() {
+  renderEditModalBody();
+  document.getElementById('edit-modal-overlay').style.display = 'flex';
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal-overlay').style.display = 'none';
+  editSelectedIso = null;
+  editPick = null;
+  renderCalendar();
+}
+
+function renderEditModalBody() {
+  const body = document.getElementById('edit-modal-body');
+  if (!body || !editPick) return;
+  body.innerHTML = `
+    <h2>Edit ${editPick.date}</h2>
+    <div class="preview-row">
+      <div class="combo-wrap">
+        <input
+          id="edit-input"
+          class="recipe-combo ${editPick.isNew ? 'is-new' : ''}"
+          type="text"
+          autocomplete="off"
+          value="${escapeHtml(editPick.recipeName)}"
+          placeholder="Search recipes..."
+        >
+        <div class="combo-dropdown" id="edit-dropdown" style="display:none;"></div>
+        <div class="new-hint ${editPick.isNew ? 'show' : ''}" id="edit-hint">Will be created as a new recipe on save</div>
+      </div>
+      <button class="btn small" data-action="edit-reroll">Reroll</button>
+    </div>
+    <div class="btn-grid" style="margin-top:12px;">
+      <button class="btn" data-action="edit-save">Save</button>
+      <button class="btn clear" data-action="edit-cancel">Cancel</button>
+    </div>
+    <div class="edit-swap-row">
+      <label for="edit-swap-target">Swap with another day:</label>
+      <input type="date" id="edit-swap-target">
+      <button class="btn small" data-action="edit-swap">Swap</button>
+    </div>
+  `;
+}
+
+async function doEditSwap() {
+  const targetInput = document.getElementById('edit-swap-target');
+  const targetDate = targetInput && targetInput.value;
+  if (!targetDate) { showStatusModal('Pick a day to swap with first.', 'error'); return; }
+  if (targetDate === editSelectedIso) { showStatusModal('Pick a different day to swap with.', 'error'); return; }
+  const dateA = editSelectedIso;
+  const mealA = plannedMap[dateA];
+  const mealB = plannedMap[targetDate];
+  if (!mealA && !mealB) {
+    showStatusModal('Both days are empty -- nothing to swap.', 'error');
+    return;
+  }
+  const labelA = mealA ? mealA.name : '(empty)';
+  const labelB = mealB ? mealB.name : '(empty)';
+  if (!(await showConfirmModal(`Swap meals between ${dateA} (${labelA}) and ${targetDate} (${labelB})?`))) return;
+  showStatusModal('Swapping...', 'loading');
+  try {
+    const res = await fetch('/api/swap-days', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dateA, dateB: targetDate })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Swap failed: ' + (data.error || res.status), 'error'); return; }
+    closeEditModal();
+    await loadMonthMealplan();
+    await loadAvailableWeeks();
+    showSuccessThenClose('Swapped!');
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+function onEditComboFocus(inputEl) {
+  const dropdown = document.getElementById('edit-dropdown');
+  if (!dropdown) return;
+  dropdown.innerHTML = renderComboDropdownHtml(inputEl.value);
+  dropdown.style.display = 'block';
+}
+
+function onEditComboType(inputEl) {
+  const typedValue = inputEl.value;
+  const hint = document.getElementById('edit-hint');
+  const match = allRecipes.find(r => r.name.toLowerCase() === typedValue.trim().toLowerCase());
+  if (match) {
+    editPick.recipeId = match.id;
+    editPick.recipeName = match.name;
+    editPick.isNew = false;
+    inputEl.classList.remove('is-new');
+    if (hint) hint.classList.remove('show');
+  } else {
+    editPick.recipeId = null;
+    editPick.recipeName = typedValue.trim();
+    editPick.isNew = true;
+    inputEl.classList.add('is-new');
+    if (hint) hint.classList.toggle('show', typedValue.trim().length > 0);
+  }
+  const dropdown = document.getElementById('edit-dropdown');
+  if (dropdown) {
+    dropdown.innerHTML = renderComboDropdownHtml(typedValue);
+    dropdown.style.display = 'block';
+  }
+}
+
+function selectEditComboItem(recipeId, dropdown) {
+  const recipe = allRecipes.find(r => r.id === recipeId);
+  if (!recipe || !editPick) return;
+  editPick.recipeId = recipe.id;
+  editPick.recipeName = recipe.name;
+  editPick.isNew = false;
+  const inputEl = document.getElementById('edit-input');
+  if (inputEl) {
+    inputEl.value = recipe.name;
+    inputEl.classList.remove('is-new');
+  }
+  const hint = document.getElementById('edit-hint');
+  if (hint) hint.classList.remove('show');
+  dropdown.style.display = 'none';
+}
+
+function onEditComboBlur() {
+  setTimeout(() => {
+    const dropdown = document.getElementById('edit-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+  }, 150);
+}
+
+async function editReroll() {
+  const excludeIds = editPick.recipeId ? [editPick.recipeId] : [];
+  try {
+    const res = await fetch('/api/reroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: editSelectedIso, avoidRepeats, excludeIds })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Reroll failed: ' + (data.error || res.status), 'error'); return; }
+    editPick.recipeId = data.pick.recipeId;
+    editPick.recipeName = data.pick.recipeName;
+    editPick.isNew = false;
+    renderEditModalBody();
+  } catch (err) {
+    showStatusModal('Reroll error: ' + err, 'error');
+  }
+}
+
+async function saveEditPick() {
+  if (!editPick.recipeId && !(editPick.isNew && editPick.recipeName.trim())) {
+    showStatusModal('Pick a recipe first.', 'error');
+    return;
+  }
+  if (!(await showConfirmModal(`Save "${editPick.recipeName}" for ${editSelectedIso}?`))) return;
+  showStatusModal('Preparing recipe...', 'loading');
+  try {
+    await resolveNewRecipes([editPick]);
+  } catch (err) {
+    showStatusModal(err.message, 'error');
+    return;
+  }
+  showStatusModal('Saving meal plan and updating shopping list...', 'loading');
+  try {
+    const res = await fetch('/api/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ picks: [editPick] })
+    });
+    if (!res.ok) { showStatusModal('Failed to start save.', 'error'); return; }
+    await pollUntilDone();
+    closeEditModal();
+    await loadMonthMealplan();
+    await loadAvailableWeeks();
+    showSuccessThenClose('Saved!');
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
 function onDayClick(iso) {
   if (calendarMode === 'view') {
     viewSelectedIso = (viewSelectedIso === iso) ? null : iso;
     renderCalendar();
     renderViewDayDetail();
     return;
+  }
+  if (calendarMode === 'edit') {
+    return onEditDayClick(iso);
   }
   if (!weekSelection) {
     const start = new Date(iso + 'T00:00:00');
@@ -479,8 +685,8 @@ async function pollUntilDone(maxAttempts = 30) {
   }
 }
 
-async function resolveNewRecipes() {
-  for (const p of previewPicks) {
+async function resolveNewRecipes(picks) {
+  for (const p of picks) {
     if (p.isNew && !p.recipeId) {
       if (!p.recipeName || !p.recipeName.trim()) {
         throw new Error(`Day ${p.date} has an empty recipe name.`);
@@ -510,7 +716,7 @@ async function commitPreview() {
   if (!(await showConfirmModal(`Save these ${previewPicks.length} meal(s) to your calendar?`))) return;
   showStatusModal('Preparing recipes...', 'loading');
   try {
-    await resolveNewRecipes();
+    await resolveNewRecipes(previewPicks);
   } catch (err) {
     showStatusModal(err.message, 'error');
     return;
@@ -838,6 +1044,33 @@ function wireDelegatedListeners() {
     if (viewLink) return openRecipeModal(viewLink.dataset.recipeId);
     if (e.target.id === 'recipe-modal-close') return closeRecipeModal();
     if (e.target.id === 'recipe-modal-overlay') return closeRecipeModal();
+    if (e.target.id === 'edit-modal-close') return closeEditModal();
+    if (e.target.id === 'edit-modal-overlay') return closeEditModal();
+  });
+
+  const editModal = document.getElementById('edit-modal-body');
+  editModal.addEventListener('mousedown', (e) => {
+    const item = e.target.closest('.combo-item[data-recipe-id]');
+    if (!item) return;
+    e.preventDefault();
+    selectEditComboItem(item.dataset.recipeId, item.closest('.combo-dropdown'));
+  });
+  editModal.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'edit-reroll') editReroll();
+    else if (btn.dataset.action === 'edit-save') saveEditPick();
+    else if (btn.dataset.action === 'edit-cancel') closeEditModal();
+    else if (btn.dataset.action === 'edit-swap') doEditSwap();
+  });
+  editModal.addEventListener('focusin', (e) => {
+    if (e.target.id === 'edit-input') onEditComboFocus(e.target);
+  });
+  editModal.addEventListener('input', (e) => {
+    if (e.target.id === 'edit-input') onEditComboType(e.target);
+  });
+  editModal.addEventListener('focusout', (e) => {
+    if (e.target.id === 'edit-input') onEditComboBlur();
   });
 
   const calendarContainer = document.getElementById('calendar-container');
@@ -977,6 +1210,13 @@ registerApp('mealie', {
         </div>
       </div>
 
+      <div class="recipe-modal-overlay" id="edit-modal-overlay">
+        <div class="recipe-modal">
+          <button class="recipe-modal-close" id="edit-modal-close">&#x2716;</button>
+          <div id="edit-modal-body"></div>
+        </div>
+      </div>
+
       <a class="goto-btn" href="http://${HOST_IP}:9000" target="_blank">Open Mealie &rarr;</a>
     </div>
   `,
@@ -986,6 +1226,8 @@ registerApp('mealie', {
     weekSelection = null;
     previewPicks = null;
     viewSelectedIso = null;
+    editSelectedIso = null;
+    editPick = null;
     renderModeToggle();
     renderMealOfDay();
     loadRecipes();

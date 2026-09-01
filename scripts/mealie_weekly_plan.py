@@ -112,6 +112,35 @@ def get_planned_dates_in_range(start, end):
     return sorted({e["date"] for e in entries})
 
 
+def swap_meals(date_a, date_b):
+    """Swaps (or moves, if one side is empty) the meals planned on two days.
+    Deliberately mealplan-only -- it never touches the shopping list, since
+    that list only ever grows (see add_recipe_to_list) and has no way to
+    subtract a recipe's ingredients. Re-adding both recipes on every swap
+    would silently double their ingredients for same-week swaps."""
+    start, end = min(date_a, date_b), max(date_a, date_b)
+    entries = get_mealplan_entries(start, end)
+    by_date = {e["date"]: e for e in entries}
+    entry_a = by_date.get(date_a.isoformat())
+    entry_b = by_date.get(date_b.isoformat())
+    recipe_a = (entry_a or {}).get("recipe") or {}
+    recipe_b = (entry_b or {}).get("recipe") or {}
+
+    if entry_a:
+        delete_mealplan_entry(entry_a["id"])
+    if entry_b:
+        delete_mealplan_entry(entry_b["id"])
+    if recipe_b.get("id"):
+        create_mealplan_entry(date_a, recipe_b["id"])
+    if recipe_a.get("id"):
+        create_mealplan_entry(date_b, recipe_a["id"])
+
+    return {
+        "a": {"date": date_a.isoformat(), "recipeName": recipe_b.get("name")},
+        "b": {"date": date_b.isoformat(), "recipeName": recipe_a.get("name")},
+    }
+
+
 def get_available_weeks(weeks_back=8, weeks_forward=12):
     today = date.today()
     range_start = canonical_week_start(today) - timedelta(weeks=weeks_back)
