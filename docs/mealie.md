@@ -4,14 +4,44 @@ tags: mealie, backend, frontend
 
 Automates weekly meal planning against a self-hosted Mealie instance:
 calendar-based day selection, randomized recipe preview with reroll/manual
-override, no-repeat memory, and per-week shopping list generation.
+override, no-repeat memory, and per-week shopping list generation. The
+dashboard tab also surfaces today's meal, a read-only calendar view, a
+per-week recipe browser, and an editable shopping list -- all layered on
+top of the same planning data.
 
 ## How it works
 
 - `scripts/mealie_weekly_plan.py` talks to Mealie's API directly (recipes,
-  meal plan entries, shopping lists)
+  meal plan entries, shopping lists, shopping list items)
 - `scripts/trigger_server.py` exposes this over HTTP for the dashboard
-- `js/mealie.js` is the frontend: calendar UI, preview/commit flow
+- `js/mealie.js` is the frontend: meal-of-the-day, calendar (plan/view),
+  preview/commit flow, meals-of-the-week browser, shopping list
+
+## Dashboard layout
+
+The Mealie tab renders, top to bottom:
+
+1. **Meal of the day** -- today's planned meal (if any), with a link to
+   its full recipe (ingredients + steps) via the recipe detail modal.
+2. **Calendar**, with a Plan/View toggle:
+   - *Plan* is the original flow -- click a day to select a 7-day block,
+     preview random picks, reroll/override, then commit.
+   - *View* is read-only -- click a single day to highlight it and show
+     its meal (if any) below the calendar, with a link to the same recipe
+     detail modal. Switching modes clears any in-progress plan selection.
+3. **Meals of the week** -- a week picker (populated from
+   `/data/available-weeks`, which lists any week with a planned meal plus
+   the current week) driving a day-by-day list. Opening a day lazily
+   fetches and shows that recipe's ingredients and steps inline.
+4. **Shopping lists** -- unchanged weekly grouping, plus inline editing:
+   check items off, delete them, or add freeform items. All three write
+   straight through to Mealie's shopping list (no local-only state), via
+   `/api/shopping-item-{add,delete,check}`.
+
+Recipe detail (ingredients/steps) is fetched by recipe ID via
+`/data/recipe-detail`, which looks up the recipe's slug from the recipe
+list (Mealie's detail endpoint is slug-keyed, not ID-keyed) before
+fetching the full recipe.
 
 ## No-repeat logic
 

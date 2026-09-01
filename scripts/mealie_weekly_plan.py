@@ -49,10 +49,38 @@ def create_recipe(name):
     return data["id"], data["name"]
 
 
-def get_recipe_ids():
+def get_recipe_summaries():
     resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=get_headers(), params={"perPage": 100})
     resp.raise_for_status()
-    return [(r["id"], r["name"]) for r in resp.json()["items"]]
+    return resp.json()["items"]
+
+
+def get_recipe_ids():
+    return [(r["id"], r["name"]) for r in get_recipe_summaries()]
+
+
+def get_recipe_detail(recipe_id):
+    match = next((r for r in get_recipe_summaries() if r["id"] == recipe_id), None)
+    if not match:
+        raise ValueError(f"recipe {recipe_id} not found")
+    resp = requests.get(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers())
+    resp.raise_for_status()
+    data = resp.json()
+    ingredients = [
+        ing.get("display") or ing.get("note") or ing.get("originalText") or "(ingredient)"
+        for ing in (data.get("recipeIngredient") or [])
+    ]
+    instructions = [
+        (step.get("text") or step.get("title") or "").strip()
+        for step in (data.get("recipeInstructions") or [])
+    ]
+    return {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "image": data.get("image"),
+        "ingredients": ingredients,
+        "instructions": [s for s in instructions if s],
+    }
 
 
 def create_mealplan_entry(entry_date, recipe_id):
@@ -82,6 +110,29 @@ def get_mealplan_entries(start, end):
 def get_planned_dates_in_range(start, end):
     entries = get_mealplan_entries(start, end)
     return sorted({e["date"] for e in entries})
+
+
+def get_available_weeks(weeks_back=8, weeks_forward=12):
+    today = date.today()
+    range_start = canonical_week_start(today) - timedelta(weeks=weeks_back)
+    range_end = canonical_week_start(today) + timedelta(weeks=weeks_forward) + timedelta(days=6)
+    entries = get_mealplan_entries(range_start, range_end)
+    weeks = {canonical_week_start(date.fromisoformat(e["date"])) for e in entries}
+    weeks.add(canonical_week_start(today))
+    return sorted(weeks)
+
+
+def get_week_meals(week_start):
+    week_end = week_start + timedelta(days=6)
+    entries = get_mealplan_entries(week_start, week_end)
+    by_date = {e["date"]: e.get("recipe") for e in entries}
+    days = []
+    for i in range(7):
+        d = week_start + timedelta(days=i)
+        iso = d.isoformat()
+        recipe = by_date.get(iso) or {}
+        days.append({"date": iso, "recipeId": recipe.get("id"), "recipeName": recipe.get("name")})
+    return days
 
 
 def delete_mealplan_entry(entry_id):
@@ -117,6 +168,31 @@ def add_recipe_to_list(list_id, recipe_id):
     resp = requests.post(f"{MEALIE_URL}/api/households/shopping/lists/{list_id}/recipe", headers=get_headers(), json=body)
     if not resp.ok:
         print(f"  FAILED adding recipe {recipe_id}: {resp.status_code} {resp.text}")
+
+
+def create_shopping_item(list_id, text):
+    body = {"shoppingListId": list_id, "note": text, "checked": False, "isFood": False, "quantity": 1}
+    resp = requests.post(f"{MEALIE_URL}/api/households/shopping/items", headers=get_headers(), json=body)
+    if not resp.ok:
+        raise RuntimeError(f"Mealie rejected the new item: {resp.status_code} {resp.text}")
+    return resp.json()
+
+
+def delete_shopping_item(item_id):
+    resp = requests.delete(f"{MEALIE_URL}/api/households/shopping/items/{item_id}", headers=get_headers())
+    if not resp.ok:
+        raise RuntimeError(f"Mealie rejected the delete: {resp.status_code} {resp.text}")
+
+
+def set_shopping_item_checked(item_id, checked):
+    resp = requests.get(f"{MEALIE_URL}/api/households/shopping/items/{item_id}", headers=get_headers())
+    resp.raise_for_status()
+    item = resp.json()
+    item["checked"] = checked
+    resp2 = requests.put(f"{MEALIE_URL}/api/households/shopping/items/{item_id}", headers=get_headers(), json=item)
+    if not resp2.ok:
+        raise RuntimeError(f"Mealie rejected the update: {resp2.status_code} {resp2.text}")
+    return resp2.json()
 
 
 def load_history():

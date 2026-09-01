@@ -77,6 +77,24 @@ server {
     location /api/clear-dates {
             proxy_pass http://172.17.0.1:9001/clear-dates?key=${TRIGGER_SECRET};
     }
+    location /data/available-weeks {
+            proxy_pass http://172.17.0.1:9001/data/available-weeks?key=${TRIGGER_SECRET};
+    }
+    location /data/week-mealplan {
+            proxy_pass http://172.17.0.1:9001/data/week-mealplan?key=${TRIGGER_SECRET}&start=$arg_start;
+    }
+    location /data/recipe-detail {
+            proxy_pass http://172.17.0.1:9001/data/recipe-detail?key=${TRIGGER_SECRET}&id=$arg_id;
+    }
+    location /api/shopping-item-add {
+            proxy_pass http://172.17.0.1:9001/api/shopping-item-add?key=${TRIGGER_SECRET};
+    }
+    location /api/shopping-item-delete {
+            proxy_pass http://172.17.0.1:9001/api/shopping-item-delete?key=${TRIGGER_SECRET};
+    }
+    location /api/shopping-item-check {
+            proxy_pass http://172.17.0.1:9001/api/shopping-item-check?key=${TRIGGER_SECRET};
+    }
     location /data/audiobook-library {
             proxy_pass http://172.17.0.1:9001/data/audiobook-library?key=${TRIGGER_SECRET}&profile=$arg_profile;
     }

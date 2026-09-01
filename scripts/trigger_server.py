@@ -52,12 +52,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = resp.json()
         items = [
             {
+                "id": it.get("id"),
                 "display": it.get("display") or it.get("note") or (it.get("food", {}).get("name") if isinstance(it.get("food"), dict) else None) or "(item)",
                 "checked": it.get("checked", False),
             }
             for it in data.get("listItems", [])
         ]
-        return {"name": data.get("name"), "items": items}
+        return {"id": list_id, "name": data.get("name"), "items": items}
 
     def do_GET(self):
         global current_process
@@ -206,7 +207,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     end = date.fromisoformat(end_s)
                     entries = mwp.get_mealplan_entries(start, end)
                     result = [
-                        {"date": e["date"], "recipe": (e.get("recipe") or {}).get("name", "(none)")}
+                        {
+                            "date": e["date"],
+                            "recipe": (e.get("recipe") or {}).get("name", "(none)"),
+                            "recipeId": (e.get("recipe") or {}).get("id"),
+                        }
                         for e in entries
                     ]
                     self._send_json(200, {"entries": result})
@@ -215,6 +220,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     last_exc = e
                     time.sleep(0.5)
             self._send_json(500, {"error": str(last_exc)})
+            return
+
+        if parsed.path == "/data/available-weeks":
+            try:
+                weeks = mwp.get_available_weeks()
+                today_week = mwp.canonical_week_start(date.today())
+                result = [
+                    {"start": w.isoformat(), "label": f"Week of {w.isoformat()}", "isCurrent": w == today_week}
+                    for w in weeks
+                ]
+                self._send_json(200, {"weeks": result})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/week-mealplan":
+            start_s = params.get("start", [None])[0]
+            if not start_s:
+                self._send_json(400, {"error": "missing start"})
+                return
+            try:
+                start = date.fromisoformat(start_s)
+                self._send_json(200, {"days": mwp.get_week_meals(start)})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/recipe-detail":
+            recipe_id = params.get("id", [None])[0]
+            if not recipe_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                self._send_json(200, mwp.get_recipe_detail(recipe_id))
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/data/recipes":
@@ -337,6 +378,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok", "valid": True})
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/shopping-item-add":
+            body = self._read_json_body()
+            list_id = body.get("listId")
+            text = (body.get("text") or "").strip()
+            if not list_id or not text:
+                self._send_json(400, {"error": "missing listId or text"})
+                return
+            try:
+                item = mwp.create_shopping_item(list_id, text)
+                self._send_json(200, {
+                    "id": item.get("id"),
+                    "display": item.get("display") or item.get("note") or text,
+                    "checked": item.get("checked", False),
+                })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/shopping-item-delete":
+            body = self._read_json_body()
+            item_id = body.get("itemId")
+            if not item_id:
+                self._send_json(400, {"error": "missing itemId"})
+                return
+            try:
+                mwp.delete_shopping_item(item_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/shopping-item-check":
+            body = self._read_json_body()
+            item_id = body.get("itemId")
+            checked = bool(body.get("checked"))
+            if not item_id:
+                self._send_json(400, {"error": "missing itemId"})
+                return
+            try:
+                mwp.set_shopping_item_checked(item_id, checked)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/audiobook-upload-local":

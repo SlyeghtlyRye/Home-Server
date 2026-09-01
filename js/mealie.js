@@ -1,6 +1,7 @@
-// mealie.js -- meal planning: calendar, preview/reroll/commit flow,
-// shopping lists. Uses event delegation on stable containers since their
-// contents (calendar days, preview rows) re-render frequently.
+// mealie.js -- meal planning: meal-of-the-day, calendar (plan/view), preview/
+// reroll/commit flow, meals-of-the-week browser, and an editable shopping
+// list. Uses event delegation on stable containers since their contents
+// (calendar days, preview rows, dropdowns) re-render frequently.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf } from './core.js';
 import { HOST_IP } from './config.js';
@@ -11,6 +12,40 @@ let weekSelection = null;
 let previewPicks = null;
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
+
+let calendarMode = localStorage.getItem('mealie_calendarMode') === 'view' ? 'view' : 'plan';
+let viewSelectedIso = null;
+
+let availableWeeks = [];
+let selectedWeekStart = null;
+let weekMealsData = null;
+const recipeDetailCache = {};
+
+// ---------- Meal of the day ----------
+
+function renderMealOfDay() {
+  const el = document.getElementById('meal-of-day-panel');
+  if (!el) return;
+  const todayIso = isoOf(new Date());
+  const meal = plannedMap[todayIso];
+  const todayLabel = new Date().toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' });
+  if (!meal) {
+    el.innerHTML = `
+      <div class="meal-of-day">
+        <h3>Today &mdash; ${todayLabel}</h3>
+        <div class="meal-empty">Nothing planned for today.</div>
+      </div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="meal-of-day">
+      <h3>Today &mdash; ${todayLabel}</h3>
+      <div class="meal-name">${escapeHtml(meal.name)}</div>
+      ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">See recipe &amp; details &rarr;</span>` : ''}
+    </div>`;
+}
+
+// ---------- Calendar (plan / view) ----------
 
 function changeMonth(delta) {
   calendarMonth.setMonth(calendarMonth.getMonth() + delta);
@@ -32,7 +67,7 @@ async function loadMonthMealplan() {
     if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
     plannedMap = {};
-    (data.entries || []).forEach(e => { plannedMap[e.date] = e.recipe; });
+    (data.entries || []).forEach(e => { plannedMap[e.date] = { name: e.recipe, id: e.recipeId }; });
     clearErrorBanner();
   } catch (err) {
     console.error('Failed to load month mealplan', err);
@@ -40,7 +75,31 @@ async function loadMonthMealplan() {
     showErrorBanner("Couldn't reach the server to load the calendar. Check that it's running and try again.");
   }
   renderCalendar();
+  renderMealOfDay();
+  renderViewDayDetail();
   refreshShoppingPanel();
+}
+
+function renderModeToggle() {
+  const el = document.getElementById('calendar-mode-toggle');
+  if (!el) return;
+  el.innerHTML = `
+    <button data-mode="plan" class="${calendarMode === 'plan' ? 'active' : ''}">Plan</button>
+    <button data-mode="view" class="${calendarMode === 'view' ? 'active' : ''}">View</button>
+  `;
+}
+
+function setCalendarMode(mode) {
+  if (calendarMode === mode) return;
+  calendarMode = mode;
+  localStorage.setItem('mealie_calendarMode', mode);
+  weekSelection = null;
+  previewPicks = null;
+  viewSelectedIso = null;
+  renderModeToggle();
+  renderCalendar();
+  renderActionPanel();
+  renderViewDayDetail();
 }
 
 function renderCalendar() {
@@ -77,10 +136,11 @@ function renderCalendar() {
     if (weekSelection && iso in weekSelection.days) {
       cls += weekSelection.days[iso] ? ' included' : ' excluded';
     }
+    if (calendarMode === 'view' && iso === viewSelectedIso) cls += ' view-selected';
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
-        ${meal ? `<div class="cal-meal">${escapeHtml(meal)}</div>` : ''}
+        ${meal ? `<div class="cal-meal">${escapeHtml(meal.name)}</div>` : ''}
       </div>
     `;
   }
@@ -88,7 +148,28 @@ function renderCalendar() {
   document.getElementById('calendar-container').innerHTML = html;
 }
 
+function renderViewDayDetail() {
+  const el = document.getElementById('view-day-detail');
+  if (!el) return;
+  if (calendarMode !== 'view' || !viewSelectedIso) { el.innerHTML = ''; return; }
+  const meal = plannedMap[viewSelectedIso];
+  el.innerHTML = `
+    <div class="view-day-detail">
+      <div class="vd-date">${viewSelectedIso}</div>
+      ${meal
+        ? `<div class="vd-meal">${escapeHtml(meal.name)}</div>
+           ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}`
+        : `<div class="meal-empty">No meal planned this day.</div>`}
+    </div>`;
+}
+
 function onDayClick(iso) {
+  if (calendarMode === 'view') {
+    viewSelectedIso = (viewSelectedIso === iso) ? null : iso;
+    renderCalendar();
+    renderViewDayDetail();
+    return;
+  }
   if (!weekSelection) {
     const start = new Date(iso + 'T00:00:00');
     const days = {};
@@ -152,7 +233,7 @@ function toggleAvoidRepeats(checked) {
 function renderActionPanel() {
   const el = document.getElementById('action-panel');
   document.getElementById('preview-panel').innerHTML = '';
-  if (!weekSelection) {
+  if (calendarMode !== 'plan' || !weekSelection) {
     el.innerHTML = '';
     return;
   }
@@ -201,7 +282,7 @@ async function planSelected() {
 
   const conflicts = dates.filter(d => plannedMap[d]);
   if (conflicts.length > 0) {
-    const list = conflicts.map(d => `${d} (${plannedMap[d]})`).join('\n');
+    const list = conflicts.map(d => `${d} (${plannedMap[d].name})`).join('\n');
     const proceed = await showConfirmModal(
       `${conflicts.length} of your selected day(s) already have a meal planned:\n\n${list}\n\nContinuing will replace them. Proceed?`
     );
@@ -447,8 +528,8 @@ async function commitPreview() {
     weekSelection = null;
     previewPicks = null;
     await loadMonthMealplan();
+    await loadAvailableWeeks();
     renderActionPanel();
-    refreshShoppingPanel();
     showSuccessThenClose('Saved!');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -471,13 +552,155 @@ async function clearSelectedDays() {
     weekSelection = null;
     previewPicks = null;
     await loadMonthMealplan();
+    await loadAvailableWeeks();
     renderActionPanel();
-    refreshShoppingPanel();
     showSuccessThenClose('Cleared!');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
+
+// ---------- Meals of the week ----------
+
+async function loadAvailableWeeks() {
+  try {
+    const res = await fetch('/data/available-weeks');
+    if (!res.ok) throw new Error('server responded ' + res.status);
+    const data = await res.json();
+    availableWeeks = data.weeks || [];
+    if (!selectedWeekStart || !availableWeeks.find(w => w.start === selectedWeekStart)) {
+      const current = availableWeeks.find(w => w.isCurrent);
+      selectedWeekStart = current ? current.start : (availableWeeks[0] && availableWeeks[0].start) || null;
+    }
+    clearErrorBanner();
+  } catch (err) {
+    console.error('Failed to load available weeks', err);
+    availableWeeks = [];
+  }
+  await loadWeekMeals();
+}
+
+async function loadWeekMeals() {
+  if (!selectedWeekStart) {
+    weekMealsData = null;
+    renderWeekMealsPanel();
+    return;
+  }
+  renderWeekMealsPanel(null, true);
+  try {
+    const res = await fetch(`/data/week-mealplan?start=${selectedWeekStart}`);
+    if (!res.ok) throw new Error('server responded ' + res.status);
+    const data = await res.json();
+    weekMealsData = data.days || [];
+    renderWeekMealsPanel();
+  } catch (err) {
+    console.error('Failed to load week meals', err);
+    weekMealsData = null;
+    renderWeekMealsPanel(err);
+  }
+}
+
+function formatDayLabel(iso) {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function renderWeekMealsPanel(err, loading) {
+  const el = document.getElementById('week-meals-panel');
+  if (!el) return;
+
+  const options = availableWeeks.map(w =>
+    `<option value="${w.start}" ${w.start === selectedWeekStart ? 'selected' : ''}>${w.label}${w.isCurrent ? ' (current)' : ''}</option>`
+  ).join('');
+
+  let body;
+  if (loading) {
+    body = '<p style="color:var(--color-text-muted);">Loading...</p>';
+  } else if (err) {
+    body = '<p style="color:var(--color-text-muted);">Couldn\'t load meals for this week.</p>';
+  } else if (!weekMealsData) {
+    body = '<p style="color:var(--color-text-muted);">No weeks available yet.</p>';
+  } else {
+    body = weekMealsData.map(day => `
+      <details class="day-dropdown">
+        <summary>
+          <span class="dd-date">${formatDayLabel(day.date)}</span>
+          <span class="dd-meal ${day.recipeName ? '' : 'dd-empty'}">${day.recipeName ? escapeHtml(day.recipeName) : 'No meal planned'}</span>
+        </summary>
+        <div class="day-dropdown-body" data-recipe-id="${day.recipeId || ''}" data-loaded="0"></div>
+      </details>
+    `).join('');
+  }
+
+  el.innerHTML = `
+    <div class="week-block">
+      <h3>Meals This Week</h3>
+      ${availableWeeks.length > 0 ? `
+        <div class="week-select-row">
+          <label for="week-select" style="font-size:13px; color:var(--color-text-dim);">Week:</label>
+          <select id="week-select">${options}</select>
+        </div>
+      ` : ''}
+      ${body}
+    </div>
+  `;
+}
+
+async function fetchRecipeDetail(recipeId) {
+  if (recipeDetailCache[recipeId]) return recipeDetailCache[recipeId];
+  const res = await fetch(`/data/recipe-detail?id=${encodeURIComponent(recipeId)}`);
+  if (!res.ok) throw new Error('server responded ' + res.status);
+  const data = await res.json();
+  recipeDetailCache[recipeId] = data;
+  return data;
+}
+
+function renderRecipeDetailHtml(detail) {
+  const hasIngredients = detail.ingredients && detail.ingredients.length > 0;
+  const hasInstructions = detail.instructions && detail.instructions.length > 0;
+  return `
+    ${hasIngredients ? `
+      <div class="recipe-section-label">Ingredients</div>
+      <ul class="recipe-ingredients">${detail.ingredients.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+    ` : ''}
+    ${hasInstructions ? `
+      <div class="recipe-section-label">Steps</div>
+      <ol class="recipe-instructions">${detail.instructions.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ol>
+    ` : ''}
+    ${(!hasIngredients && !hasInstructions) ? '<p class="meal-empty">No ingredients or steps recorded for this recipe.</p>' : ''}
+  `;
+}
+
+async function loadRecipeDetailInto(container, recipeId) {
+  container.innerHTML = '<div class="recipe-loading">Loading recipe...</div>';
+  try {
+    const detail = await fetchRecipeDetail(recipeId);
+    container.innerHTML = renderRecipeDetailHtml(detail);
+  } catch (err) {
+    container.innerHTML = '<p class="meal-empty">Couldn\'t load recipe details.</p>';
+  }
+}
+
+// ---------- Recipe detail modal ----------
+
+async function openRecipeModal(recipeId) {
+  const overlay = document.getElementById('recipe-modal-overlay');
+  const body = document.getElementById('recipe-modal-body');
+  body.innerHTML = '<div class="recipe-loading">Loading recipe...</div>';
+  overlay.style.display = 'flex';
+  try {
+    const detail = await fetchRecipeDetail(recipeId);
+    body.innerHTML = `<h2>${escapeHtml(detail.name || 'Recipe')}</h2>${renderRecipeDetailHtml(detail)}`;
+  } catch (err) {
+    body.innerHTML = '<p class="meal-empty">Couldn\'t load recipe details.</p>';
+  }
+}
+
+function closeRecipeModal() {
+  document.getElementById('recipe-modal-overlay').style.display = 'none';
+}
+
+// ---------- Shopping list ----------
 
 async function loadShoppingListsForRange(startIso, endIso) {
   const el = document.getElementById('shopping-list-panel');
@@ -496,11 +719,15 @@ async function loadShoppingListsForRange(startIso, endIso) {
       <div class="week-block">
         <h3>Shopping Lists</h3>
         ${lists.map(l => `
-          <details class="list-dropdown">
+          <details class="list-dropdown" data-label="${escapeHtml(l.week_label || l.name)}">
             <summary>${escapeHtml(l.week_label || l.name)} &mdash; ${l.items.length} item${l.items.length === 1 ? '' : 's'}</summary>
-            <ul class="shopping-items">
-              ${l.items.map(i => `<li>${i.checked ? '&#x2611;' : '&#x2610;'} ${escapeHtml(i.display)}</li>`).join('')}
+            <ul class="shopping-items" data-list-id="${l.id}">
+              ${l.items.map(i => renderShoppingItemHtml(i)).join('')}
             </ul>
+            <div class="shopping-add-row">
+              <input type="text" class="add-item-input" data-list-id="${l.id}" placeholder="Add item...">
+              <button class="btn small" data-action="add-item" data-list-id="${l.id}">Add</button>
+            </div>
           </details>
         `).join('')}
       </div>
@@ -508,6 +735,84 @@ async function loadShoppingListsForRange(startIso, endIso) {
   } catch (err) {
     el.innerHTML = `<div class="week-block"><h3>Shopping Lists</h3><p style="color:var(--color-text-muted);">Couldn't load shopping lists.</p></div>`;
     showErrorBanner("Couldn't reach the server to load shopping lists. Check that it's running and try again.");
+  }
+}
+
+function renderShoppingItemHtml(item) {
+  return `
+    <li data-item-id="${item.id}">
+      <input type="checkbox" class="shopping-item-check" data-item-id="${item.id}" ${item.checked ? 'checked' : ''}>
+      <span class="shopping-item-text ${item.checked ? 'checked' : ''}">${escapeHtml(item.display)}</span>
+      <button class="shopping-item-del" data-action="delete-item" data-item-id="${item.id}" title="Remove item">&#x2716;</button>
+    </li>
+  `;
+}
+
+function updateListItemCount(listId) {
+  const ul = document.querySelector(`.shopping-items[data-list-id="${CSS.escape(listId)}"]`);
+  if (!ul) return;
+  const details = ul.closest('.list-dropdown');
+  const summary = details && details.querySelector('summary');
+  if (!summary) return;
+  const label = details.dataset.label || '';
+  const count = ul.children.length;
+  summary.textContent = `${label} — ${count} item${count === 1 ? '' : 's'}`;
+}
+
+async function addShoppingItem(listId, text) {
+  text = (text || '').trim();
+  if (!text) return;
+  try {
+    const res = await fetch('/api/shopping-item-add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ listId, text })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Failed to add item: ' + (data.error || res.status), 'error'); return; }
+    const ul = document.querySelector(`.shopping-items[data-list-id="${CSS.escape(listId)}"]`);
+    if (ul) {
+      ul.insertAdjacentHTML('beforeend', renderShoppingItemHtml(data));
+      updateListItemCount(listId);
+    }
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function deleteShoppingItem(itemId, liEl, listId) {
+  try {
+    const res = await fetch('/api/shopping-item-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showStatusModal('Failed to remove item: ' + (data.error || res.status), 'error');
+      return;
+    }
+    if (liEl) liEl.remove();
+    updateListItemCount(listId);
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function toggleShoppingItemChecked(itemId, checked, textEl) {
+  try {
+    const res = await fetch('/api/shopping-item-check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId, checked })
+    });
+    if (!res.ok) {
+      if (textEl) textEl.classList.toggle('checked', !checked);
+      const checkbox = document.querySelector(`.shopping-item-check[data-item-id="${CSS.escape(itemId)}"]`);
+      if (checkbox) checkbox.checked = !checked;
+    }
+  } catch (err) {
+    if (textEl) textEl.classList.toggle('checked', !checked);
   }
 }
 
@@ -522,7 +827,19 @@ function refreshShoppingPanel() {
   loadShoppingListsForRange(isoOf(gridStart), isoOf(gridEnd));
 }
 
+// ---------- Wiring ----------
+
 function wireDelegatedListeners() {
+  const root = document.getElementById('mealie-root');
+  root.addEventListener('click', (e) => {
+    const modeBtn = e.target.closest('#calendar-mode-toggle button');
+    if (modeBtn) return setCalendarMode(modeBtn.dataset.mode);
+    const viewLink = e.target.closest('[data-action="view-recipe"]');
+    if (viewLink) return openRecipeModal(viewLink.dataset.recipeId);
+    if (e.target.id === 'recipe-modal-close') return closeRecipeModal();
+    if (e.target.id === 'recipe-modal-overlay') return closeRecipeModal();
+  });
+
   const calendarContainer = document.getElementById('calendar-container');
   calendarContainer.addEventListener('click', (e) => {
     if (e.target.closest('[data-action="prev-month"]')) return changeMonth(-1);
@@ -572,28 +889,108 @@ function wireDelegatedListeners() {
   previewPanel.addEventListener('focusout', (e) => {
     if (e.target.classList.contains('recipe-combo')) onComboBlur(e.target.dataset.date);
   });
+
+  const weekMealsPanel = document.getElementById('week-meals-panel');
+  // "toggle" on <details> doesn't bubble, but a capturing listener still
+  // sees it on the way down to the target, so this works via delegation.
+  weekMealsPanel.addEventListener('toggle', (e) => {
+    const details = e.target;
+    if (!details.classList || !details.classList.contains('day-dropdown') || !details.open) return;
+    const body = details.querySelector('.day-dropdown-body');
+    if (!body || body.dataset.loaded === '1') return;
+    body.dataset.loaded = '1';
+    const recipeId = body.dataset.recipeId;
+    if (!recipeId) {
+      body.innerHTML = '<p class="meal-empty">No meal planned this day.</p>';
+      return;
+    }
+    loadRecipeDetailInto(body, recipeId);
+  }, true);
+  weekMealsPanel.addEventListener('change', (e) => {
+    if (e.target.id === 'week-select') {
+      selectedWeekStart = e.target.value;
+      loadWeekMeals();
+    }
+  });
+
+  const shoppingPanel = document.getElementById('shopping-list-panel');
+  shoppingPanel.addEventListener('click', (e) => {
+    const addBtn = e.target.closest('[data-action="add-item"]');
+    if (addBtn) {
+      const listId = addBtn.dataset.listId;
+      const input = shoppingPanel.querySelector(`.add-item-input[data-list-id="${CSS.escape(listId)}"]`);
+      if (input) {
+        addShoppingItem(listId, input.value);
+        input.value = '';
+      }
+      return;
+    }
+    const delBtn = e.target.closest('[data-action="delete-item"]');
+    if (delBtn) {
+      const li = delBtn.closest('li');
+      const listId = li.closest('.shopping-items').dataset.listId;
+      deleteShoppingItem(delBtn.dataset.itemId, li, listId);
+    }
+  });
+  shoppingPanel.addEventListener('keydown', (e) => {
+    if (e.target.classList.contains('add-item-input') && e.key === 'Enter') {
+      e.preventDefault();
+      const listId = e.target.dataset.listId;
+      addShoppingItem(listId, e.target.value);
+      e.target.value = '';
+    }
+  });
+  shoppingPanel.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('shopping-item-check')) return;
+    const itemId = e.target.dataset.itemId;
+    const checked = e.target.checked;
+    const textEl = e.target.parentElement.querySelector('.shopping-item-text');
+    if (textEl) textEl.classList.toggle('checked', checked);
+    toggleShoppingItemChecked(itemId, checked, textEl);
+  });
 }
 
 registerApp('mealie', {
   title: '&#x1F374; Mealie',
   bodyHtml: `
-    <div id="conn-error-banner" class="error-banner"></div>
-    <div class="week-block">
-      <div id="calendar-container"><div class="cal-loading">Loading calendar...</div></div>
+    <div id="mealie-root">
+      <div id="conn-error-banner" class="error-banner"></div>
+
+      <div id="meal-of-day-panel"></div>
+
+      <div class="week-block">
+        <div class="mode-toggle" id="calendar-mode-toggle"></div>
+        <div id="calendar-container" style="margin-top:12px;"><div class="cal-loading">Loading calendar...</div></div>
+        <div id="view-day-detail"></div>
+      </div>
+      <div id="action-panel"></div>
+      <div id="preview-panel"></div>
+
+      <div id="week-meals-panel"></div>
+
+      <div id="shopping-list-panel"></div>
+
+      <div class="recipe-modal-overlay" id="recipe-modal-overlay">
+        <div class="recipe-modal">
+          <button class="recipe-modal-close" id="recipe-modal-close">&#x2716;</button>
+          <div id="recipe-modal-body"></div>
+        </div>
+      </div>
+
+      <a class="goto-btn" href="http://${HOST_IP}:9000" target="_blank">Open Mealie &rarr;</a>
     </div>
-    <div id="action-panel"></div>
-    <div id="preview-panel"></div>
-    <div id="shopping-list-panel"></div>
-    <a class="goto-btn" href="http://${HOST_IP}:9000" target="_blank">Open Mealie &rarr;</a>
   `,
   onRender: () => {
     wireDelegatedListeners();
     calendarMonth = new Date();
     weekSelection = null;
     previewPicks = null;
+    viewSelectedIso = null;
+    renderModeToggle();
+    renderMealOfDay();
     loadRecipes();
     loadMonthMealplan();
     renderActionPanel();
-    refreshShoppingPanel();
+    loadAvailableWeeks();
   },
 });
