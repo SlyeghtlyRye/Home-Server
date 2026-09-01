@@ -242,7 +242,7 @@ function startModePanelResize(e) {
   const startHeight = inner.getBoundingClientRect().height;
   const minWidth = 320;
   const maxWidth = window.innerWidth - 32; // matches #mode-panel's CSS width cap: calc(100% - 32px)
-  const minHeight = 120;
+  const minHeight = 160; // matches .mode-panel-inner's CSS min-height -- lower would be a no-op dead zone
   const maxHeight = window.innerHeight * 0.7; // matches .mode-panel-inner's CSS max-height: 70vh
 
   function onMove(ev) {
