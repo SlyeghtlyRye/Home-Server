@@ -29,6 +29,17 @@ let editPick = null;
 let modePanelHeight = parseInt(localStorage.getItem('mealie_modePanelHeight'), 10) || null;
 let modePanelWidth = parseInt(localStorage.getItem('mealie_modePanelWidth'), 10) || null;
 
+// Clicking the mode badge inside the panel reveals the same Plan/View/Edit
+// buttons as the toggle above the calendar, so modes can be switched
+// without leaving the panel.
+let modePanelShowModeSwitcher = false;
+
+// View mode's "View details" link expands the recipe (ingredients/steps)
+// inline in the same panel instead of opening the separate recipe modal --
+// null = not shown, 'loading' while fetching, an error marker, or the
+// fetched detail object.
+let viewInlineRecipeState = null;
+
 let availableWeeks = [];
 let selectedWeekStart = null;
 let weekMealsData = null;
@@ -111,8 +122,10 @@ function setCalendarMode(mode) {
   previewPicks = null;
   previewConflicts = [];
   viewSelectedIso = null;
+  viewInlineRecipeState = null;
   editSelectedIso = null;
   editPick = null;
+  modePanelShowModeSwitcher = false;
   renderModeToggle();
   renderCalendar();
   renderModePanel();
@@ -204,13 +217,23 @@ function renderModePanel() {
   if (!visible) {
     el.classList.remove('show');
     el.innerHTML = '';
+    modePanelShowModeSwitcher = false;
     return;
   }
+
+  const badgeHtml = modePanelShowModeSwitcher
+    ? `
+      <div class="mode-toggle mode-panel-mode-switch">
+        <button data-mode="plan" class="${calendarMode === 'plan' ? 'active' : ''}">Plan</button>
+        <button data-mode="view" class="${calendarMode === 'view' ? 'active' : ''}">View</button>
+        <button data-mode="edit" class="${calendarMode === 'edit' ? 'active' : ''}">Edit</button>
+      </div>`
+    : `<div class="mode-panel-badge mode-${calendarMode}" data-action="toggle-mode-switcher" title="Click to switch mode"><span class="mode-panel-dot"></span>${calendarMode} mode</div>`;
 
   el.innerHTML = `
     <div class="mode-panel-inner" ${modePanelHeight ? `style="height:${modePanelHeight}px;"` : ''}>
       <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-curve"></span></div>
-      <div class="mode-panel-badge mode-${calendarMode}"><span class="mode-panel-dot"></span>${calendarMode} mode</div>
+      ${badgeHtml}
       <div class="mode-panel-body">${contentHtml}</div>
       <button class="vdf-close" data-action="close-mode-panel" title="Close">&#x2716;</button>
     </div>`;
@@ -279,17 +302,39 @@ function startModePanelResize(e) {
 
 function viewDayDetailBodyHtml() {
   const meal = plannedMap[viewSelectedIso];
+  if (!meal) {
+    return `<div class="vd-date">${viewSelectedIso}</div><div class="meal-empty">No meal planned this day.</div>`;
+  }
+  let detailHtml = '';
+  if (viewInlineRecipeState === 'loading') {
+    detailHtml = '<div class="recipe-loading">Loading recipe...</div>';
+  } else if (viewInlineRecipeState === 'error') {
+    detailHtml = '<p class="meal-empty">Couldn\'t load recipe details.</p>';
+  } else if (viewInlineRecipeState) {
+    detailHtml = renderRecipeDetailHtml(viewInlineRecipeState);
+  }
   return `
     <div class="vd-date">${viewSelectedIso}</div>
-    ${meal
-      ? `<div class="vd-meal">${escapeHtml(meal.name)}</div>
-         ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}`
-      : `<div class="meal-empty">No meal planned this day.</div>`}
+    <div class="vd-meal">${escapeHtml(meal.name)}</div>
+    ${meal.id && !viewInlineRecipeState ? `<span class="meal-link" data-action="view-recipe-inline" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}
+    ${detailHtml}
   `;
+}
+
+async function showViewRecipeDetailInline(recipeId) {
+  viewInlineRecipeState = 'loading';
+  renderModePanel();
+  try {
+    viewInlineRecipeState = await fetchRecipeDetail(recipeId);
+  } catch (err) {
+    viewInlineRecipeState = 'error';
+  }
+  renderModePanel();
 }
 
 function closeViewDayDetail() {
   viewSelectedIso = null;
+  viewInlineRecipeState = null;
   renderCalendar();
   renderModePanel();
 }
@@ -481,8 +526,10 @@ async function saveEditPick() {
 }
 
 function onDayClick(iso) {
+  modePanelShowModeSwitcher = false;
   if (calendarMode === 'view') {
     viewSelectedIso = (viewSelectedIso === iso) ? null : iso;
+    viewInlineRecipeState = null;
     renderCalendar();
     renderModePanel();
     return;
@@ -1260,11 +1307,17 @@ function wireDelegatedListeners() {
     if (e.target.id === 'avoid-repeats-check') toggleAvoidRepeats(e.target.checked);
   });
   modePanel.addEventListener('click', (e) => {
+    const modeSwitchBtn = e.target.closest('.mode-panel-mode-switch button');
+    if (modeSwitchBtn) return setCalendarMode(modeSwitchBtn.dataset.mode);
+
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const date = btn.dataset.date;
     switch (btn.dataset.action) {
       case 'close-mode-panel': return closeModePanel();
+      case 'toggle-mode-switcher':
+        modePanelShowModeSwitcher = !modePanelShowModeSwitcher;
+        return renderModePanel();
       case 'exclude-fridays': return excludeAllFridays();
       case 'plan-selected': return planSelected();
       case 'clear-selected-days': return clearSelectedDays();
@@ -1278,6 +1331,7 @@ function wireDelegatedListeners() {
       case 'edit-save': return saveEditPick();
       case 'edit-cancel': return closeEditPanel();
       case 'edit-swap': return doEditSwap();
+      case 'view-recipe-inline': return showViewRecipeDetailInline(btn.dataset.recipeId);
     }
   });
   modePanel.addEventListener('focusin', (e) => {
