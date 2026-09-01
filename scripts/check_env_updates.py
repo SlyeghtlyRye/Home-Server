@@ -4,8 +4,13 @@ prompts for any new keys that don't exist yet. Run by update.sh after a
 git pull, so a future update that adds a new required setting doesn't
 silently crash the backend on an existing install -- it prompts once for
 just the new value instead.
+
+Exit code doubles as a signal to update.sh: 2 means new keys were added
+(a hint that could matter for the container restart plan, since
+docker-compose interpolates .env at "up" time), 0 means nothing changed.
 """
 import os
+import sys
 
 ROOT = "/root"
 ENV_FILE = os.path.join(ROOT, ".env")
@@ -34,7 +39,7 @@ def main():
 
     if not missing_keys:
         print("No new config values needed.")
-        return
+        return False
 
     print(f"{len(missing_keys)} new config value(s) needed since your last update:")
     new_lines = []
@@ -49,7 +54,8 @@ def main():
         f.write("\n" + "\n".join(new_lines) + "\n")
 
     print(f"Added {len(missing_keys)} new value(s) to .env.")
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(2 if main() else 0)

@@ -41,8 +41,10 @@ destructive a real reset is, staying conservative here is deliberate.
 
 ## Software updates (`scripts/updater.py`)
 
-Same shared-logic pattern as reset: one module both a CLI flow and the
-dashboard call, so they can't drift apart.
+Same shared-logic pattern as reset: `update.sh` (CLI) and the dashboard
+both drive their restart decision from the same `_classify_restart()` in
+`updater.py`, so the two can't recommend different things for the same
+diff -- they just act on that recommendation differently (see below).
 
 - **Check for Update** (`/api/check-update`, GET) -- fetches from the git
   remote, reports whether the local commit differs and what changed.
@@ -52,8 +54,8 @@ dashboard call, so they can't drift apart.
   otherwise does a fast-forward-only `git pull`, backfills any new `.env`
   keys with sensible defaults from `.env.example` (non-interactively,
   since a web request can't wait on terminal input), regenerates the docs
-  index and architecture map, then **restarts services automatically in
-  the background** -- no SSH needed.
+  index and architecture map, then **restarts only what the pulled diff
+  actually touched, automatically, in the background** -- no SSH needed.
 
 **How the automatic restart avoids the same self-referential problem as
 Factory Reset:** it doesn't restart synchronously inside the request.
@@ -64,6 +66,46 @@ restart actually runs, the request that triggered it is long finished, so
 there's no connection to drop mid-restart. This is a more capable, but
 also more carefully engineered, version of the same idea Factory Reset
 deliberately avoided -- worth understanding both before changing either.
+
+**Restarts are scoped to the diff, not blanket.** `_classify_restart()`
+looks at which files changed between the old and new commit (plus whether
+any new `.env` key got backfilled) and decides the minimum needed:
+
+| Changed paths | What restarts |
+|---|---|
+| `dashboard.html`, `js/`, `docs/` only | Nothing -- nginx bind-mounts these straight off disk, live on next browser refresh |
+| `scripts/`, `audiobooks/` | `mealie-trigger.service` only (never Docker -- the containers run pinned images, not this repo's code) |
+| `nginx.conf`, `nginx/templates/` | Just the `nginx` container recreated |
+| `docker-compose.yml`, a new `.env` key, or any path not listed above | Everything -- all containers force-recreated plus the trigger service, same as before this existed |
+
+That last row is a deliberate fallback, not a gap: an unrecognized path
+(a new top-level file, a renamed directory, etc.) can't be reasoned about
+safely, so it degrades to the old always-restart-everything behavior
+rather than guessing wrong and skipping a needed restart. This means the
+scoped version can only ever be as safe as the blanket restart it
+replaces, never less -- see `updater.py`'s module docstring for the exact
+classification rules.
+
+**The CLI (`update.sh`) shows the same plan and lets you override it,
+instead of just running it.** After pulling, it runs
+`python3 scripts/updater.py plan <local> <remote> [--env-added]`, a small
+CLI entrypoint that calls the exact same `_classify_restart()` the
+dashboard uses and prints the result as `NAME=0/1` lines that get
+`eval`'d straight into bash variables -- no separate bash reimplementation
+of the classification rules to drift out of sync. It then prints the
+recommended plan and prompts:
+- **accept** (default) -- runs exactly the recommended plan.
+- **customize** -- lets you type any space-separated subset of
+  `pihole kanboard nginx mealie` to recreate (or `all`), plus a separate
+  yes/no for `mealie-trigger.service`, overriding the recommendation
+  entirely.
+- **skip** -- pulls the code but restarts nothing.
+
+This is a deliberately different tradeoff from the dashboard's fully
+automatic background restart: the CLI is already an interactive terminal
+session (unlike a fire-and-forget HTTP request), so it's a better fit to
+show the person the recommendation and let them decide, rather than just
+acting on it unattended.
 
 ## Extending this feature
 
