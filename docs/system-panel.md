@@ -73,9 +73,9 @@ any new `.env` key got backfilled) and decides the minimum needed:
 
 | Changed paths | What restarts |
 |---|---|
-| `dashboard.html`, `js/`, `docs/` only | Nothing -- nginx bind-mounts these straight off disk, live on next browser refresh |
+| `js/`, `docs/` only | Nothing -- both are DIRECTORY bind mounts, so nginx resolves files inside them fresh on every request, live on next browser refresh |
 | `scripts/`, `audiobooks/` | `mealie-trigger.service` only (never Docker -- the containers run pinned images, not this repo's code) |
-| `nginx.conf`, `nginx/templates/` | Just the `nginx` container recreated |
+| `nginx.conf`, `nginx/templates/`, `dashboard.html` | Just the `nginx` container recreated |
 | `docker-compose.yml`, a new `.env` key, or any path not listed above | Everything -- all containers force-recreated plus the trigger service, same as before this existed |
 
 That last row is a deliberate fallback, not a gap: an unrecognized path
@@ -85,6 +85,21 @@ rather than guessing wrong and skipping a needed restart. This means the
 scoped version can only ever be as safe as the blanket restart it
 replaces, never less -- see `updater.py`'s module docstring for the exact
 classification rules.
+
+**`dashboard.html` is grouped with nginx.conf, not with js/docs, and this
+was learned the hard way.** It's mounted as a *single-file* bind mount
+(`./dashboard.html:/usr/share/nginx/html/index.html:ro`) rather than a
+directory mount like `js/` and `docs/`. In production (2026-09-02),
+`dashboard.html` on disk had a real change, but nginx's running container
+kept serving the old version indefinitely -- `docker exec nginx grep ...`
+on the file inside the container showed 0 matches for content confirmed
+present on disk, and only recreating the container (`docker compose up -d
+--force-recreate nginx`) fixed it. Single-file bind mounts can go stale
+this way when the host file is replaced rather than edited in place;
+directory mounts don't have this failure mode. If `dashboard.html` is ever
+restructured to live inside a mounted directory instead of being mounted
+as an individual file, this special-casing in `_classify_restart()` should
+be revisited -- it would become safe to treat like js/docs again.
 
 **The CLI (`update.sh`) shows the same plan and lets you override it,
 instead of just running it.** After pulling, it runs

@@ -9,10 +9,17 @@ a request being served BY nginx is fragile (the connection would likely
 drop mid-restart). Instead it diffs the pulled commit range and schedules
 only the restart(s) that diff actually requires, fully detached in the
 background:
-  - static files (dashboard.html, js/, docs/) need nothing -- nginx serves
-    them straight off disk via bind mount, live on next browser refresh.
+  - js/ or docs/ changes need nothing -- both are DIRECTORY bind mounts,
+    so nginx resolves files inside them fresh on every request, live on
+    next browser refresh.
   - scripts/ or audiobooks/ changes restart mealie-trigger.service only.
-  - nginx.conf / nginx/templates changes recreate just the nginx container.
+  - nginx.conf, nginx/templates, or dashboard.html changes recreate just
+    the nginx container. dashboard.html is grouped with the nginx.conf
+    case (not treated as "static" like js/docs) because it's a SINGLE-FILE
+    bind mount, which can go stale when the host file is replaced rather
+    than edited in place -- confirmed in production, where nginx kept
+    serving an old dashboard.html indefinitely until its container was
+    recreated. Directory mounts don't have this failure mode; this one did.
   - docker-compose.yml changes (or anything unrecognized) fall back to
     recreating every container plus the trigger service, same as before
     this file could tell the difference.
@@ -111,10 +118,10 @@ def _auto_fill_new_env_values(log_lines):
     return True
 
 
-# Path prefixes/exact names that nginx serves straight off disk via bind
-# mount (see docker-compose.yml) -- these need no restart at all, the
-# change is live on the next browser refresh.
-_STATIC_FILES = {"dashboard.html"}
+# js/ and docs/ are DIRECTORY bind mounts (see docker-compose.yml) -- nginx
+# resolves paths inside them fresh on every request, so a changed file here
+# needs no restart at all, live on the next browser refresh.
+_STATIC_FILES = set()
 _STATIC_PREFIXES = ("js/", "docs/")
 
 # Anything trigger_server.py imports, directly or transitively, lives under
@@ -123,10 +130,17 @@ _STATIC_PREFIXES = ("js/", "docs/")
 # images, not code from this repo).
 _BACKEND_PREFIXES = ("scripts/", "audiobooks/")
 
-# nginx.conf and nginx/templates/* are bind-mounted into the nginx container
-# read-only -- it doesn't hot-reload them, so only that one container needs
-# recreating, not the other three.
-_NGINX_FILES = {"nginx.conf"}
+# nginx.conf, nginx/templates/*, AND dashboard.html all need the nginx
+# container recreated, not just a live refresh. nginx.conf/templates don't
+# hot-reload. dashboard.html is the odd one out: unlike js/docs it's a
+# SINGLE-FILE bind mount (./dashboard.html:.../index.html:ro), which can go
+# stale when the host file is replaced rather than edited in place --
+# confirmed in production (2026-09-02): dashboard.html on disk had a change
+# nginx's container never picked up, serving a stale copy indefinitely until
+# the container was recreated. Treating it as "static, no restart" (the
+# original assumption here) was wrong -- only directory mounts are safe to
+# skip a restart for.
+_NGINX_FILES = {"nginx.conf", "dashboard.html"}
 _NGINX_PREFIXES = ("nginx/",)
 
 # docker-compose.yml itself can change any service's image/env/ports, so a
