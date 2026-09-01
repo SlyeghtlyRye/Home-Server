@@ -43,22 +43,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _check_key(self, params):
         return params.get("key", [None])[0] == SECRET
 
-    def _fetch_list_detail(self, list_id):
+    def _fetch_list_detail(self, list_id, recipe_name_map):
         resp = mwp.requests.get(
             f"{mwp.MEALIE_URL}/api/households/shopping/lists/{list_id}",
             headers=mwp.get_headers(),
         )
         resp.raise_for_status()
         data = resp.json()
-        items = [
-            {
+        items = []
+        for it in data.get("listItems", []):
+            recipe_ids = []
+            for ref in (it.get("recipeReferences") or []):
+                rid = ref.get("recipeId")
+                if rid and rid not in recipe_ids:
+                    recipe_ids.append(rid)
+            items.append({
                 "id": it.get("id"),
                 "display": it.get("display") or it.get("note") or (it.get("food", {}).get("name") if isinstance(it.get("food"), dict) else None) or "(item)",
                 "checked": it.get("checked", False),
-            }
-            for it in data.get("listItems", [])
-        ]
-        return {"id": list_id, "name": data.get("name"), "items": items}
+                "recipeIds": recipe_ids,
+            })
+
+        # Group items by the meal(s) they came from, so the dashboard can default
+        # to a "by meal" shopping view. An item merged across multiple recipes
+        # (same ingredient needed by two meals) appears in every relevant group;
+        # items with no recipe reference (freeform additions) fall into "other".
+        groups_by_id = {}
+        other_items = []
+        for it in items:
+            if not it["recipeIds"]:
+                other_items.append(it)
+                continue
+            for rid in it["recipeIds"]:
+                group = groups_by_id.setdefault(rid, {
+                    "recipeId": rid,
+                    "recipeName": recipe_name_map.get(rid, "(unknown recipe)"),
+                    "items": [],
+                })
+                group["items"].append(it)
+        groups = sorted(groups_by_id.values(), key=lambda g: g["recipeName"].lower())
+
+        return {"id": list_id, "name": data.get("name"), "items": items, "groups": groups, "otherItems": other_items}
 
     def do_GET(self):
         global current_process
@@ -289,12 +314,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     while d <= end:
                         sundays.append(d)
                         d += timedelta(days=7)
+                    recipe_name_map = {r[0]: r[1] for r in mwp.get_recipe_ids()}
                     results = []
                     for sunday in sundays:
                         name = mwp.list_name_for(sunday)
                         list_id = mwp.find_shopping_list(name)
                         if list_id:
-                            detail = self._fetch_list_detail(list_id)
+                            detail = self._fetch_list_detail(list_id, recipe_name_map)
                             wk_end = sunday + timedelta(days=6)
                             detail["week_label"] = f"{sunday.isoformat()} to {wk_end.isoformat()}"
                             results.append(detail)

@@ -161,16 +161,28 @@ function renderCalendar() {
 function renderViewDayDetail() {
   const el = document.getElementById('view-day-detail');
   if (!el) return;
-  if (calendarMode !== 'view' || !viewSelectedIso) { el.innerHTML = ''; return; }
+  if (calendarMode !== 'view' || !viewSelectedIso) {
+    el.classList.remove('show');
+    el.innerHTML = '';
+    return;
+  }
   const meal = plannedMap[viewSelectedIso];
   el.innerHTML = `
-    <div class="view-day-detail">
+    <div class="view-day-detail-inner">
+      <button class="vdf-close" data-action="close-view-detail" title="Close">&#x2716;</button>
       <div class="vd-date">${viewSelectedIso}</div>
       ${meal
         ? `<div class="vd-meal">${escapeHtml(meal.name)}</div>
            ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}`
         : `<div class="meal-empty">No meal planned this day.</div>`}
     </div>`;
+  el.classList.add('show');
+}
+
+function closeViewDayDetail() {
+  viewSelectedIso = null;
+  renderCalendar();
+  renderViewDayDetail();
 }
 
 // ---------- Edit mode (single-day change / swap, in a modal) ----------
@@ -828,13 +840,10 @@ function renderWeekMealsPanel(err, loading) {
     body = '<p style="color:var(--color-text-muted);">No weeks available yet.</p>';
   } else {
     body = weekMealsData.map(day => `
-      <details class="day-dropdown">
-        <summary>
-          <span class="dd-date">${formatDayLabel(day.date)}</span>
-          <span class="dd-meal ${day.recipeName ? '' : 'dd-empty'}">${day.recipeName ? escapeHtml(day.recipeName) : 'No meal planned'}</span>
-        </summary>
-        <div class="day-dropdown-body" data-recipe-id="${day.recipeId || ''}" data-loaded="0"></div>
-      </details>
+      <div class="day-row ${day.recipeId ? 'clickable' : ''}" ${day.recipeId ? `data-action="view-recipe" data-recipe-id="${day.recipeId}"` : ''}>
+        <span class="dd-date">${formatDayLabel(day.date)}</span>
+        <span class="dd-meal ${day.recipeName ? '' : 'dd-empty'}">${day.recipeName ? escapeHtml(day.recipeName) : 'No meal planned'}</span>
+      </div>
     `).join('');
   }
 
@@ -877,16 +886,6 @@ function renderRecipeDetailHtml(detail) {
   `;
 }
 
-async function loadRecipeDetailInto(container, recipeId) {
-  container.innerHTML = '<div class="recipe-loading">Loading recipe...</div>';
-  try {
-    const detail = await fetchRecipeDetail(recipeId);
-    container.innerHTML = renderRecipeDetailHtml(detail);
-  } catch (err) {
-    container.innerHTML = '<p class="meal-empty">Couldn\'t load recipe details.</p>';
-  }
-}
-
 // ---------- Recipe detail modal ----------
 
 async function openRecipeModal(recipeId) {
@@ -908,6 +907,11 @@ function closeRecipeModal() {
 
 // ---------- Shopping list ----------
 
+const SHOPPING_FILTER_MODES = ['meal', 'all'];
+let shoppingFilterMode = SHOPPING_FILTER_MODES.includes(localStorage.getItem('mealie_shoppingFilterMode'))
+  ? localStorage.getItem('mealie_shoppingFilterMode') : 'meal';
+let shoppingListsCache = [];
+
 async function loadShoppingListsForRange(startIso, endIso) {
   const el = document.getElementById('shopping-list-panel');
   el.innerHTML = '<div class="week-block"><h3>Shopping Lists</h3><p>Loading...</p></div>';
@@ -915,33 +919,85 @@ async function loadShoppingListsForRange(startIso, endIso) {
     const res = await fetch(`/data/shopping-lists-for-range?start=${startIso}&end=${endIso}`);
     if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
-    const lists = data.lists || [];
+    shoppingListsCache = data.lists || [];
     clearErrorBanner();
-    if (lists.length === 0) {
-      el.innerHTML = '<div class="week-block"><h3>Shopping Lists</h3><p style="color:var(--color-text-muted);">No shopping lists for this range.</p></div>';
-      return;
-    }
-    el.innerHTML = `
-      <div class="week-block">
-        <h3>Shopping Lists</h3>
-        ${lists.map(l => `
-          <details class="list-dropdown" data-label="${escapeHtml(l.week_label || l.name)}">
-            <summary>${escapeHtml(l.week_label || l.name)} &mdash; ${l.items.length} item${l.items.length === 1 ? '' : 's'}</summary>
-            <ul class="shopping-items" data-list-id="${l.id}">
-              ${l.items.map(i => renderShoppingItemHtml(i)).join('')}
-            </ul>
-            <div class="shopping-add-row">
-              <input type="text" class="add-item-input" data-list-id="${l.id}" placeholder="Add item...">
-              <button class="btn small" data-action="add-item" data-list-id="${l.id}">Add</button>
-            </div>
-          </details>
-        `).join('')}
-      </div>
-    `;
+    renderShoppingListsPanel();
   } catch (err) {
     el.innerHTML = `<div class="week-block"><h3>Shopping Lists</h3><p style="color:var(--color-text-muted);">Couldn't load shopping lists.</p></div>`;
     showErrorBanner("Couldn't reach the server to load shopping lists. Check that it's running and try again.");
   }
+}
+
+function renderShoppingFilterToggleHtml() {
+  return `
+    <div class="mode-toggle" id="shopping-filter-toggle">
+      <button data-filter="meal" class="${shoppingFilterMode === 'meal' ? 'active' : ''}">By Meal</button>
+      <button data-filter="all" class="${shoppingFilterMode === 'all' ? 'active' : ''}">All Items</button>
+    </div>
+  `;
+}
+
+function renderShoppingListsPanel() {
+  const el = document.getElementById('shopping-list-panel');
+  const lists = shoppingListsCache;
+  if (lists.length === 0) {
+    el.innerHTML = `
+      <div class="week-block">
+        <div class="shopping-panel-header"><h3>Shopping Lists</h3>${renderShoppingFilterToggleHtml()}</div>
+        <p style="color:var(--color-text-muted);">No shopping lists for this range.</p>
+      </div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="week-block">
+      <div class="shopping-panel-header"><h3>Shopping Lists</h3>${renderShoppingFilterToggleHtml()}</div>
+      ${lists.map(l => renderShoppingListDetailsHtml(l)).join('')}
+    </div>
+  `;
+}
+
+function renderShoppingListDetailsHtml(l) {
+  const body = shoppingFilterMode === 'meal'
+    ? renderGroupedItemsHtml(l)
+    : `<ul class="shopping-items" data-list-id="${l.id}">${l.items.map(i => renderShoppingItemHtml(i)).join('')}</ul>`;
+  return `
+    <details class="list-dropdown" data-label="${escapeHtml(l.week_label || l.name)}" data-list-id="${l.id}">
+      <summary>${escapeHtml(l.week_label || l.name)} &mdash; ${l.items.length} item${l.items.length === 1 ? '' : 's'}</summary>
+      ${body}
+      <div class="shopping-add-row">
+        <input type="text" class="add-item-input" data-list-id="${l.id}" placeholder="Add item...">
+        <button class="btn small" data-action="add-item" data-list-id="${l.id}">Add</button>
+      </div>
+    </details>
+  `;
+}
+
+function renderGroupedItemsHtml(l) {
+  const groups = l.groups || [];
+  const otherItems = l.otherItems || [];
+  const groupsHtml = groups.map(g => `
+    <div class="shopping-group" data-group="${g.recipeId}">
+      <h4 class="shopping-group-title">${escapeHtml(g.recipeName)}</h4>
+      <ul class="shopping-items" data-list-id="${l.id}">${g.items.map(i => renderShoppingItemHtml(i)).join('')}</ul>
+    </div>
+  `).join('');
+  const otherHtml = otherItems.length > 0 ? `
+    <div class="shopping-group" data-group="other">
+      <h4 class="shopping-group-title">Other</h4>
+      <ul class="shopping-items" data-list-id="${l.id}">${otherItems.map(i => renderShoppingItemHtml(i)).join('')}</ul>
+    </div>
+  ` : '';
+  if (!groupsHtml && !otherHtml) {
+    return '<p style="color:var(--color-text-muted); font-size:13px;">No items yet.</p>';
+  }
+  return groupsHtml + otherHtml;
+}
+
+function setShoppingFilterMode(mode) {
+  if (mode === shoppingFilterMode) return;
+  shoppingFilterMode = mode;
+  localStorage.setItem('mealie_shoppingFilterMode', mode);
+  renderShoppingListsPanel();
 }
 
 function renderShoppingItemHtml(item) {
@@ -955,14 +1011,39 @@ function renderShoppingItemHtml(item) {
 }
 
 function updateListItemCount(listId) {
-  const ul = document.querySelector(`.shopping-items[data-list-id="${CSS.escape(listId)}"]`);
-  if (!ul) return;
-  const details = ul.closest('.list-dropdown');
-  const summary = details && details.querySelector('summary');
+  const details = document.querySelector(`.list-dropdown[data-list-id="${CSS.escape(listId)}"]`);
+  if (!details) return;
+  const summary = details.querySelector('summary');
   if (!summary) return;
   const label = details.dataset.label || '';
-  const count = ul.children.length;
+  const uniqueIds = new Set();
+  details.querySelectorAll('.shopping-items li[data-item-id]').forEach(li => uniqueIds.add(li.dataset.itemId));
+  const count = uniqueIds.size;
   summary.textContent = `${label} — ${count} item${count === 1 ? '' : 's'}`;
+}
+
+function appendItemToList(listId, itemData) {
+  const details = document.querySelector(`.list-dropdown[data-list-id="${CSS.escape(listId)}"]`);
+  if (!details) return;
+  let ul;
+  if (shoppingFilterMode === 'meal') {
+    let group = details.querySelector('.shopping-group[data-group="other"]');
+    if (!group) {
+      const addRow = details.querySelector('.shopping-add-row');
+      addRow.insertAdjacentHTML('beforebegin', `
+        <div class="shopping-group" data-group="other">
+          <h4 class="shopping-group-title">Other</h4>
+          <ul class="shopping-items" data-list-id="${listId}"></ul>
+        </div>
+      `);
+      group = details.querySelector('.shopping-group[data-group="other"]');
+    }
+    ul = group.querySelector('.shopping-items');
+  } else {
+    ul = details.querySelector('.shopping-items');
+  }
+  if (ul) ul.insertAdjacentHTML('beforeend', renderShoppingItemHtml(itemData));
+  updateListItemCount(listId);
 }
 
 async function addShoppingItem(listId, text) {
@@ -976,17 +1057,13 @@ async function addShoppingItem(listId, text) {
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal('Failed to add item: ' + (data.error || res.status), 'error'); return; }
-    const ul = document.querySelector(`.shopping-items[data-list-id="${CSS.escape(listId)}"]`);
-    if (ul) {
-      ul.insertAdjacentHTML('beforeend', renderShoppingItemHtml(data));
-      updateListItemCount(listId);
-    }
+    appendItemToList(listId, data);
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
 
-async function deleteShoppingItem(itemId, liEl, listId) {
+async function deleteShoppingItem(itemId, listId) {
   try {
     const res = await fetch('/api/shopping-item-delete', {
       method: 'POST',
@@ -998,14 +1075,14 @@ async function deleteShoppingItem(itemId, liEl, listId) {
       showStatusModal('Failed to remove item: ' + (data.error || res.status), 'error');
       return;
     }
-    if (liEl) liEl.remove();
+    document.querySelectorAll(`li[data-item-id="${CSS.escape(itemId)}"]`).forEach(li => li.remove());
     updateListItemCount(listId);
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
 
-async function toggleShoppingItemChecked(itemId, checked, textEl) {
+async function toggleShoppingItemChecked(itemId, checked) {
   try {
     const res = await fetch('/api/shopping-item-check', {
       method: 'POST',
@@ -1013,12 +1090,20 @@ async function toggleShoppingItemChecked(itemId, checked, textEl) {
       body: JSON.stringify({ itemId, checked })
     });
     if (!res.ok) {
-      if (textEl) textEl.classList.toggle('checked', !checked);
-      const checkbox = document.querySelector(`.shopping-item-check[data-item-id="${CSS.escape(itemId)}"]`);
-      if (checkbox) checkbox.checked = !checked;
+      document.querySelectorAll(`li[data-item-id="${CSS.escape(itemId)}"]`).forEach(li => {
+        const checkbox = li.querySelector('.shopping-item-check');
+        const textEl = li.querySelector('.shopping-item-text');
+        if (checkbox) checkbox.checked = !checked;
+        if (textEl) textEl.classList.toggle('checked', !checked);
+      });
     }
   } catch (err) {
-    if (textEl) textEl.classList.toggle('checked', !checked);
+    document.querySelectorAll(`li[data-item-id="${CSS.escape(itemId)}"]`).forEach(li => {
+      const checkbox = li.querySelector('.shopping-item-check');
+      const textEl = li.querySelector('.shopping-item-text');
+      if (checkbox) checkbox.checked = !checked;
+      if (textEl) textEl.classList.toggle('checked', !checked);
+    });
   }
 }
 
@@ -1042,6 +1127,7 @@ function wireDelegatedListeners() {
     if (modeBtn) return setCalendarMode(modeBtn.dataset.mode);
     const viewLink = e.target.closest('[data-action="view-recipe"]');
     if (viewLink) return openRecipeModal(viewLink.dataset.recipeId);
+    if (e.target.closest('[data-action="close-view-detail"]')) return closeViewDayDetail();
     if (e.target.id === 'recipe-modal-close') return closeRecipeModal();
     if (e.target.id === 'recipe-modal-overlay') return closeRecipeModal();
     if (e.target.id === 'edit-modal-close') return closeEditModal();
@@ -1124,21 +1210,6 @@ function wireDelegatedListeners() {
   });
 
   const weekMealsPanel = document.getElementById('week-meals-panel');
-  // "toggle" on <details> doesn't bubble, but a capturing listener still
-  // sees it on the way down to the target, so this works via delegation.
-  weekMealsPanel.addEventListener('toggle', (e) => {
-    const details = e.target;
-    if (!details.classList || !details.classList.contains('day-dropdown') || !details.open) return;
-    const body = details.querySelector('.day-dropdown-body');
-    if (!body || body.dataset.loaded === '1') return;
-    body.dataset.loaded = '1';
-    const recipeId = body.dataset.recipeId;
-    if (!recipeId) {
-      body.innerHTML = '<p class="meal-empty">No meal planned this day.</p>';
-      return;
-    }
-    loadRecipeDetailInto(body, recipeId);
-  }, true);
   weekMealsPanel.addEventListener('change', (e) => {
     if (e.target.id === 'week-select') {
       selectedWeekStart = e.target.value;
@@ -1148,6 +1219,8 @@ function wireDelegatedListeners() {
 
   const shoppingPanel = document.getElementById('shopping-list-panel');
   shoppingPanel.addEventListener('click', (e) => {
+    const filterBtn = e.target.closest('#shopping-filter-toggle button');
+    if (filterBtn) return setShoppingFilterMode(filterBtn.dataset.filter);
     const addBtn = e.target.closest('[data-action="add-item"]');
     if (addBtn) {
       const listId = addBtn.dataset.listId;
@@ -1162,7 +1235,7 @@ function wireDelegatedListeners() {
     if (delBtn) {
       const li = delBtn.closest('li');
       const listId = li.closest('.shopping-items').dataset.listId;
-      deleteShoppingItem(delBtn.dataset.itemId, li, listId);
+      deleteShoppingItem(delBtn.dataset.itemId, listId);
     }
   });
   shoppingPanel.addEventListener('keydown', (e) => {
@@ -1177,9 +1250,13 @@ function wireDelegatedListeners() {
     if (!e.target.classList.contains('shopping-item-check')) return;
     const itemId = e.target.dataset.itemId;
     const checked = e.target.checked;
-    const textEl = e.target.parentElement.querySelector('.shopping-item-text');
-    if (textEl) textEl.classList.toggle('checked', checked);
-    toggleShoppingItemChecked(itemId, checked, textEl);
+    document.querySelectorAll(`li[data-item-id="${CSS.escape(itemId)}"]`).forEach(li => {
+      const checkbox = li.querySelector('.shopping-item-check');
+      const textEl = li.querySelector('.shopping-item-text');
+      if (checkbox) checkbox.checked = checked;
+      if (textEl) textEl.classList.toggle('checked', checked);
+    });
+    toggleShoppingItemChecked(itemId, checked);
   });
 }
 
@@ -1194,8 +1271,8 @@ registerApp('mealie', {
       <div class="week-block">
         <div class="mode-toggle" id="calendar-mode-toggle"></div>
         <div id="calendar-container" style="margin-top:12px;"><div class="cal-loading">Loading calendar...</div></div>
-        <div id="view-day-detail"></div>
       </div>
+      <div id="view-day-detail"></div>
       <div id="action-panel"></div>
       <div id="preview-panel"></div>
 

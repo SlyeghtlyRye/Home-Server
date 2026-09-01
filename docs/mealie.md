@@ -26,9 +26,12 @@ The Mealie tab renders, top to bottom:
 2. **Calendar**, with a Plan/View/Edit toggle:
    - *Plan* is the original flow -- click a day to select a 7-day block,
      preview random picks, reroll/override, then commit.
-   - *View* is read-only -- click a single day to highlight it and show
-     its meal (if any) below the calendar, with a link to the same recipe
-     detail modal.
+   - *View* is read-only -- click a single day to highlight it and open its
+     meal (if any) in a panel docked to the bottom of the screen, with a
+     link to the same recipe detail modal. The panel floats above the page
+     (fixed position) so it stays on screen while the calendar and rest of
+     the dashboard scroll underneath it; a close button (or picking the
+     same day again) dismisses it.
    - *Edit* opens a modal for a single day: change its recipe (same
      search/reroll combo as Plan's preview row), or swap it with another
      day via a date field in the same modal. A swap only rearranges the
@@ -42,12 +45,20 @@ The Mealie tab renders, top to bottom:
    edit modal.
 3. **Meals of the week** -- a week picker (populated from
    `/data/available-weeks`, which lists any week with a planned meal plus
-   the current week) driving a day-by-day list. Opening a day lazily
-   fetches and shows that recipe's ingredients and steps inline.
-4. **Shopping lists** -- unchanged weekly grouping, plus inline editing:
-   check items off, delete them, or add freeform items. All three write
-   straight through to Mealie's shopping list (no local-only state), via
-   `/api/shopping-item-{add,delete,check}`.
+   the current week) driving a day-by-day list. Clicking a day with a
+   planned meal opens that recipe's ingredients and steps in the same
+   recipe detail modal used by meal-of-the-day and calendar View mode.
+4. **Shopping lists** -- weekly grouping, plus inline editing: check items
+   off, delete them, or add freeform items. All three write straight
+   through to Mealie's shopping list (no local-only state), via
+   `/api/shopping-item-{add,delete,check}`. A "By Meal / All Items" toggle
+   (defaulting to By Meal) controls layout: By Meal groups each list's
+   items under the recipe(s) that generated them (via Mealie's
+   `recipeReferences` on each shopping list item, resolved to a recipe name
+   server-side in `_fetch_list_detail`), with an "Other" section for
+   freeform additions that have no recipe association. An item shared by
+   two recipes (Mealie merges identical ingredient lines) appears under
+   each relevant meal.
 
 Recipe detail (ingredients/steps) is fetched by recipe ID via
 `/data/recipe-detail`, which looks up the recipe's slug from the recipe

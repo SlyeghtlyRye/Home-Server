@@ -103,20 +103,41 @@
     .meal-link { color: var(--color-accent); font-size: 14px; cursor: pointer; }
     .meal-link:hover { text-decoration: underline; }
 
-    .view-day-detail { background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 12px 16px; margin-top: 10px; }
-    .view-day-detail .vd-date { color: var(--color-text-muted); font-size: 13px; }
-    .view-day-detail .vd-meal { font-size: 16px; font-weight: bold; margin: 4px 0 8px; }
+    #view-day-detail {
+      display: none;
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      width: min(560px, calc(100% - 32px));
+      z-index: 200;
+    }
+    #view-day-detail.show { display: block; }
+    .view-day-detail-inner {
+      position: relative;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border-soft);
+      border-radius: 10px;
+      padding: 14px 40px 14px 18px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    }
+    .view-day-detail-inner .vd-date { color: var(--color-text-muted); font-size: 13px; }
+    .view-day-detail-inner .vd-meal { font-size: 16px; font-weight: bold; margin: 4px 0 8px; }
+    .view-day-detail-inner .vdf-close {
+      position: absolute; top: 10px; right: 12px; background: transparent; border: none;
+      color: var(--color-text-muted); font-size: 16px; cursor: pointer; line-height: 1;
+    }
+    .view-day-detail-inner .vdf-close:hover { color: white; }
 
     .week-select-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
     .week-select-row select { background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
 
-    .day-dropdown { background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; }
-    .day-dropdown summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-    .day-dropdown summary::-webkit-details-marker { display: none; }
-    .day-dropdown .dd-date { color: var(--color-text-dim); font-size: 13px; min-width: 90px; flex-shrink: 0; }
-    .day-dropdown .dd-meal { flex: 1; text-align: right; }
-    .day-dropdown .dd-meal.dd-empty { color: var(--color-text-muted); font-style: italic; }
-    .day-dropdown-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-soft); }
+    .day-row { background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .day-row.clickable { cursor: pointer; }
+    .day-row.clickable:hover { border-color: var(--color-accent); }
+    .day-row .dd-date { color: var(--color-text-dim); font-size: 13px; min-width: 90px; flex-shrink: 0; }
+    .day-row .dd-meal { flex: 1; text-align: right; }
+    .day-row .dd-meal.dd-empty { color: var(--color-text-muted); font-style: italic; }
 
     .recipe-section-label { font-size: 12px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 12px 0 6px; }
     .recipe-section-label:first-child { margin-top: 0; }
@@ -150,6 +171,11 @@
     .shopping-item-del:hover { color: #ff9d9d; }
     .shopping-add-row { display: flex; gap: 8px; margin-top: 10px; }
     .shopping-add-row input[type="text"] { flex: 1; background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+
+    .shopping-panel-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+    .shopping-panel-header h3 { margin: 0; }
+    .shopping-group { margin-bottom: 12px; }
+    .shopping-group-title { font-size: 12px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 4px; }
 
     .preview-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--color-border-soft); flex-wrap: wrap; }
     .preview-row:last-of-type { border-bottom: none; }
