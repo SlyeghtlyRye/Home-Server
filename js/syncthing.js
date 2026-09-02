@@ -1,21 +1,26 @@
-// syncthing.js -- devices panel for a Syncthing instance, either the one
-// running in this stack's docker-compose (default) or a fully external
-// one elsewhere on the network. Connect once with a URL + API key, then
-// view connection/sync status and pause/resume/add/rename/remove devices
-// and folders. Uses the same event-delegation / status-modal patterns as
-// the other modules rather than introducing a new UI pattern.
+// syncthing.js -- devices/folders panel for one or more Syncthing
+// instances. A permanent "Host" tab represents the Syncthing container in
+// this stack's own docker-compose (always listed, even before it's ever
+// been connected); any number of externally-added instances (e.g. a
+// phone/handheld running Syncthing elsewhere) show up as additional
+// tabs. Each tab is its own independent connection -- devices/folders,
+// pause/resume, add/rename/remove -- scoped to whichever instance is
+// currently selected. Uses the same event-delegation / status-modal
+// patterns as the other modules rather than introducing a new UI pattern.
 import { registerApp, showStatusModal, hideStatusModal,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
 import { HOST_IP } from './config.js';
 
-let configured = null; // null = not checked yet, otherwise boolean
+let instances = []; // [{id, label, isHost, configured, url}], "host" always present
+let activeInstanceId = 'host'; // or '__add__' for the add-instance form
+let showConnectForm = false; // show connect/edit form for the active instance
+let showAddDeviceForm = false; // add-device form within the active instance
+
 let devices = [];
 let folders = [];
 let devicesError = null; // set when OUR backend responded but Syncthing itself didn't
 let foldersError = null;
-let showAddForm = false;
-let editingConfig = false;
-let stBaseUrl = null; // this Syncthing instance's own URL, for the self device's GUI link
+let stBaseUrl = null; // active instance's own URL, for the self device's GUI link
 
 const DEFAULT_GUI_PORT = 8384;
 let stDevicePorts = {}; // per-device GUI port overrides (device ID -> port), local to this browser
@@ -53,30 +58,63 @@ function buildGuiUrl(host, port) {
   return `http://${hostPart}:${port}`;
 }
 
-async function checkConfigured() {
+// ---------- Instance list + tab selection ----------
+
+async function loadInstances() {
   try {
-    const res = await fetch('/data/syncthing-status');
+    const res = await fetch('/data/syncthing-instances');
     if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
-    configured = data.configured;
+    instances = data.instances || [];
     clearErrorBanner();
   } catch (err) {
-    console.error('Failed to check Syncthing status', err);
-    configured = false;
-    showErrorBanner("Couldn't reach the server to check Syncthing status. Check that it's running and try again.");
-  }
-  if (configured) {
-    refreshAll();
-  } else {
+    console.error('Failed to load Syncthing instances', err);
+    instances = [];
+    showErrorBanner("Couldn't reach the server to load Syncthing instances. Check that it's running and try again.");
     renderSyncthingPanel();
+    return;
   }
+  if (activeInstanceId !== '__add__' && !instances.find(i => i.id === activeInstanceId)) {
+    activeInstanceId = 'host';
+  }
+  await selectInstanceTab(activeInstanceId);
 }
+
+async function selectInstanceTab(id) {
+  activeInstanceId = id;
+  showAddDeviceForm = false;
+
+  if (id === '__add__') {
+    renderSyncthingPanel();
+    return;
+  }
+
+  const inst = instances.find(i => i.id === id);
+  showConnectForm = !inst || !inst.configured;
+  if (showConnectForm) {
+    renderSyncthingPanel();
+    return;
+  }
+  await refreshAll();
+}
+
+function showAddInstanceTab() {
+  activeInstanceId = '__add__';
+  renderSyncthingPanel();
+}
+
+function cancelAddInstance() {
+  const fallback = instances.find(i => i.isHost) ? 'host' : ((instances[0] && instances[0].id) || 'host');
+  selectInstanceTab(fallback);
+}
+
+// ---------- Devices / folders data ----------
 
 async function fetchDevicesData() {
   devicesError = null;
   let res;
   try {
-    res = await fetch('/data/syncthing-devices');
+    res = await fetch(`/data/syncthing-devices?instance=${encodeURIComponent(activeInstanceId)}`);
   } catch (err) {
     // fetch() itself threw -- our own backend (nginx/trigger_server) is
     // unreachable. That's a real "check that it's running" situation,
@@ -97,7 +135,6 @@ async function fetchDevicesData() {
     return;
   }
   const data = await res.json();
-  configured = data.configured;
   devices = data.devices || [];
   stBaseUrl = data.baseUrl || null;
 }
@@ -106,7 +143,7 @@ async function fetchFoldersData() {
   foldersError = null;
   let res;
   try {
-    res = await fetch('/data/syncthing-folders');
+    res = await fetch(`/data/syncthing-folders?instance=${encodeURIComponent(activeInstanceId)}`);
   } catch (err) {
     console.error("Couldn't reach the server for Syncthing folders", err);
     return; // fetchDevicesData already surfaces the page banner for this
@@ -127,20 +164,26 @@ async function refreshAll() {
   renderSyncthingPanel();
 }
 
-function renderConfigFormHtml(editing) {
-  // First-time connect defaults to the Syncthing container in this stack
-  // (same host as everything else, same reasoning as Mealie's known URL)
-  // -- still fully editable for anyone pointing at a different instance.
+// ---------- Connect / edit / add / clear instance ----------
+
+function renderConnectFormHtml() {
+  const inst = instances.find(i => i.id === activeInstanceId);
+  if (!inst) return '';
+  const editing = inst.configured;
+  // First-time connect defaults to a sensible URL when we have one (the
+  // Host tab already knows the in-stack container's address, same
+  // reasoning as Mealie's known URL) -- still fully editable.
   const urlValue = editing
-    ? (stBaseUrl ? escapeHtml(stBaseUrl) : '')
-    : `http://${escapeHtml(HOST_IP)}:8384`;
+    ? (inst.url ? escapeHtml(inst.url) : '')
+    : escapeHtml(inst.url || (inst.isHost ? `http://${HOST_IP}:8384` : ''));
   return `
     <div class="week-block">
-      <h3>${editing ? 'Editing Syncthing Connection' : 'Connect to Syncthing'}</h3>
+      <h3>${editing ? `Editing ${escapeHtml(inst.label)} Connection` : `Connect ${escapeHtml(inst.label)}`}</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
         ${editing
           ? 'Update the URL and/or API key below. Leave the API key blank to keep the one already saved.'
-          : "We've pre-filled the address for the Syncthing running on this server -- change it if you're connecting to a different instance instead. API key is in Syncthing under Actions &rarr; Settings &rarr; General."}
+          : (inst.isHost ? "We've pre-filled the address for the Syncthing running on this server -- change it if needed. " : '')
+            + 'API key is in Syncthing under Actions &rarr; Settings &rarr; General.'}
       </p>
       <div class="preview-row">
         <span class="date">URL</span>
@@ -151,54 +194,28 @@ function renderConfigFormHtml(editing) {
         <input type="password" id="st-config-key" placeholder="${editing ? 'Leave blank to keep current key' : 'Paste your API key'}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="btn-grid">
-        <button class="btn" data-action="save-config">${editing ? 'Save' : 'Connect'}</button>
+        <button class="btn" data-action="save-instance-config">${editing ? 'Save' : 'Connect'}</button>
         ${editing ? '<button class="btn clear" data-action="cancel-edit-config">Cancel</button>' : ''}
       </div>
     </div>
   `;
 }
 
-function startEditConfig() {
-  editingConfig = true;
-  renderSyncthingPanel();
-}
-
-function cancelEditConfig() {
-  editingConfig = false;
-  renderSyncthingPanel();
-}
-
-async function deleteConfigConnection() {
-  if (!(await showConfirmModal("Remove the saved Syncthing connection? You'll need to reconnect (URL + API key) to manage devices again -- this doesn't affect Syncthing itself or any of its devices."))) return;
-  try {
-    const res = await fetch('/api/delete-syncthing-config', { method: 'POST' });
-    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to remove connection: ' + (data.error || res.status), 'error'); return; }
-    configured = false;
-    editingConfig = false;
-    devices = [];
-    folders = [];
-    devicesError = null;
-    foldersError = null;
-    stBaseUrl = null;
-    renderSyncthingPanel();
-  } catch (err) {
-    showStatusModal('Error: ' + err, 'error');
-  }
-}
-
-async function saveConfig() {
+async function saveInstanceConfig() {
   const urlInput = document.getElementById('st-config-url');
   const keyInput = document.getElementById('st-config-key');
   const url = urlInput.value.trim();
   const apiKey = keyInput.value.trim();
+  const inst = instances.find(i => i.id === activeInstanceId);
+  const editing = !!(inst && inst.configured);
   if (!url) return;
-  if (!editingConfig && !apiKey) return; // first-time connect always needs a key
-  showStatusModal(editingConfig ? 'Saving...' : 'Connecting...', 'loading');
+  if (!editing && !apiKey) return; // first-time connect always needs a key
+  showStatusModal(editing ? 'Saving...' : 'Connecting...', 'loading');
   try {
-    const res = await fetch('/api/save-syncthing-config', {
+    const res = await fetch('/api/save-syncthing-instance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, apiKey })
+      body: JSON.stringify({ instanceId: activeInstanceId, url, apiKey })
     });
     const data = await res.json();
     if (!data.valid) {
@@ -206,13 +223,99 @@ async function saveConfig() {
       return;
     }
     hideStatusModal();
-    configured = true;
-    editingConfig = false;
-    refreshAll();
+    showConnectForm = false;
+    await loadInstances();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
+
+function startEditConfig() {
+  showConnectForm = true;
+  renderSyncthingPanel();
+}
+
+function cancelEditConfig() {
+  showConnectForm = false;
+  renderSyncthingPanel();
+}
+
+function renderAddInstanceFormHtml() {
+  return `
+    <div class="week-block">
+      <h3>Add Syncthing Instance</h3>
+      <p style="color:var(--color-text-dim); font-size:14px;">
+        Connect another Syncthing instance on your network (e.g. a phone or handheld). URL is the
+        regular address you'd use to open its GUI in a browser; API key is under
+        Actions &rarr; Settings &rarr; General on that instance.
+      </p>
+      <div class="preview-row">
+        <span class="date">Name</span>
+        <input type="text" id="st-new-instance-label" placeholder="e.g. a10mini" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+      </div>
+      <div class="preview-row">
+        <span class="date">URL</span>
+        <input type="text" id="st-new-instance-url" placeholder="http://192.168.1.50:8384" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+      </div>
+      <div class="preview-row">
+        <span class="date">API key</span>
+        <input type="password" id="st-new-instance-key" placeholder="Paste its API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+      </div>
+      <div class="btn-grid">
+        <button class="btn" data-action="add-instance">Add</button>
+        <button class="btn clear" data-action="cancel-add-instance">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+async function addInstance() {
+  const labelInput = document.getElementById('st-new-instance-label');
+  const urlInput = document.getElementById('st-new-instance-url');
+  const keyInput = document.getElementById('st-new-instance-key');
+  const label = labelInput.value.trim();
+  const url = urlInput.value.trim();
+  const apiKey = keyInput.value.trim();
+  if (!label || !url || !apiKey) return;
+  showStatusModal('Connecting...', 'loading');
+  try {
+    const res = await fetch('/api/add-syncthing-instance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label, url, apiKey })
+    });
+    const data = await res.json();
+    if (!data.valid) {
+      showStatusModal('Could not connect: ' + (data.error || 'check the URL and API key.'), 'error');
+      return;
+    }
+    hideStatusModal();
+    activeInstanceId = data.instanceId;
+    await loadInstances();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function clearActiveInstance() {
+  const inst = instances.find(i => i.id === activeInstanceId);
+  if (!inst) return;
+  const confirmMsg = inst.isHost
+    ? "Clear the saved connection for Host? You'll need to reconnect (URL + API key) to manage it again -- this doesn't affect the Syncthing container itself."
+    : `Remove "${inst.label}" from this dashboard? You'll need to re-add it (URL + API key) to manage it again -- this doesn't affect Syncthing itself.`;
+  if (!(await showConfirmModal(confirmMsg))) return;
+  try {
+    const res = await fetch('/api/clear-syncthing-instance', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+    await loadInstances();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+// ---------- Rendering ----------
 
 function formatLastSeen(iso) {
   if (!iso || iso.startsWith('0001-01-01')) return '';
@@ -269,7 +372,7 @@ function renderDeviceRowHtml(d) {
 }
 
 function renderAddDeviceSectionHtml() {
-  if (!showAddForm) {
+  if (!showAddDeviceForm) {
     return `<div class="btn-grid"><button class="btn small" data-action="show-add-device">+ Add Device</button></div>`;
   }
   return `
@@ -315,18 +418,18 @@ function renderFolderRowHtml(f) {
   `;
 }
 
-function renderSyncthingPanel() {
-  const el = document.getElementById('syncthing-panel');
-  if (!el) return;
-  if (configured === null) {
-    el.innerHTML = '<div class="week-block"><p style="color:var(--color-text-muted);">Loading...</p></div>';
-    return;
-  }
-  if (!configured || editingConfig) {
-    el.innerHTML = renderConfigFormHtml(configured && editingConfig);
-    return;
-  }
-  el.innerHTML = `
+function renderTabsHtml() {
+  const tabs = instances.map(inst =>
+    `<button data-instance-tab="${escapeHtml(inst.id)}" class="${inst.id === activeInstanceId ? 'active' : ''}">${escapeHtml(inst.label)}</button>`
+  ).join('');
+  const addTab = `<button data-instance-tab="__add__" class="${activeInstanceId === '__add__' ? 'active' : ''}">+ Add</button>`;
+  return `<div class="mode-toggle" style="margin-bottom:12px;">${tabs}${addTab}</div>`;
+}
+
+function renderDevicesAndFoldersHtml() {
+  const inst = instances.find(i => i.id === activeInstanceId);
+  const clearLabel = inst && inst.isHost ? 'Clear connection' : 'Remove instance';
+  return `
     <div class="week-block">
       <div class="shopping-panel-header">
         <h3>Devices</h3>
@@ -338,27 +441,47 @@ function renderSyncthingPanel() {
         ` : ''}
       </div>
       ${devicesError
-        ? `<div class="warning-box">&#x26A0; Couldn't reach your Syncthing instance: ${escapeHtml(devicesError)}</div>`
+        ? `<div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(devicesError)}</div>`
         : (devices.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : devices.map(d => renderDeviceRowHtml(d)).join(''))}
       ${!devicesError ? renderAddDeviceSectionHtml() : ''}
       <div class="st-connection-links">
         <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
-        <span class="st-link-action" data-action="delete-config">Delete connection</span>
+        <span class="st-link-action" data-action="clear-instance">${clearLabel}</span>
       </div>
     </div>
     <div class="week-block">
       <h3>Folders</h3>
       ${foldersError
-        ? `<div class="warning-box">&#x26A0; Couldn't reach your Syncthing instance: ${escapeHtml(foldersError)}</div>`
+        ? `<div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(foldersError)}</div>`
         : (folders.length === 0 ? '<p style="color:var(--color-text-muted);">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join(''))}
     </div>
   `;
 }
 
+function renderSyncthingPanel() {
+  const el = document.getElementById('syncthing-panel');
+  if (!el) return;
+  if (instances.length === 0) {
+    el.innerHTML = '<div class="week-block"><p style="color:var(--color-text-muted);">Loading...</p></div>';
+    return;
+  }
+  let bodyHtml;
+  if (activeInstanceId === '__add__') {
+    bodyHtml = renderAddInstanceFormHtml();
+  } else if (showConnectForm) {
+    bodyHtml = renderConnectFormHtml();
+  } else {
+    bodyHtml = renderDevicesAndFoldersHtml();
+  }
+  el.innerHTML = renderTabsHtml() + bodyHtml;
+}
+
+// ---------- Device / folder / global actions ----------
+
 async function pauseDevice(deviceId) {
   try {
     const res = await fetch('/api/syncthing-device-pause', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -370,7 +493,7 @@ async function pauseDevice(deviceId) {
 async function resumeDevice(deviceId) {
   try {
     const res = await fetch('/api/syncthing-device-resume', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -383,7 +506,7 @@ async function removeDevice(deviceId, name) {
   if (!(await showConfirmModal(`Remove "${name}" from Syncthing? This only removes it here -- the device itself is unaffected and can be re-added later.`))) return;
   try {
     const res = await fetch('/api/syncthing-device-remove', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to remove: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -397,7 +520,7 @@ async function startRenameDevice(deviceId, currentName) {
   if (!name || !name.trim() || name.trim() === currentName) return;
   try {
     const res = await fetch('/api/syncthing-device-rename', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId, name: name.trim() })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, deviceId, name: name.trim() })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Rename failed: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -408,7 +531,9 @@ async function startRenameDevice(deviceId, currentName) {
 
 async function pauseAllDevices() {
   try {
-    const res = await fetch('/api/syncthing-pause-all', { method: 'POST' });
+    const res = await fetch('/api/syncthing-pause-all', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+    });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause all: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
   } catch (err) {
@@ -418,7 +543,9 @@ async function pauseAllDevices() {
 
 async function resumeAllDevices() {
   try {
-    const res = await fetch('/api/syncthing-resume-all', { method: 'POST' });
+    const res = await fetch('/api/syncthing-resume-all', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+    });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume all: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
   } catch (err) {
@@ -429,7 +556,7 @@ async function resumeAllDevices() {
 async function pauseFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-pause', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause folder: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -441,7 +568,7 @@ async function pauseFolder(folderId) {
 async function resumeFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-resume', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume folder: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -453,7 +580,7 @@ async function resumeFolder(folderId) {
 async function rescanFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-rescan', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to rescan: ' + (data.error || res.status), 'error'); return; }
     refreshAll();
@@ -483,28 +610,38 @@ async function addDevice() {
   if (!deviceId) return;
   try {
     const res = await fetch('/api/syncthing-device-add', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId, name })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, deviceId, name })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to add device: ' + (data.error || res.status), 'error'); return; }
-    showAddForm = false;
+    showAddDeviceForm = false;
     refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
 
+// ---------- Wiring ----------
+
 function wireDelegatedListeners() {
   const panel = document.getElementById('syncthing-panel');
   panel.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('[data-instance-tab]');
+    if (tabBtn) {
+      const id = tabBtn.dataset.instanceTab;
+      return id === '__add__' ? showAddInstanceTab() : selectInstanceTab(id);
+    }
+
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const deviceId = btn.dataset.deviceId;
     const folderId = btn.dataset.folderId;
     switch (btn.dataset.action) {
-      case 'save-config': return saveConfig();
+      case 'save-instance-config': return saveInstanceConfig();
       case 'start-edit-config': return startEditConfig();
       case 'cancel-edit-config': return cancelEditConfig();
-      case 'delete-config': return deleteConfigConnection();
+      case 'add-instance': return addInstance();
+      case 'cancel-add-instance': return cancelAddInstance();
+      case 'clear-instance': return clearActiveInstance();
       case 'pause-all': return pauseAllDevices();
       case 'resume-all': return resumeAllDevices();
       case 'pause-device': return pauseDevice(deviceId);
@@ -519,10 +656,10 @@ function wireDelegatedListeners() {
       }
       case 'edit-gui-port': return editGuiPort(deviceId);
       case 'show-add-device':
-        showAddForm = true;
+        showAddDeviceForm = true;
         return renderSyncthingPanel();
       case 'cancel-add-device':
-        showAddForm = false;
+        showAddDeviceForm = false;
         return renderSyncthingPanel();
       case 'add-device': return addDevice();
       case 'pause-folder': return pauseFolder(folderId);
@@ -542,14 +679,16 @@ registerApp('syncthing', {
   `,
   onRender: () => {
     wireDelegatedListeners();
-    configured = null;
+    instances = [];
+    activeInstanceId = 'host';
+    showConnectForm = false;
+    showAddDeviceForm = false;
     devices = [];
     folders = [];
     devicesError = null;
     foldersError = null;
-    showAddForm = false;
-    editingConfig = false;
+    stBaseUrl = null;
     renderSyncthingPanel();
-    checkConfigured();
+    loadInstances();
   },
 });
