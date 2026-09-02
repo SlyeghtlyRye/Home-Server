@@ -36,7 +36,18 @@ This isn't one connection you point at whichever Syncthing you care about
   you pause/resume/rename/remove right from the merged list (each action
   carries the device's own `instanceId`, read from the row that triggered
   it, rather than assuming "whichever tab is active" the way single-
-  instance actions do).
+  instance actions do). Every device here renders as its own bordered
+  card (`.st-card-style`, only applied on this view -- the single-
+  instance tabs keep the plain divided-list look), since it's the one
+  place rows from different instances sit next to each other and
+  benefit from a clearer visual boundary. If an instance fails to load
+  entirely (offline, connection refused, etc.), it shows as its own
+  collapsed, amber `<details>` card (`.st-instance-error-card`) --
+  `⚠ <label> — Couldn't connect`, expandable to the raw error text --
+  rather than a page-level banner. That distinction matters: a banner at
+  the top would read as "something's wrong with the whole page," when
+  it's really just one instance (commonly one that's asleep/offline)
+  failing to answer, unrelated to the others.
 
 **"+ Connect Instance" is deliberately not called "Add Device",** and
 this distinction is the whole reason the multi-instance design exists:

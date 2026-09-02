@@ -32,7 +32,7 @@ let foldersError = null;
 let stBaseUrl = null; // active instance's own URL, for the self device's GUI link
 
 let allDevicesList = []; // merged devices across every configured instance, for the overview tab
-let allDevicesError = null;
+let allDevicesErrors = []; // [{instanceId, label, error}] -- one per instance that failed to load, shown as its own card
 
 const DEFAULT_GUI_PORT = 8384;
 let stDevicePorts = {}; // per-device GUI port overrides (device ID -> port), local to this browser
@@ -203,7 +203,7 @@ async function refreshAll() {
 // ---------- All Devices overview (every configured instance, merged) ----------
 
 async function refreshAllDevicesOverview() {
-  allDevicesError = null;
+  allDevicesErrors = [];
   const configured = instances.filter(i => i.configured);
   if (configured.length === 0) {
     allDevicesList = [];
@@ -222,14 +222,15 @@ async function refreshAllDevicesOverview() {
     }));
     clearErrorBanner();
     allDevicesList = [];
-    const errors = [];
     for (const r of results) {
-      if (r.error) { errors.push(`${r.inst.label}: ${r.error}`); continue; }
+      if (r.error) {
+        allDevicesErrors.push({ instanceId: r.inst.id, label: r.inst.label, error: r.error });
+        continue;
+      }
       for (const d of r.devices) {
         allDevicesList.push({ ...d, instanceId: r.inst.id, instanceLabel: r.inst.label });
       }
     }
-    allDevicesError = errors.length ? errors.join(' | ') : null;
   } catch (err) {
     console.error('Failed to load combined device list', err);
     showErrorBanner("Couldn't reach the server to load Syncthing devices. Check that it's running and try again.");
@@ -419,7 +420,7 @@ function deviceGuiLinkHtml(d, instanceBaseUrl) {
 // so the same row renderer works both on a single instance's tab and in
 // the merged All Devices list, where every row can belong to a different
 // instance. instanceLabel is only shown when set (the merged view).
-function renderDeviceRowHtml(d, instanceId, instanceLabel, instanceBaseUrl) {
+function renderDeviceRowHtml(d, instanceId, instanceLabel, instanceBaseUrl, asCard) {
   const statusLabel = d.paused ? 'Paused' : (d.connected ? 'Connected' : 'Offline');
   const statusClass = d.paused ? 'paused' : (d.connected ? 'connected' : 'offline');
   const completionText = d.connected && d.completion != null ? `${Math.round(d.completion)}% synced` : '';
@@ -427,7 +428,7 @@ function renderDeviceRowHtml(d, instanceId, instanceLabel, instanceBaseUrl) {
   const metaParts = [statusLabel, completionText, lastSeenText ? `last seen ${lastSeenText}` : ''].filter(Boolean);
   const tagHtml = instanceLabel ? `<span class="st-instance-tag">${escapeHtml(instanceLabel)}</span>` : '';
   return `
-    <div class="st-device-row" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}">
+    <div class="st-device-row${asCard ? ' st-card-style' : ''}" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}">
       <span class="st-status-dot ${statusClass}" title="${statusLabel}"></span>
       <div class="st-device-info">
         <div class="st-device-name">
@@ -531,13 +532,20 @@ function renderAllDevicesHtml() {
       </div>
     `;
   }
+  const errorCardsHtml = allDevicesErrors.map(e => `
+    <details class="st-instance-error-card">
+      <summary>&#x26A0; ${escapeHtml(e.label)} &mdash; Couldn't connect</summary>
+      <div class="st-instance-error-detail">${escapeHtml(e.error)}</div>
+    </details>
+  `).join('');
+  const noneFound = allDevicesList.length === 0 && allDevicesErrors.length === 0;
   return `
     <div class="week-block">
       <h3>All Devices ${infoTip}</h3>
-      ${allDevicesError ? `<div class="warning-box">&#x26A0; ${escapeHtml(allDevicesError)}</div>` : ''}
-      ${allDevicesList.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : allDevicesList.map(d => {
+      ${errorCardsHtml}
+      ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : allDevicesList.map(d => {
         const owningInstance = instances.find(i => i.id === d.instanceId);
-        return renderDeviceRowHtml(d, d.instanceId, d.instanceLabel, owningInstance ? owningInstance.url : null);
+        return renderDeviceRowHtml(d, d.instanceId, d.instanceLabel, owningInstance ? owningInstance.url : null, true);
       }).join('')}
       ${renderAddDeviceSectionHtml(defaultAddInstanceId())}
     </div>
@@ -822,7 +830,7 @@ registerApp('syncthing', {
     foldersError = null;
     stBaseUrl = null;
     allDevicesList = [];
-    allDevicesError = null;
+    allDevicesErrors = [];
     renderSyncthingPanel();
     loadInstances();
   },
