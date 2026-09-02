@@ -9,7 +9,7 @@ exists in the actual codebase.
 """
 
 # Layers, top to bottom in the diagram
-LAYERS = ["client", "network", "container", "host", "frontend"]
+LAYERS = ["client", "network", "container", "host", "frontend", "external"]
 
 NODES = {
     "browser":   {"label": "Browser",              "layer": "client"},
@@ -26,6 +26,7 @@ NODES = {
     "resetmgr":  {"label": "reset_manager.py",      "layer": "host"},
     "updater":   {"label": "updater.py",             "layer": "host"},
     "envcheck":  {"label": "check_env_updates.py",    "layer": "host"},
+    "stc":       {"label": "syncthing_client.py",    "layer": "host"},
 
     "core_js":     {"label": "core.js",             "layer": "frontend"},
     "mealie_js":   {"label": "mealie.js",           "layer": "frontend"},
@@ -34,11 +35,14 @@ NODES = {
     "system_js":   {"label": "system.js",           "layer": "frontend"},
     "wizard_js":   {"label": "wizard.js",           "layer": "frontend"},
     "static_js":   {"label": "static-apps.js",      "layer": "frontend"},
+    "syncthing_js": {"label": "syncthing.js",       "layer": "frontend"},
 
     "config_py":   {"label": "config.py",            "layer": "host"},
     "config_js":   {"label": "config.js",             "layer": "frontend"},
     "gendocs":     {"label": "generate_docs_index.py", "layer": "host"},
     "genmap":      {"label": "generate_architecture_map.py", "layer": "host"},
+
+    "syncthing":   {"label": "Syncthing (external)", "layer": "external"},
 }
 
 # (from, to) -- direction of the real request/data flow
@@ -60,9 +64,12 @@ EDGES = [
     ("system_js", "core_js"),
     ("wizard_js", "core_js"),
     ("static_js", "core_js"),
+    ("syncthing_js", "core_js"),
     ("browser", "core_js"),
     ("trigger", "config_py"),
     ("config_js", "core_js"),
+    ("trigger", "stc"),
+    ("stc", "syncthing"),
 ]
 
 # Real, on-disk sources the completeness checker cross-references against.
@@ -86,8 +93,10 @@ CODE_MAPPING = {
     "system_js": "js/system.js",
     "wizard_js": "js/wizard.js",
     "static_js": "js/static-apps.js",
+    "syncthing_js": "js/syncthing.js",
     "config_py": "scripts/config.py",
     "config_js": "js/config.js",
     "gendocs": "scripts/generate_docs_index.py",
     "genmap": "scripts/generate_architecture_map.py",
+    "stc": "scripts/syncthing_client.py",
 }

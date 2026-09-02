@@ -5,6 +5,9 @@
 scripts/mealie_token.txt
 scripts/meal_history.json
 
+# Personal data - Syncthing
+scripts/syncthing_config.json
+
 # Personal data - Streams
 audiobooks/library.json
 audiobooks/profiles.json

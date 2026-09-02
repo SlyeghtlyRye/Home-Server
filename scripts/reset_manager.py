@@ -35,6 +35,7 @@ WantedBy=multi-user.target
 RESET_TARGETS = [
     "scripts/mealie_token.txt",
     "scripts/meal_history.json",
+    "scripts/syncthing_config.json",
     "audiobooks/library.json",
     "audiobooks/profiles.json",
     "audiobooks/config.json",

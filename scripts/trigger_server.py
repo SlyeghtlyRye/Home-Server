@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, "/root/scripts")
 import mealie_weekly_plan as mwp
+import syncthing_client as stc
 
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
@@ -354,6 +355,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/data/syncthing-status":
+            self._send_json(200, {"configured": stc.is_configured()})
+            return
+
+        if parsed.path == "/data/syncthing-devices":
+            if not stc.is_configured():
+                self._send_json(200, {"configured": False, "devices": [], "baseUrl": None})
+                return
+            try:
+                devices = stc.get_devices()
+                base_url = (stc.get_config() or {}).get("url")
+                self._send_json(200, {"configured": True, "devices": devices, "baseUrl": base_url})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
 
         self.send_response(404)
         self.end_headers()
@@ -404,6 +420,89 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok", "valid": True})
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/save-syncthing-config":
+            body = self._read_json_body()
+            url = (body.get("url") or "").strip()
+            api_key = (body.get("apiKey") or "").strip()
+            if not url or not api_key:
+                self._send_json(400, {"error": "missing url or apiKey"})
+                return
+            try:
+                stc.test_connection(url, api_key)
+            except Exception as e:
+                self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+                return
+            stc.save_config(url, api_key)
+            self._send_json(200, {"status": "ok", "valid": True})
+            return
+
+        if parsed.path == "/api/syncthing-device-pause":
+            body = self._read_json_body()
+            device_id = body.get("deviceId")
+            if not device_id:
+                self._send_json(400, {"error": "missing deviceId"})
+                return
+            try:
+                stc.pause_device(device_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-device-resume":
+            body = self._read_json_body()
+            device_id = body.get("deviceId")
+            if not device_id:
+                self._send_json(400, {"error": "missing deviceId"})
+                return
+            try:
+                stc.resume_device(device_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-device-add":
+            body = self._read_json_body()
+            device_id = (body.get("deviceId") or "").strip()
+            name = (body.get("name") or "").strip()
+            if not device_id:
+                self._send_json(400, {"error": "missing deviceId"})
+                return
+            try:
+                stc.add_device(device_id, name)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-device-rename":
+            body = self._read_json_body()
+            device_id = body.get("deviceId")
+            name = (body.get("name") or "").strip()
+            if not device_id or not name:
+                self._send_json(400, {"error": "missing deviceId or name"})
+                return
+            try:
+                stc.rename_device(device_id, name)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-device-remove":
+            body = self._read_json_body()
+            device_id = body.get("deviceId")
+            if not device_id:
+                self._send_json(400, {"error": "missing deviceId"})
+                return
+            try:
+                stc.remove_device(device_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/api/shopping-item-add":

@@ -212,6 +212,7 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── static-apps.js (Pi-hole, Kanboard)
 │ ├── mealie.js
 │ ├── streams.js
+│ ├── syncthing.js (devices panel for an external Syncthing instance)
 │ ├── docs.js
 │ ├── system.js (status, factory reset, software updates)
 │ └── wizard.js (first-time setup banner)
@@ -224,13 +225,15 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── generate_docs_index.py
 │ ├── generate_architecture_map.py
 │ ├── trigger_server.py
-│ └── mealie_weekly_plan.py
+│ ├── mealie_weekly_plan.py
+│ └── syncthing_client.py
 ├── audiobooks/
 │ ├── audiobook_lib.py
 │ └── add_book.py
 ├── docs/
 │ ├── mealie.md
 │ ├── streams.md
+│ ├── syncthing.md
 │ ├── config-and-setup.md
 │ ├── nginx-and-networking.md
 │ ├── system-panel.md

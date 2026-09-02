@@ -1,48 +1,52 @@
-<svg viewBox="0 0 2080 730" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
+<svg viewBox="0 0 2280 860" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">
 <rect width="100%" height="100%" fill="#1a1a1a"/>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#666"/></marker></defs>
-<line data-src="browser" data-dst="nginx" data-src-cx="1040.0" data-src-cy="60.0" data-dst-cx="1040.0" data-dst-cy="190.0" x1="1040.0" y1="60.0" x2="1040.0" y2="190.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="nginx" data-dst="pihole" data-src-cx="1040.0" data-src-cy="190.0" data-dst-cx="840.0" data-dst-cy="320.0" x1="1040.0" y1="190.0" x2="840.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="nginx" data-dst="mealie" data-src-cx="1040.0" data-src-cy="190.0" data-dst-cx="1040.0" data-dst-cy="320.0" x1="1040.0" y1="190.0" x2="1040.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="nginx" data-dst="kanboard" data-src-cx="1040.0" data-src-cy="190.0" data-dst-cx="1240.0" data-dst-cy="320.0" x1="1040.0" y1="190.0" x2="1240.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="nginx" data-dst="trigger" data-src-cx="1040.0" data-src-cy="190.0" data-dst-cx="140.0" data-dst-cy="450.0" x1="1040.0" y1="190.0" x2="140.0" y2="450.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="browser" data-dst="nginx" data-src-cx="1140.0" data-src-cy="60.0" data-dst-cx="1140.0" data-dst-cy="190.0" x1="1140.0" y1="60.0" x2="1140.0" y2="190.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="nginx" data-dst="pihole" data-src-cx="1140.0" data-src-cy="190.0" data-dst-cx="940.0" data-dst-cy="320.0" x1="1140.0" y1="190.0" x2="940.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="nginx" data-dst="mealie" data-src-cx="1140.0" data-src-cy="190.0" data-dst-cx="1140.0" data-dst-cy="320.0" x1="1140.0" y1="190.0" x2="1140.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="nginx" data-dst="kanboard" data-src-cx="1140.0" data-src-cy="190.0" data-dst-cx="1340.0" data-dst-cy="320.0" x1="1140.0" y1="190.0" x2="1340.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="nginx" data-dst="trigger" data-src-cx="1140.0" data-src-cy="190.0" data-dst-cx="140.0" data-dst-cy="450.0" x1="1140.0" y1="190.0" x2="140.0" y2="450.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="trigger" data-dst="mwp" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="340.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 240.0,492.0 340.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="trigger" data-dst="alib" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="540.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 340.0,492.0 540.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="trigger" data-dst="sysstat" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="740.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 440.0,492.0 740.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="trigger" data-dst="resetmgr" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="940.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 540.0,492.0 940.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="trigger" data-dst="updater" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="1140.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 640.0,492.0 1140.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="mwp" data-dst="mealie" data-src-cx="340.0" data-src-cy="450.0" data-dst-cx="1040.0" data-dst-cy="320.0" x1="340.0" y1="450.0" x2="1040.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="mwp" data-dst="mealie" data-src-cx="340.0" data-src-cy="450.0" data-dst-cx="1140.0" data-dst-cy="320.0" x1="340.0" y1="450.0" x2="1140.0" y2="320.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="mealie_js" data-dst="core_js" data-src-cx="540.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 540.0,580.0 Q 440.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="streams_js" data-dst="core_js" data-src-cx="740.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 740.0,580.0 Q 540.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="docs_js" data-dst="core_js" data-src-cx="940.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 940.0,580.0 Q 640.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="system_js" data-dst="core_js" data-src-cx="1140.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1140.0,580.0 Q 740.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="wizard_js" data-dst="core_js" data-src-cx="1340.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1340.0,580.0 Q 840.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path data-src="static_js" data-dst="core_js" data-src-cx="1540.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1540.0,580.0 Q 940.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<line data-src="browser" data-dst="core_js" data-src-cx="1040.0" data-src-cy="60.0" data-dst-cx="340.0" data-dst-cy="580.0" x1="1040.0" y1="60.0" x2="340.0" y2="580.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<path data-src="trigger" data-dst="config_py" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="1540.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 840.0,492.0 1540.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
-<path data-src="config_js" data-dst="core_js" data-src-cx="1740.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1740.0,580.0 Q 1040.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path data-src="syncthing_js" data-dst="core_js" data-src-cx="1740.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1740.0,580.0 Q 1040.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="browser" data-dst="core_js" data-src-cx="1140.0" data-src-cy="60.0" data-dst-cx="340.0" data-dst-cy="580.0" x1="1140.0" y1="60.0" x2="340.0" y2="580.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path data-src="trigger" data-dst="config_py" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="1740.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 940.0,492.0 1740.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path data-src="config_js" data-dst="core_js" data-src-cx="1940.0" data-src-cy="580.0" data-dst-cx="340.0" data-dst-cy="580.0" d="M 1940.0,580.0 Q 1140.0,622.0 340.0,580.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path data-src="trigger" data-dst="stc" data-src-cx="140.0" data-src-cy="450.0" data-dst-cx="1540.0" data-dst-cy="450.0" d="M 140.0,450.0 Q 840.0,492.0 1540.0,450.0" fill="none" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
+<line data-src="stc" data-dst="syncthing" data-src-cx="1540.0" data-src-cy="450.0" data-dst-cx="1140.0" data-dst-cy="710.0" x1="1540.0" y1="450.0" x2="1140.0" y2="710.0" stroke="#666" stroke-width="1.5" marker-end="url(#arrow)"/>
 <text x="40" y="20" fill="#888" font-size="12">Client</text>
 <text x="40" y="150" fill="#888" font-size="12">Network / Proxy</text>
 <text x="40" y="280" fill="#888" font-size="12">Docker Containers</text>
 <text x="40" y="410" fill="#888" font-size="12">Host Scripts (non-Docker)</text>
 <text x="40" y="540" fill="#888" font-size="12">Frontend Modules (js/)</text>
-<g class="node-group" data-node-id="browser" transform="translate(955.0, 40)" data-x-y="955.0,40">
+<text x="40" y="670" fill="#888" font-size="12">External Services (not this stack)</text>
+<g class="node-group" data-node-id="browser" transform="translate(1055.0, 40)" data-x-y="1055.0,40">
 <rect data-node-id="browser" x="0" y="0" width="170" height="40" rx="6" fill="#2f4a63" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">Browser</text>
 </g>
-<g class="node-group" data-node-id="nginx" transform="translate(955.0, 170)" data-x-y="955.0,170">
+<g class="node-group" data-node-id="nginx" transform="translate(1055.0, 170)" data-x-y="1055.0,170">
 <rect data-node-id="nginx" x="0" y="0" width="170" height="40" rx="6" fill="#3a2f1a" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">nginx</text>
 </g>
-<g class="node-group" data-node-id="pihole" transform="translate(755.0, 300)" data-x-y="755.0,300">
+<g class="node-group" data-node-id="pihole" transform="translate(855.0, 300)" data-x-y="855.0,300">
 <rect data-node-id="pihole" x="0" y="0" width="170" height="40" rx="6" fill="#233b2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">Pi-hole</text>
 </g>
-<g class="node-group" data-node-id="mealie" transform="translate(955.0, 300)" data-x-y="955.0,300">
+<g class="node-group" data-node-id="mealie" transform="translate(1055.0, 300)" data-x-y="1055.0,300">
 <rect data-node-id="mealie" x="0" y="0" width="170" height="40" rx="6" fill="#233b2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">Mealie</text>
 </g>
-<g class="node-group" data-node-id="kanboard" transform="translate(1155.0, 300)" data-x-y="1155.0,300">
+<g class="node-group" data-node-id="kanboard" transform="translate(1255.0, 300)" data-x-y="1255.0,300">
 <rect data-node-id="kanboard" x="0" y="0" width="170" height="40" rx="6" fill="#233b2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">Kanboard</text>
 </g>
@@ -74,6 +78,10 @@
 <rect data-node-id="envcheck" x="0" y="0" width="170" height="40" rx="6" fill="#2d2d2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">check_env_updates.py</text>
 </g>
+<g class="node-group" data-node-id="stc" transform="translate(1455.0, 430)" data-x-y="1455.0,430">
+<rect data-node-id="stc" x="0" y="0" width="170" height="40" rx="6" fill="#2d2d2d" stroke="#555"/>
+<text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">syncthing_client.py</text>
+</g>
 <g class="node-group" data-node-id="core_js" transform="translate(255.0, 560)" data-x-y="255.0,560">
 <rect data-node-id="core_js" x="0" y="0" width="170" height="40" rx="6" fill="#2f2d4a" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">core.js</text>
@@ -102,20 +110,28 @@
 <rect data-node-id="static_js" x="0" y="0" width="170" height="40" rx="6" fill="#2f2d4a" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">static-apps.js</text>
 </g>
-<g class="node-group" data-node-id="config_py" transform="translate(1455.0, 430)" data-x-y="1455.0,430">
+<g class="node-group" data-node-id="syncthing_js" transform="translate(1655.0, 560)" data-x-y="1655.0,560">
+<rect data-node-id="syncthing_js" x="0" y="0" width="170" height="40" rx="6" fill="#2f2d4a" stroke="#555"/>
+<text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">syncthing.js</text>
+</g>
+<g class="node-group" data-node-id="config_py" transform="translate(1655.0, 430)" data-x-y="1655.0,430">
 <rect data-node-id="config_py" x="0" y="0" width="170" height="40" rx="6" fill="#2d2d2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">config.py</text>
 </g>
-<g class="node-group" data-node-id="config_js" transform="translate(1655.0, 560)" data-x-y="1655.0,560">
+<g class="node-group" data-node-id="config_js" transform="translate(1855.0, 560)" data-x-y="1855.0,560">
 <rect data-node-id="config_js" x="0" y="0" width="170" height="40" rx="6" fill="#2f2d4a" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">config.js</text>
 </g>
-<g class="node-group" data-node-id="gendocs" transform="translate(1655.0, 430)" data-x-y="1655.0,430">
+<g class="node-group" data-node-id="gendocs" transform="translate(1855.0, 430)" data-x-y="1855.0,430">
 <rect data-node-id="gendocs" x="0" y="0" width="170" height="40" rx="6" fill="#2d2d2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">generate_docs_index.py</text>
 </g>
-<g class="node-group" data-node-id="genmap" transform="translate(1855.0, 430)" data-x-y="1855.0,430">
+<g class="node-group" data-node-id="genmap" transform="translate(2055.0, 430)" data-x-y="2055.0,430">
 <rect data-node-id="genmap" x="0" y="0" width="170" height="40" rx="6" fill="#2d2d2d" stroke="#555"/>
 <text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">generate_architecture_map.py</text>
+</g>
+<g class="node-group" data-node-id="syncthing" transform="translate(1055.0, 690)" data-x-y="1055.0,690">
+<rect data-node-id="syncthing" x="0" y="0" width="170" height="40" rx="6" fill="#4a2d2d" stroke="#555"/>
+<text x="85.0" y="25.0" fill="white" font-size="12" text-anchor="middle" style="pointer-events:none;">Syncthing (external)</text>
 </g>
 </svg>

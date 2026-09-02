@@ -19,6 +19,7 @@ INDEX_FILE = os.path.join(DOCS_DIR, "index.md")
 EXPECTED_TOPICS = {
     "mealie": "Mealie meal planning",
     "streams": "Streams media player",
+    "syncthing": "Syncthing devices",
     "config-and-setup": "Configuration & setup system",
     "nginx-and-networking": "nginx & networking",
     "system-panel": "System panel (status & factory reset)",

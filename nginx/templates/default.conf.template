@@ -98,6 +98,30 @@ server {
     location /api/swap-days {
             proxy_pass http://172.17.0.1:9001/api/swap-days?key=${TRIGGER_SECRET};
     }
+    location /data/syncthing-status {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-status?key=${TRIGGER_SECRET};
+    }
+    location /data/syncthing-devices {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-devices?key=${TRIGGER_SECRET};
+    }
+    location /api/save-syncthing-config {
+            proxy_pass http://172.17.0.1:9001/api/save-syncthing-config?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-device-pause {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-device-pause?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-device-resume {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-device-resume?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-device-add {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-device-add?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-device-rename {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-device-rename?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-device-remove {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-device-remove?key=${TRIGGER_SECRET};
+    }
     location /data/audiobook-library {
             proxy_pass http://172.17.0.1:9001/data/audiobook-library?key=${TRIGGER_SECRET}&profile=$arg_profile;
     }

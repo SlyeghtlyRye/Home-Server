@@ -435,6 +435,25 @@
     }
     .nav-link:hover { border-color: var(--color-border); color: white; }
     .nav-link.active { background: var(--color-selected-bg); color: white; border-color: var(--color-accent); }
+
+    .st-device-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--color-border-soft); }
+    .st-device-row:last-of-type { border-bottom: none; }
+    .st-status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .st-status-dot.connected { background: #7cb87c; }
+    .st-status-dot.paused { background: var(--color-warning); }
+    .st-status-dot.offline { background: var(--color-text-muted); }
+    .st-device-info { flex: 1; min-width: 0; }
+    .st-device-name { font-weight: bold; font-size: 15px; }
+    .st-device-name-text { cursor: pointer; }
+    .st-device-name-text:hover { text-decoration: underline; color: var(--color-accent); }
+    .st-device-meta { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+    .st-device-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .st-gui-link-wrap { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+    .st-gui-link { font-size: 12px; font-weight: normal; color: var(--color-accent); text-decoration: none; }
+    .st-gui-link:hover { text-decoration: underline; }
+    .st-gui-port-edit { cursor: pointer; font-size: 11px; color: var(--color-text-muted); }
+    .st-gui-port-edit:hover { color: white; }
+
     @media (max-width: 600px) {
       body { padding: 10px; }
       h1 { font-size: 24px; margin-bottom: 20px; }
@@ -452,6 +471,7 @@
         <button class="nav-link" data-nav="mealie">Mealie</button>
         <button class="nav-link" data-nav="kanboard">Kanboard</button>
         <button class="nav-link" data-nav="audiobooks">Streams</button>
+        <button class="nav-link" data-nav="syncthing">Syncthing</button>
         <button class="nav-link" data-nav="docs">Docs</button>
         <button class="nav-link" data-nav="system">System</button>
       </nav>
@@ -475,6 +495,10 @@
         <div class="card" data-app="audiobooks">
           <h2>&#x1F3A7; Streams</h2>
           <p>Watch & Listen</p>
+        </div>
+        <div class="card" data-app="syncthing">
+          <h2>&#x1F504; Syncthing</h2>
+          <p>Device Sync</p>
         </div>
         <div class="card" data-app="docs">
           <h2>&#x1F4DA; Docs</h2>
@@ -505,6 +529,7 @@
   <script type="module" src="js/static-apps.js"></script>
   <script type="module" src="js/mealie.js"></script>
   <script type="module" src="js/streams.js"></script>
+  <script type="module" src="js/syncthing.js"></script>
   <script type="module" src="js/docs.js"></script>
   <script type="module" src="js/system.js"></script>
   <script type="module" src="js/wizard.js"></script>
