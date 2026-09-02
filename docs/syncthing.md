@@ -48,6 +48,23 @@ managed by this dashboard). An earlier single-instance version conflated
 these because there was only one "Add" button in the whole panel, and
 it wasn't obvious which of the two very different things it did.
 
+**Why "Add Device" shows up once per instance, and why that's correct:**
+Syncthing has no shared/global device registry -- each installation keeps
+its own private list of peers it's configured to sync with. Pairing Host
+with a10mini genuinely requires both sides to separately know about the
+other; there's no single place to "add a device" once that covers both.
+This is Syncthing's own architecture, not a quirk of how the panel is
+built. Each instance tab's "Devices" header is labeled `<Label>'s
+Devices` (not just "Devices") specifically to make that ownership
+explicit, and carries an info tooltip (`infoTipHtml()`, a small
+&#x24D8; using the same native `title`-attribute pattern as every other
+hint in this codebase) spelling out that it's a separate list and that
+pairing needs the same device added on the other side too. There's
+deliberately no invented "device group" terminology here -- Syncthing's
+own docs and GUI don't use that term, so the tooltip describes the real
+mechanism (a separate per-instance list) rather than a name that would
+mean nothing if someone went looking for it in Syncthing itself.
+
 ## Running Syncthing: in this stack, or fully external
 
 The Host tab covers one case, "+ Connect Instance" covers the other, and

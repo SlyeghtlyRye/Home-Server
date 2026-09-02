@@ -70,6 +70,15 @@ function buildGuiUrl(host, port) {
   return `http://${hostPart}:${port}`;
 }
 
+// Syncthing has no official "group" concept for a device list -- each
+// instance just keeps its own separate one. These tooltips spell that
+// out inline (native title-attribute tooltip, same pattern as every
+// other title="..." hint in this codebase) rather than inventing
+// terminology Syncthing itself doesn't use.
+function infoTipHtml(text) {
+  return `<span class="st-info-tip" title="${escapeHtml(text)}">&#x24D8;</span>`;
+}
+
 function defaultAddInstanceId() {
   const host = instances.find(i => i.isHost && i.configured);
   if (host) return host.id;
@@ -512,18 +521,19 @@ function renderTabsHtml() {
 }
 
 function renderAllDevicesHtml() {
+  const infoTip = infoTipHtml('Merges the separate device list from every connected instance into one view. Syncthing keeps no shared/global device list -- each instance has its own -- so the same physical device can appear more than once here if it\'s known to more than one of your instances.');
   const anyConfigured = instances.some(i => i.configured);
   if (!anyConfigured) {
     return `
       <div class="week-block">
-        <h3>All Devices</h3>
+        <h3>All Devices ${infoTip}</h3>
         <p style="color:var(--color-text-muted);">No Syncthing instances connected yet -- connect Host, or use "+ Connect Instance" to add another, to see devices here.</p>
       </div>
     `;
   }
   return `
     <div class="week-block">
-      <h3>All Devices</h3>
+      <h3>All Devices ${infoTip}</h3>
       ${allDevicesError ? `<div class="warning-box">&#x26A0; ${escapeHtml(allDevicesError)}</div>` : ''}
       ${allDevicesList.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : allDevicesList.map(d => {
         const owningInstance = instances.find(i => i.id === d.instanceId);
@@ -537,10 +547,12 @@ function renderAllDevicesHtml() {
 function renderDevicesAndFoldersHtml() {
   const inst = instances.find(i => i.id === activeInstanceId);
   const clearLabel = inst && inst.isHost ? 'Clear connection' : 'Remove instance';
+  const label = inst ? inst.label : activeInstanceId;
+  const devicesInfoTip = infoTipHtml(`This is ${label}'s own separate list of known Syncthing devices -- Syncthing keeps no shared/global list, each instance has its own. Adding a device here only makes ${label} aware of it; the other side needs the same device added on its own tab (or to accept a connection request) before they'll actually sync with each other.`);
   return `
     <div class="week-block">
       <div class="shopping-panel-header">
-        <h3>Devices</h3>
+        <h3>${escapeHtml(label)}'s Devices ${devicesInfoTip}</h3>
         ${!devicesError ? `
           <div class="st-global-actions">
             <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
