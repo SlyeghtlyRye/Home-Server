@@ -98,20 +98,23 @@ server {
     location /api/swap-days {
             proxy_pass http://172.17.0.1:9001/api/swap-days?key=${TRIGGER_SECRET};
     }
-    location /data/syncthing-status {
-            proxy_pass http://172.17.0.1:9001/data/syncthing-status?key=${TRIGGER_SECRET};
+    location /data/syncthing-instances {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-instances?key=${TRIGGER_SECRET};
     }
     location /data/syncthing-devices {
-            proxy_pass http://172.17.0.1:9001/data/syncthing-devices?key=${TRIGGER_SECRET};
+            proxy_pass http://172.17.0.1:9001/data/syncthing-devices?key=${TRIGGER_SECRET}&instance=$arg_instance;
     }
     location /data/syncthing-folders {
-            proxy_pass http://172.17.0.1:9001/data/syncthing-folders?key=${TRIGGER_SECRET};
+            proxy_pass http://172.17.0.1:9001/data/syncthing-folders?key=${TRIGGER_SECRET}&instance=$arg_instance;
     }
-    location /api/save-syncthing-config {
-            proxy_pass http://172.17.0.1:9001/api/save-syncthing-config?key=${TRIGGER_SECRET};
+    location /api/save-syncthing-instance {
+            proxy_pass http://172.17.0.1:9001/api/save-syncthing-instance?key=${TRIGGER_SECRET};
     }
-    location /api/delete-syncthing-config {
-            proxy_pass http://172.17.0.1:9001/api/delete-syncthing-config?key=${TRIGGER_SECRET};
+    location /api/add-syncthing-instance {
+            proxy_pass http://172.17.0.1:9001/api/add-syncthing-instance?key=${TRIGGER_SECRET};
+    }
+    location /api/clear-syncthing-instance {
+            proxy_pass http://172.17.0.1:9001/api/clear-syncthing-instance?key=${TRIGGER_SECRET};
     }
     location /api/syncthing-pause-all {
             proxy_pass http://172.17.0.1:9001/api/syncthing-pause-all?key=${TRIGGER_SECRET};

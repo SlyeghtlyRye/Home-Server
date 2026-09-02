@@ -1,56 +1,145 @@
 """
-syncthing_client.py -- talks to an existing Syncthing instance's REST API.
-Syncthing itself is NOT part of this repo's docker-compose stack -- it's
-assumed to already be running elsewhere on the network. Powers the
-dashboard's Syncthing devices panel: connection status, sync completion,
-pause/resume, and add/rename/remove devices.
+syncthing_client.py -- talks to one or more Syncthing instances' REST
+APIs. Supports multiple simultaneous instances: a permanent "host" slot
+(the Syncthing container in this repo's own docker-compose stack, always
+listed even before it's configured) plus any number of externally-added
+instances (e.g. a phone/handheld running Syncthing elsewhere on the
+network). Powers the dashboard's Syncthing panel: connection status per
+instance, sync completion, pause/resume, and add/rename/remove devices
+and folders.
 
-Connection details (base URL + API key) live in a separate gitignored file
-rather than .env, same reasoning as scripts/mealie_token.txt: .env is
-wholesale-rewritten by reset_manager.py's write_env() on every setup/reset,
-which would silently wipe anything else added to it.
+Connection details (base URL + API key) per instance live in a separate
+gitignored file rather than .env, same reasoning as scripts/mealie_token.txt:
+.env is wholesale-rewritten by reset_manager.py's write_env() on every
+setup/reset, which would silently wipe anything else added to it.
 """
 import json
 import os
+import re
 import requests
+from config import HOST_IP
 
 CONFIG_FILE = "/root/scripts/syncthing_config.json"
+HOST_INSTANCE_ID = "host"
 
 
-def get_config():
+def _load_raw():
     if not os.path.exists(CONFIG_FILE):
-        return None
+        return {"instances": {}}
     with open(CONFIG_FILE) as f:
-        return json.load(f)
+        data = json.load(f)
+    data.setdefault("instances", {})
+    return data
 
 
-def save_config(url, api_key):
-    config = {"url": url.rstrip("/"), "apiKey": api_key}
+def _save_raw(data):
     with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f)
+        json.dump(data, f)
     os.chmod(CONFIG_FILE, 0o600)
-    return config
 
 
-def delete_config():
-    if os.path.exists(CONFIG_FILE):
-        os.remove(CONFIG_FILE)
+def default_host_url():
+    return f"http://{HOST_IP}:8384"
 
 
-def is_configured():
-    config = get_config()
+def list_instances():
+    """Always includes the pinned "host" slot, even before it's ever been
+    configured -- the dashboard can show a placeholder + Connect prompt
+    for it rather than the user needing to know it exists and add it
+    themselves. Other instances only appear once explicitly added."""
+    data = _load_raw()
+    stored = data["instances"]
+    result = []
+
+    host = stored.get(HOST_INSTANCE_ID)
+    result.append({
+        "id": HOST_INSTANCE_ID,
+        "label": "Host",
+        "isHost": True,
+        "configured": bool(host and host.get("url") and host.get("apiKey")),
+        "url": (host or {}).get("url") or default_host_url(),
+    })
+
+    for instance_id, inst in stored.items():
+        if instance_id == HOST_INSTANCE_ID:
+            continue
+        result.append({
+            "id": instance_id,
+            "label": inst.get("label", instance_id),
+            "isHost": False,
+            "configured": bool(inst.get("url") and inst.get("apiKey")),
+            "url": inst.get("url"),
+        })
+
+    return result
+
+
+def get_instance_config(instance_id):
+    data = _load_raw()
+    return data["instances"].get(instance_id)
+
+
+def is_instance_configured(instance_id):
+    config = get_instance_config(instance_id)
     return bool(config and config.get("url") and config.get("apiKey"))
 
 
-def _require_config():
-    config = get_config()
+def _slugify(label):
+    slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
+    return slug or "instance"
+
+
+def add_instance(label, url, api_key):
+    """Creates a new externally-added instance with an auto-generated ID
+    (a slug of its label, de-duplicated if it collides). Returns the ID."""
+    data = _load_raw()
+    base_slug = _slugify(label)
+    slug = base_slug
+    n = 2
+    while slug in data["instances"]:
+        slug = f"{base_slug}-{n}"
+        n += 1
+    data["instances"][slug] = {"label": label, "url": url.rstrip("/"), "apiKey": api_key}
+    _save_raw(data)
+    return slug
+
+
+def save_instance_config(instance_id, url, api_key, label=None):
+    """Creates or updates an instance's saved connection -- used both for
+    the host slot (instance_id="host") and for editing an already-added
+    external instance."""
+    data = _load_raw()
+    existing = data["instances"].get(instance_id, {})
+    default_label = "Host" if instance_id == HOST_INSTANCE_ID else instance_id
+    data["instances"][instance_id] = {
+        "label": label if label is not None else existing.get("label", default_label),
+        "url": url.rstrip("/"),
+        "apiKey": api_key,
+    }
+    _save_raw(data)
+
+
+def clear_instance_config(instance_id):
+    """Drops an instance's saved url/key. For the host slot this reverts
+    it to the not-yet-connected placeholder (list_instances() still
+    synthesizes it) -- the host can never be fully removed from the list,
+    only disconnected. For an externally-added instance, this is what
+    makes its tab disappear entirely, since those only exist in the
+    stored config to begin with."""
+    data = _load_raw()
+    if instance_id in data["instances"]:
+        del data["instances"][instance_id]
+        _save_raw(data)
+
+
+def _require_instance_config(instance_id):
+    config = get_instance_config(instance_id)
     if not config or not config.get("url") or not config.get("apiKey"):
-        raise RuntimeError("Syncthing isn't configured yet -- add its URL and API key first.")
+        raise RuntimeError("This Syncthing instance isn't configured yet -- add its URL and API key first.")
     return config
 
 
-def get_headers(config=None):
-    config = config or _require_config()
+def get_headers(config):
     return {"X-API-Key": config["apiKey"], "Content-Type": "application/json"}
 
 
@@ -88,14 +177,14 @@ def test_connection(url, api_key):
     return _get("/rest/system/status", config)
 
 
-def get_devices():
+def get_devices(instance_id):
     """Combines several Syncthing endpoints into one flat list the
     dashboard can render directly: identity + config from
     /rest/config/devices, live connection state from
     /rest/system/connections, last-seen from /rest/stats/device, and
     aggregate sync completion from /rest/db/completion -- Syncthing
     doesn't expose any single endpoint with all of this already joined."""
-    config = _require_config()
+    config = _require_instance_config(instance_id)
 
     status = _get("/rest/system/status", config)
     my_id = status.get("myID")
@@ -142,53 +231,53 @@ def get_devices():
     return result
 
 
-def pause_device(device_id):
-    config = _require_config()
+def pause_device(instance_id, device_id):
+    config = _require_instance_config(instance_id)
     _post("/rest/system/pause", config, params={"device": device_id})
 
 
-def resume_device(device_id):
-    config = _require_config()
+def resume_device(instance_id, device_id):
+    config = _require_instance_config(instance_id)
     _post("/rest/system/resume", config, params={"device": device_id})
 
 
-def add_device(device_id, name):
-    config = _require_config()
+def add_device(instance_id, device_id, name):
+    config = _require_instance_config(instance_id)
     body = {"deviceID": device_id, "name": name or device_id[:7], "addresses": ["dynamic"]}
     _put(f"/rest/config/devices/{device_id}", config, body)
 
 
-def rename_device(device_id, name):
-    config = _require_config()
+def rename_device(instance_id, device_id, name):
+    config = _require_instance_config(instance_id)
     device = _get(f"/rest/config/devices/{device_id}", config)
     device["name"] = name
     _put(f"/rest/config/devices/{device_id}", config, device)
 
 
-def remove_device(device_id):
-    config = _require_config()
+def remove_device(instance_id, device_id):
+    config = _require_instance_config(instance_id)
     _delete(f"/rest/config/devices/{device_id}", config)
 
 
-def pause_all_devices():
+def pause_all_devices(instance_id):
     """Omitting the `device` param on /rest/system/pause (or /resume)
     applies it to every device at once -- this is Syncthing's own
     documented behavior, not a loop we have to do ourselves."""
-    config = _require_config()
+    config = _require_instance_config(instance_id)
     _post("/rest/system/pause", config)
 
 
-def resume_all_devices():
-    config = _require_config()
+def resume_all_devices(instance_id):
+    config = _require_instance_config(instance_id)
     _post("/rest/system/resume", config)
 
 
-def get_folders():
+def get_folders(instance_id):
     """Folder list + live sync state, joined the same way get_devices()
     joins device state: /rest/config/folders has the identity/paused
     config, /rest/db/status has the live state/byte counts Syncthing
     doesn't include in the config response."""
-    config = _require_config()
+    config = _require_instance_config(instance_id)
     folders = _get("/rest/config/folders", config)
 
     result = []
@@ -214,13 +303,13 @@ def get_folders():
     return result
 
 
-def set_folder_paused(folder_id, paused):
-    config = _require_config()
+def set_folder_paused(instance_id, folder_id, paused):
+    config = _require_instance_config(instance_id)
     folder = _get(f"/rest/config/folders/{folder_id}", config)
     folder["paused"] = paused
     _put(f"/rest/config/folders/{folder_id}", config, folder)
 
 
-def rescan_folder(folder_id):
-    config = _require_config()
+def rescan_folder(instance_id, folder_id):
+    config = _require_instance_config(instance_id)
     _post("/rest/db/scan", config, params={"folder": folder_id})

@@ -355,28 +355,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
-        if parsed.path == "/data/syncthing-status":
-            self._send_json(200, {"configured": stc.is_configured()})
+        if parsed.path == "/data/syncthing-instances":
+            self._send_json(200, {"instances": stc.list_instances()})
             return
 
         if parsed.path == "/data/syncthing-devices":
-            if not stc.is_configured():
+            instance_id = params.get("instance", [None])[0]
+            if not instance_id:
+                self._send_json(400, {"error": "missing instance"})
+                return
+            if not stc.is_instance_configured(instance_id):
                 self._send_json(200, {"configured": False, "devices": [], "baseUrl": None})
                 return
             try:
-                devices = stc.get_devices()
-                base_url = (stc.get_config() or {}).get("url")
+                devices = stc.get_devices(instance_id)
+                base_url = (stc.get_instance_config(instance_id) or {}).get("url")
                 self._send_json(200, {"configured": True, "devices": devices, "baseUrl": base_url})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/data/syncthing-folders":
-            if not stc.is_configured():
+            instance_id = params.get("instance", [None])[0]
+            if not instance_id:
+                self._send_json(400, {"error": "missing instance"})
+                return
+            if not stc.is_instance_configured(instance_id):
                 self._send_json(200, {"configured": False, "folders": []})
                 return
             try:
-                folders = stc.get_folders()
+                folders = stc.get_folders(instance_id)
                 self._send_json(200, {"configured": True, "folders": folders})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -433,18 +441,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
             return
 
-        if parsed.path == "/api/save-syncthing-config":
+        if parsed.path == "/api/save-syncthing-instance":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             url = (body.get("url") or "").strip()
             api_key = (body.get("apiKey") or "").strip()
-            if not url:
-                self._send_json(400, {"error": "missing url"})
+            label = body.get("label")
+            if not instance_id or not url:
+                self._send_json(400, {"error": "missing instanceId or url"})
                 return
             if not api_key:
                 # Editing with the API key field left blank means "keep
                 # the existing key" -- only meaningful if one is already
                 # saved, since first-time connect always requires it.
-                existing = stc.get_config()
+                existing = stc.get_instance_config(instance_id)
                 if not existing or not existing.get("apiKey"):
                     self._send_json(400, {"error": "missing apiKey"})
                     return
@@ -454,26 +464,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
                 return
-            stc.save_config(url, api_key)
+            stc.save_instance_config(instance_id, url, api_key, label)
             self._send_json(200, {"status": "ok", "valid": True})
             return
 
-        if parsed.path == "/api/delete-syncthing-config":
-            stc.delete_config()
+        if parsed.path == "/api/add-syncthing-instance":
+            body = self._read_json_body()
+            label = (body.get("label") or "").strip()
+            url = (body.get("url") or "").strip()
+            api_key = (body.get("apiKey") or "").strip()
+            if not label or not url or not api_key:
+                self._send_json(400, {"error": "missing label, url, or apiKey"})
+                return
+            try:
+                stc.test_connection(url, api_key)
+            except Exception as e:
+                self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+                return
+            instance_id = stc.add_instance(label, url, api_key)
+            self._send_json(200, {"status": "ok", "valid": True, "instanceId": instance_id})
+            return
+
+        if parsed.path == "/api/clear-syncthing-instance":
+            body = self._read_json_body()
+            instance_id = body.get("instanceId")
+            if not instance_id:
+                self._send_json(400, {"error": "missing instanceId"})
+                return
+            stc.clear_instance_config(instance_id)
             self._send_json(200, {"status": "ok"})
             return
 
         if parsed.path == "/api/syncthing-pause-all":
+            body = self._read_json_body()
+            instance_id = body.get("instanceId")
+            if not instance_id:
+                self._send_json(400, {"error": "missing instanceId"})
+                return
             try:
-                stc.pause_all_devices()
+                stc.pause_all_devices(instance_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/api/syncthing-resume-all":
+            body = self._read_json_body()
+            instance_id = body.get("instanceId")
+            if not instance_id:
+                self._send_json(400, {"error": "missing instanceId"})
+                return
             try:
-                stc.resume_all_devices()
+                stc.resume_all_devices(instance_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -481,12 +523,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-folder-pause":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             folder_id = body.get("folderId")
-            if not folder_id:
-                self._send_json(400, {"error": "missing folderId"})
+            if not instance_id or not folder_id:
+                self._send_json(400, {"error": "missing instanceId or folderId"})
                 return
             try:
-                stc.set_folder_paused(folder_id, True)
+                stc.set_folder_paused(instance_id, folder_id, True)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -494,12 +537,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-folder-resume":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             folder_id = body.get("folderId")
-            if not folder_id:
-                self._send_json(400, {"error": "missing folderId"})
+            if not instance_id or not folder_id:
+                self._send_json(400, {"error": "missing instanceId or folderId"})
                 return
             try:
-                stc.set_folder_paused(folder_id, False)
+                stc.set_folder_paused(instance_id, folder_id, False)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -507,12 +551,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-folder-rescan":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             folder_id = body.get("folderId")
-            if not folder_id:
-                self._send_json(400, {"error": "missing folderId"})
+            if not instance_id or not folder_id:
+                self._send_json(400, {"error": "missing instanceId or folderId"})
                 return
             try:
-                stc.rescan_folder(folder_id)
+                stc.rescan_folder(instance_id, folder_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -520,12 +565,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-device-pause":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             device_id = body.get("deviceId")
-            if not device_id:
-                self._send_json(400, {"error": "missing deviceId"})
+            if not instance_id or not device_id:
+                self._send_json(400, {"error": "missing instanceId or deviceId"})
                 return
             try:
-                stc.pause_device(device_id)
+                stc.pause_device(instance_id, device_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -533,12 +579,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-device-resume":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             device_id = body.get("deviceId")
-            if not device_id:
-                self._send_json(400, {"error": "missing deviceId"})
+            if not instance_id or not device_id:
+                self._send_json(400, {"error": "missing instanceId or deviceId"})
                 return
             try:
-                stc.resume_device(device_id)
+                stc.resume_device(instance_id, device_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -546,13 +593,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-device-add":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             device_id = (body.get("deviceId") or "").strip()
             name = (body.get("name") or "").strip()
-            if not device_id:
-                self._send_json(400, {"error": "missing deviceId"})
+            if not instance_id or not device_id:
+                self._send_json(400, {"error": "missing instanceId or deviceId"})
                 return
             try:
-                stc.add_device(device_id, name)
+                stc.add_device(instance_id, device_id, name)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -560,13 +608,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-device-rename":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             device_id = body.get("deviceId")
             name = (body.get("name") or "").strip()
-            if not device_id or not name:
-                self._send_json(400, {"error": "missing deviceId or name"})
+            if not instance_id or not device_id or not name:
+                self._send_json(400, {"error": "missing instanceId, deviceId, or name"})
                 return
             try:
-                stc.rename_device(device_id, name)
+                stc.rename_device(instance_id, device_id, name)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -574,12 +623,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if parsed.path == "/api/syncthing-device-remove":
             body = self._read_json_body()
+            instance_id = body.get("instanceId")
             device_id = body.get("deviceId")
-            if not device_id:
-                self._send_json(400, {"error": "missing deviceId"})
+            if not instance_id or not device_id:
+                self._send_json(400, {"error": "missing instanceId or deviceId"})
                 return
             try:
-                stc.remove_device(device_id)
+                stc.remove_device(instance_id, device_id)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
