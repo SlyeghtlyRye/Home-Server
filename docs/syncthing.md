@@ -22,8 +22,10 @@ devices, without needing Syncthing's own web GUI for routine management.
 
 ## Connecting
 
-Syncthing's REST API needs a base URL and an API key (found in its web GUI
-under Actions -> Settings -> GUI). The Syncthing tab shows a small form for
+Syncthing's REST API needs a base URL and an API key. The URL is just the
+regular address you'd use to open Syncthing in a browser (e.g.
+`http://192.168.1.50:8384`); the API key is in Syncthing under
+Actions -> Settings -> General. The Syncthing tab shows a small form for
 these on first use; **Connect** validates them with a real API call
 (`/rest/system/status`) before saving, so a bad URL or key fails loudly
 right away instead of silently breaking every device call afterward.
@@ -35,8 +37,25 @@ setup/reset, which would silently wipe anything added to it that isn't in
 that function's own hardcoded template. `scripts/mealie_token.txt` already
 established the pattern of keeping a post-setup credential in its own
 gitignored file instead, for exactly this reason -- `syncthing_config.json`
-follows it. A "Settings" button in the panel re-opens the connect form to
-change the URL/key later.
+follows it.
+
+There's deliberately no in-app way to change the URL/API key once
+connected (an earlier "Settings" button that just re-opened the same
+connect form added a click without adding value). To reconnect elsewhere,
+delete `scripts/syncthing_config.json` over SSH and reload the tab -- the
+connect form reappears automatically since `is_configured()` goes back to
+`false`.
+
+A connection failure worth knowing about: **403 Forbidden despite a
+correct API key** is a documented Syncthing behavior (DNS-rebinding
+protection, a.k.a. "host check") rejecting the request based on the `Host`
+header, separate from authentication. It can come up when Syncthing's GUI
+listens on `0.0.0.0` (all interfaces, needed for this dashboard to reach
+it from another device at all) but doesn't recognize the specific
+IP/hostname the request arrived on. The documented fix is enabling
+"Insecure Skip Host-check" under Syncthing's own Settings -> GUI --
+unconfirmed against a real 403 in this setup as of writing, so treat it as
+the first thing to try, not a guaranteed fix.
 
 ## Device list
 
@@ -55,6 +74,26 @@ Syncthing doesn't expose one endpoint with everything the panel shows, so
 The self device (this Syncthing instance's own identity) is always sorted
 first and shown without pause/resume/remove actions, since those don't
 apply to itself.
+
+## Per-device GUI links
+
+Each device row has a "GUI" link to jump straight to that device's own
+Syncthing web interface. Syncthing's REST API has no endpoint that exposes
+a remote device's GUI address -- `/rest/system/connections` only reports
+the *sync-protocol* address (e.g. `tcp://192.0.2.42:22000`), a different
+port than the GUI. So the link is a best-effort guess: same host,
+port 8384 (Syncthing's default GUI port) unless overridden.
+
+- The **self** device links to the exact configured URL (`baseUrl` in the
+  `/data/syncthing-devices` response) -- no guessing needed, since that's
+  the instance the panel is already talking to.
+- **Other** devices only get a link while connected (no address is known
+  otherwise), built by `extractHostFromAddress()` + `buildGuiUrl()` in
+  `js/syncthing.js`. A gear icon next to the link lets you override the
+  port per device via a prompt; overrides live in `localStorage`
+  (`mealie_syncthingDevicePorts`), not the backend -- this is purely a
+  per-browser display convenience, not data worth round-tripping through
+  the server.
 
 ## Actions
 

@@ -442,6 +442,8 @@
     .st-status-dot.connected { background: #7cb87c; }
     .st-status-dot.paused { background: var(--color-warning); }
     .st-status-dot.offline { background: var(--color-text-muted); }
+    .st-status-dot.syncing { background: var(--color-accent); }
+    .st-status-dot.error { background: var(--color-danger-border); }
     .st-device-info { flex: 1; min-width: 0; }
     .st-device-name { font-weight: bold; font-size: 15px; }
     .st-device-name-text { cursor: pointer; }
@@ -453,6 +455,10 @@
     .st-gui-link:hover { text-decoration: underline; }
     .st-gui-port-edit { cursor: pointer; font-size: 11px; color: var(--color-text-muted); }
     .st-gui-port-edit:hover { color: white; }
+    .st-global-actions { display: flex; gap: 6px; }
+    .st-connection-links { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--color-border-soft); font-size: 12px; color: var(--color-text-muted); display: flex; gap: 14px; }
+    .st-link-action { cursor: pointer; }
+    .st-link-action:hover { color: var(--color-accent); text-decoration: underline; }
 
     @media (max-width: 600px) {
       body { padding: 10px; }

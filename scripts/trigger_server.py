@@ -371,6 +371,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/data/syncthing-folders":
+            if not stc.is_configured():
+                self._send_json(200, {"configured": False, "folders": []})
+                return
+            try:
+                folders = stc.get_folders()
+                self._send_json(200, {"configured": True, "folders": folders})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -426,9 +437,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = self._read_json_body()
             url = (body.get("url") or "").strip()
             api_key = (body.get("apiKey") or "").strip()
-            if not url or not api_key:
-                self._send_json(400, {"error": "missing url or apiKey"})
+            if not url:
+                self._send_json(400, {"error": "missing url"})
                 return
+            if not api_key:
+                # Editing with the API key field left blank means "keep
+                # the existing key" -- only meaningful if one is already
+                # saved, since first-time connect always requires it.
+                existing = stc.get_config()
+                if not existing or not existing.get("apiKey"):
+                    self._send_json(400, {"error": "missing apiKey"})
+                    return
+                api_key = existing["apiKey"]
             try:
                 stc.test_connection(url, api_key)
             except Exception as e:
@@ -436,6 +456,66 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             stc.save_config(url, api_key)
             self._send_json(200, {"status": "ok", "valid": True})
+            return
+
+        if parsed.path == "/api/delete-syncthing-config":
+            stc.delete_config()
+            self._send_json(200, {"status": "ok"})
+            return
+
+        if parsed.path == "/api/syncthing-pause-all":
+            try:
+                stc.pause_all_devices()
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-resume-all":
+            try:
+                stc.resume_all_devices()
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-folder-pause":
+            body = self._read_json_body()
+            folder_id = body.get("folderId")
+            if not folder_id:
+                self._send_json(400, {"error": "missing folderId"})
+                return
+            try:
+                stc.set_folder_paused(folder_id, True)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-folder-resume":
+            body = self._read_json_body()
+            folder_id = body.get("folderId")
+            if not folder_id:
+                self._send_json(400, {"error": "missing folderId"})
+                return
+            try:
+                stc.set_folder_paused(folder_id, False)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-folder-rescan":
+            body = self._read_json_body()
+            folder_id = body.get("folderId")
+            if not folder_id:
+                self._send_json(400, {"error": "missing folderId"})
+                return
+            try:
+                stc.rescan_folder(folder_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/api/syncthing-device-pause":

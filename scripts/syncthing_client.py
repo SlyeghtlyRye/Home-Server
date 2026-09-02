@@ -32,6 +32,11 @@ def save_config(url, api_key):
     return config
 
 
+def delete_config():
+    if os.path.exists(CONFIG_FILE):
+        os.remove(CONFIG_FILE)
+
+
 def is_configured():
     config = get_config()
     return bool(config and config.get("url") and config.get("apiKey"))
@@ -163,3 +168,59 @@ def rename_device(device_id, name):
 def remove_device(device_id):
     config = _require_config()
     _delete(f"/rest/config/devices/{device_id}", config)
+
+
+def pause_all_devices():
+    """Omitting the `device` param on /rest/system/pause (or /resume)
+    applies it to every device at once -- this is Syncthing's own
+    documented behavior, not a loop we have to do ourselves."""
+    config = _require_config()
+    _post("/rest/system/pause", config)
+
+
+def resume_all_devices():
+    config = _require_config()
+    _post("/rest/system/resume", config)
+
+
+def get_folders():
+    """Folder list + live sync state, joined the same way get_devices()
+    joins device state: /rest/config/folders has the identity/paused
+    config, /rest/db/status has the live state/byte counts Syncthing
+    doesn't include in the config response."""
+    config = _require_config()
+    folders = _get("/rest/config/folders", config)
+
+    result = []
+    for f in folders:
+        folder_id = f["id"]
+        try:
+            status = _get("/rest/db/status", config, params={"folder": folder_id})
+        except (requests.RequestException, RuntimeError):
+            status = {}
+        global_bytes = status.get("globalBytes") or 0
+        in_sync_bytes = status.get("inSyncBytes") or 0
+        completion_pct = round((in_sync_bytes / global_bytes) * 100, 1) if global_bytes else 100.0
+        result.append({
+            "id": folder_id,
+            "label": f.get("label") or folder_id,
+            "paused": f.get("paused", False),
+            "state": status.get("state", "unknown"),
+            "completion": completion_pct,
+            "errors": status.get("errors", 0),
+        })
+
+    result.sort(key=lambda x: x["label"].lower())
+    return result
+
+
+def set_folder_paused(folder_id, paused):
+    config = _require_config()
+    folder = _get(f"/rest/config/folders/{folder_id}", config)
+    folder["paused"] = paused
+    _put(f"/rest/config/folders/{folder_id}", config, folder)
+
+
+def rescan_folder(folder_id):
+    config = _require_config()
+    _post("/rest/db/scan", config, params={"folder": folder_id})

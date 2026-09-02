@@ -104,8 +104,29 @@ server {
     location /data/syncthing-devices {
             proxy_pass http://172.17.0.1:9001/data/syncthing-devices?key=${TRIGGER_SECRET};
     }
+    location /data/syncthing-folders {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-folders?key=${TRIGGER_SECRET};
+    }
     location /api/save-syncthing-config {
             proxy_pass http://172.17.0.1:9001/api/save-syncthing-config?key=${TRIGGER_SECRET};
+    }
+    location /api/delete-syncthing-config {
+            proxy_pass http://172.17.0.1:9001/api/delete-syncthing-config?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-pause-all {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-pause-all?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-resume-all {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-resume-all?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-folder-pause {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-folder-pause?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-folder-resume {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-folder-resume?key=${TRIGGER_SECRET};
+    }
+    location /api/syncthing-folder-rescan {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-folder-rescan?key=${TRIGGER_SECRET};
     }
     location /api/syncthing-device-pause {
             proxy_pass http://172.17.0.1:9001/api/syncthing-device-pause?key=${TRIGGER_SECRET};

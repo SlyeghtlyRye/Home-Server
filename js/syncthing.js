@@ -9,7 +9,9 @@ import { registerApp, showStatusModal, hideStatusModal,
 
 let configured = null; // null = not checked yet, otherwise boolean
 let devices = [];
+let folders = [];
 let showAddForm = false;
+let editingConfig = false;
 let stBaseUrl = null; // this Syncthing instance's own URL, for the self device's GUI link
 
 const DEFAULT_GUI_PORT = 8384;
@@ -61,13 +63,13 @@ async function checkConfigured() {
     showErrorBanner("Couldn't reach the server to check Syncthing status. Check that it's running and try again.");
   }
   if (configured) {
-    loadDevices();
+    refreshAll();
   } else {
     renderSyncthingPanel();
   }
 }
 
-async function loadDevices() {
+async function fetchDevicesData() {
   try {
     const res = await fetch('/data/syncthing-devices');
     if (!res.ok) throw new Error('server responded ' + res.status);
@@ -80,30 +82,75 @@ async function loadDevices() {
     console.error('Failed to load Syncthing devices', err);
     showErrorBanner("Couldn't reach the server to load Syncthing devices. Check that it's running and try again.");
   }
+}
+
+async function fetchFoldersData() {
+  try {
+    const res = await fetch('/data/syncthing-folders');
+    if (!res.ok) throw new Error('server responded ' + res.status);
+    const data = await res.json();
+    folders = data.folders || [];
+  } catch (err) {
+    console.error('Failed to load Syncthing folders', err);
+    folders = [];
+  }
+}
+
+async function refreshAll() {
+  await Promise.all([fetchDevicesData(), fetchFoldersData()]);
   renderSyncthingPanel();
 }
 
-function renderConfigFormHtml() {
+function renderConfigFormHtml(editing) {
+  const urlValue = editing && stBaseUrl ? escapeHtml(stBaseUrl) : '';
   return `
     <div class="week-block">
-      <h3>Connect to Syncthing</h3>
+      <h3>${editing ? 'Editing Syncthing Connection' : 'Connect to Syncthing'}</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
-        Enter your existing Syncthing instance's address and API key (found in its
-        web GUI under Actions &rarr; Settings &rarr; GUI).
+        ${editing
+          ? 'Update the URL and/or API key below. Leave the API key blank to keep the one already saved.'
+          : 'URL is just the regular address you use to open Syncthing in a browser. API key is in Syncthing under Actions &rarr; Settings &rarr; General.'}
       </p>
       <div class="preview-row">
         <span class="date">URL</span>
-        <input type="text" id="st-config-url" placeholder="http://192.168.1.50:8384" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <input type="text" id="st-config-url" value="${urlValue}" placeholder="http://192.168.1.50:8384" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="preview-row">
         <span class="date">API key</span>
-        <input type="password" id="st-config-key" placeholder="Paste your API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <input type="password" id="st-config-key" placeholder="${editing ? 'Leave blank to keep current key' : 'Paste your API key'}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="btn-grid">
-        <button class="btn" data-action="save-config">Connect</button>
+        <button class="btn" data-action="save-config">${editing ? 'Save' : 'Connect'}</button>
+        ${editing ? '<button class="btn clear" data-action="cancel-edit-config">Cancel</button>' : ''}
       </div>
     </div>
   `;
+}
+
+function startEditConfig() {
+  editingConfig = true;
+  renderSyncthingPanel();
+}
+
+function cancelEditConfig() {
+  editingConfig = false;
+  renderSyncthingPanel();
+}
+
+async function deleteConfigConnection() {
+  if (!(await showConfirmModal("Remove the saved Syncthing connection? You'll need to reconnect (URL + API key) to manage devices again -- this doesn't affect Syncthing itself or any of its devices."))) return;
+  try {
+    const res = await fetch('/api/delete-syncthing-config', { method: 'POST' });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to remove connection: ' + (data.error || res.status), 'error'); return; }
+    configured = false;
+    editingConfig = false;
+    devices = [];
+    folders = [];
+    stBaseUrl = null;
+    renderSyncthingPanel();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
 }
 
 async function saveConfig() {
@@ -111,8 +158,9 @@ async function saveConfig() {
   const keyInput = document.getElementById('st-config-key');
   const url = urlInput.value.trim();
   const apiKey = keyInput.value.trim();
-  if (!url || !apiKey) return;
-  showStatusModal('Connecting...', 'loading');
+  if (!url) return;
+  if (!editingConfig && !apiKey) return; // first-time connect always needs a key
+  showStatusModal(editingConfig ? 'Saving...' : 'Connecting...', 'loading');
   try {
     const res = await fetch('/api/save-syncthing-config', {
       method: 'POST',
@@ -126,15 +174,11 @@ async function saveConfig() {
     }
     hideStatusModal();
     configured = true;
-    loadDevices();
+    editingConfig = false;
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
-}
-
-function reconfigure() {
-  configured = false;
-  renderSyncthingPanel();
 }
 
 function formatLastSeen(iso) {
@@ -211,6 +255,33 @@ function renderAddDeviceSectionHtml() {
   `;
 }
 
+function folderStatusClass(f) {
+  if (f.paused) return 'paused';
+  if (f.state === 'idle') return 'connected';
+  if (f.state === 'scanning' || f.state === 'syncing') return 'syncing';
+  if (f.state === 'error') return 'error';
+  return 'offline';
+}
+
+function renderFolderRowHtml(f) {
+  const stateLabel = f.paused ? 'Paused' : (f.state || 'idle');
+  const metaParts = [stateLabel, `${f.completion}% synced`];
+  if (f.errors) metaParts.push(`${f.errors} error${f.errors === 1 ? '' : 's'}`);
+  return `
+    <div class="st-device-row" data-folder-id="${escapeHtml(f.id)}">
+      <span class="st-status-dot ${folderStatusClass(f)}" title="${escapeHtml(stateLabel)}"></span>
+      <div class="st-device-info">
+        <div class="st-device-name">${escapeHtml(f.label)}</div>
+        <div class="st-device-meta">${metaParts.map(escapeHtml).join(' &middot; ')}</div>
+      </div>
+      <div class="st-device-actions">
+        <button class="btn small" data-action="${f.paused ? 'resume-folder' : 'pause-folder'}" data-folder-id="${escapeHtml(f.id)}">${f.paused ? 'Resume' : 'Pause'}</button>
+        <button class="btn small" data-action="rescan-folder" data-folder-id="${escapeHtml(f.id)}">Rescan</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderSyncthingPanel() {
   const el = document.getElementById('syncthing-panel');
   if (!el) return;
@@ -218,18 +289,29 @@ function renderSyncthingPanel() {
     el.innerHTML = '<div class="week-block"><p style="color:var(--color-text-muted);">Loading...</p></div>';
     return;
   }
-  if (!configured) {
-    el.innerHTML = renderConfigFormHtml();
+  if (!configured || editingConfig) {
+    el.innerHTML = renderConfigFormHtml(configured && editingConfig);
     return;
   }
   el.innerHTML = `
     <div class="week-block">
       <div class="shopping-panel-header">
         <h3>Devices</h3>
-        <button class="btn small" data-action="reconfigure" title="Change URL or API key">&#x2699; Settings</button>
+        <div class="st-global-actions">
+          <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
+          <button class="btn small" data-action="resume-all" title="Resume all devices">Resume All</button>
+        </div>
       </div>
       ${devices.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : devices.map(d => renderDeviceRowHtml(d)).join('')}
       ${renderAddDeviceSectionHtml()}
+      <div class="st-connection-links">
+        <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
+        <span class="st-link-action" data-action="delete-config">Delete connection</span>
+      </div>
+    </div>
+    <div class="week-block">
+      <h3>Folders</h3>
+      ${folders.length === 0 ? '<p style="color:var(--color-text-muted);">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join('')}
     </div>
   `;
 }
@@ -240,7 +322,7 @@ async function pauseDevice(deviceId) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause: ' + (data.error || res.status), 'error'); return; }
-    loadDevices();
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -252,7 +334,7 @@ async function resumeDevice(deviceId) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume: ' + (data.error || res.status), 'error'); return; }
-    loadDevices();
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -265,21 +347,77 @@ async function removeDevice(deviceId, name) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to remove: ' + (data.error || res.status), 'error'); return; }
-    loadDevices();
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
 
 async function startRenameDevice(deviceId, currentName) {
-  const name = window.prompt('Rename device:', currentName);
+  const name = window.prompt(`Rename "${currentName}" to:`, currentName);
   if (!name || !name.trim() || name.trim() === currentName) return;
   try {
     const res = await fetch('/api/syncthing-device-rename', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId, name: name.trim() })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Rename failed: ' + (data.error || res.status), 'error'); return; }
-    loadDevices();
+    refreshAll();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function pauseAllDevices() {
+  try {
+    const res = await fetch('/api/syncthing-pause-all', { method: 'POST' });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause all: ' + (data.error || res.status), 'error'); return; }
+    refreshAll();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function resumeAllDevices() {
+  try {
+    const res = await fetch('/api/syncthing-resume-all', { method: 'POST' });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume all: ' + (data.error || res.status), 'error'); return; }
+    refreshAll();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function pauseFolder(folderId) {
+  try {
+    const res = await fetch('/api/syncthing-folder-pause', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause folder: ' + (data.error || res.status), 'error'); return; }
+    refreshAll();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function resumeFolder(folderId) {
+  try {
+    const res = await fetch('/api/syncthing-folder-resume', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume folder: ' + (data.error || res.status), 'error'); return; }
+    refreshAll();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function rescanFolder(folderId) {
+  try {
+    const res = await fetch('/api/syncthing-folder-rescan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to rescan: ' + (data.error || res.status), 'error'); return; }
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -310,7 +448,7 @@ async function addDevice() {
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to add device: ' + (data.error || res.status), 'error'); return; }
     showAddForm = false;
-    loadDevices();
+    refreshAll();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -322,9 +460,14 @@ function wireDelegatedListeners() {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const deviceId = btn.dataset.deviceId;
+    const folderId = btn.dataset.folderId;
     switch (btn.dataset.action) {
       case 'save-config': return saveConfig();
-      case 'reconfigure': return reconfigure();
+      case 'start-edit-config': return startEditConfig();
+      case 'cancel-edit-config': return cancelEditConfig();
+      case 'delete-config': return deleteConfigConnection();
+      case 'pause-all': return pauseAllDevices();
+      case 'resume-all': return resumeAllDevices();
       case 'pause-device': return pauseDevice(deviceId);
       case 'resume-device': return resumeDevice(deviceId);
       case 'remove-device': {
@@ -343,6 +486,9 @@ function wireDelegatedListeners() {
         showAddForm = false;
         return renderSyncthingPanel();
       case 'add-device': return addDevice();
+      case 'pause-folder': return pauseFolder(folderId);
+      case 'resume-folder': return resumeFolder(folderId);
+      case 'rescan-folder': return rescanFolder(folderId);
     }
   });
 }
@@ -359,7 +505,9 @@ registerApp('syncthing', {
     wireDelegatedListeners();
     configured = null;
     devices = [];
+    folders = [];
     showAddForm = false;
+    editingConfig = false;
     renderSyncthingPanel();
     checkConfigured();
   },
