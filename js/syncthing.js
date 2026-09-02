@@ -10,6 +10,8 @@ import { registerApp, showStatusModal, hideStatusModal,
 let configured = null; // null = not checked yet, otherwise boolean
 let devices = [];
 let folders = [];
+let devicesError = null; // set when OUR backend responded but Syncthing itself didn't
+let foldersError = null;
 let showAddForm = false;
 let editingConfig = false;
 let stBaseUrl = null; // this Syncthing instance's own URL, for the self device's GUI link
@@ -70,30 +72,53 @@ async function checkConfigured() {
 }
 
 async function fetchDevicesData() {
+  devicesError = null;
+  let res;
   try {
-    const res = await fetch('/data/syncthing-devices');
-    if (!res.ok) throw new Error('server responded ' + res.status);
-    const data = await res.json();
-    configured = data.configured;
-    devices = data.devices || [];
-    stBaseUrl = data.baseUrl || null;
-    clearErrorBanner();
+    res = await fetch('/data/syncthing-devices');
   } catch (err) {
-    console.error('Failed to load Syncthing devices', err);
+    // fetch() itself threw -- our own backend (nginx/trigger_server) is
+    // unreachable. That's a real "check that it's running" situation,
+    // same shared page banner every other module uses for it.
+    console.error("Couldn't reach the server for Syncthing devices", err);
     showErrorBanner("Couldn't reach the server to load Syncthing devices. Check that it's running and try again.");
+    return;
   }
+  clearErrorBanner();
+  if (!res.ok) {
+    // Our backend responded, so it's fine -- this is Syncthing itself
+    // (at the configured URL) not answering. Scoped to the panel, not
+    // the page banner, so it isn't mistaken for a dashboard outage.
+    const data = await res.json().catch(() => ({}));
+    devicesError = data.error || `Server responded ${res.status}`;
+    devices = [];
+    console.error('Syncthing devices request failed', devicesError);
+    return;
+  }
+  const data = await res.json();
+  configured = data.configured;
+  devices = data.devices || [];
+  stBaseUrl = data.baseUrl || null;
 }
 
 async function fetchFoldersData() {
+  foldersError = null;
+  let res;
   try {
-    const res = await fetch('/data/syncthing-folders');
-    if (!res.ok) throw new Error('server responded ' + res.status);
-    const data = await res.json();
-    folders = data.folders || [];
+    res = await fetch('/data/syncthing-folders');
   } catch (err) {
-    console.error('Failed to load Syncthing folders', err);
-    folders = [];
+    console.error("Couldn't reach the server for Syncthing folders", err);
+    return; // fetchDevicesData already surfaces the page banner for this
   }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    foldersError = data.error || `Server responded ${res.status}`;
+    folders = [];
+    console.error('Syncthing folders request failed', foldersError);
+    return;
+  }
+  const data = await res.json();
+  folders = data.folders || [];
 }
 
 async function refreshAll() {
@@ -146,6 +171,8 @@ async function deleteConfigConnection() {
     editingConfig = false;
     devices = [];
     folders = [];
+    devicesError = null;
+    foldersError = null;
     stBaseUrl = null;
     renderSyncthingPanel();
   } catch (err) {
@@ -297,13 +324,17 @@ function renderSyncthingPanel() {
     <div class="week-block">
       <div class="shopping-panel-header">
         <h3>Devices</h3>
-        <div class="st-global-actions">
-          <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
-          <button class="btn small" data-action="resume-all" title="Resume all devices">Resume All</button>
-        </div>
+        ${!devicesError ? `
+          <div class="st-global-actions">
+            <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
+            <button class="btn small" data-action="resume-all" title="Resume all devices">Resume All</button>
+          </div>
+        ` : ''}
       </div>
-      ${devices.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : devices.map(d => renderDeviceRowHtml(d)).join('')}
-      ${renderAddDeviceSectionHtml()}
+      ${devicesError
+        ? `<div class="warning-box">&#x26A0; Couldn't reach your Syncthing instance: ${escapeHtml(devicesError)}</div>`
+        : (devices.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : devices.map(d => renderDeviceRowHtml(d)).join(''))}
+      ${!devicesError ? renderAddDeviceSectionHtml() : ''}
       <div class="st-connection-links">
         <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
         <span class="st-link-action" data-action="delete-config">Delete connection</span>
@@ -311,7 +342,9 @@ function renderSyncthingPanel() {
     </div>
     <div class="week-block">
       <h3>Folders</h3>
-      ${folders.length === 0 ? '<p style="color:var(--color-text-muted);">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join('')}
+      ${foldersError
+        ? `<div class="warning-box">&#x26A0; Couldn't reach your Syncthing instance: ${escapeHtml(foldersError)}</div>`
+        : (folders.length === 0 ? '<p style="color:var(--color-text-muted);">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join(''))}
     </div>
   `;
 }
@@ -506,6 +539,8 @@ registerApp('syncthing', {
     configured = null;
     devices = [];
     folders = [];
+    devicesError = null;
+    foldersError = null;
     showAddForm = false;
     editingConfig = false;
     renderSyncthingPanel();

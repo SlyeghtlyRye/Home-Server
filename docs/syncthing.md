@@ -2,23 +2,29 @@ tags: syncthing, backend, frontend, external
 
 # Syncthing Devices
 
-A dashboard panel for managing devices on an existing Syncthing instance.
-Syncthing itself is **not** part of this repo's docker-compose stack -- it's
-assumed to already be running elsewhere on the network (this host or
-another device). The panel talks to that instance's REST API to show
-connection status and let you pause/resume, add, rename, and remove
-devices, without needing Syncthing's own web GUI for routine management.
+A dashboard panel for managing devices and folders on an existing
+Syncthing instance. Syncthing itself is **not** part of this repo's
+docker-compose stack -- it's assumed to already be running elsewhere on
+the network (this host or another device). The panel talks to that
+instance's REST API to show connection/sync status and let you
+pause/resume (per-device or all at once), add, rename, and remove
+devices, and pause/resume/rescan folders, without needing Syncthing's own
+web GUI for routine management.
 
 ## How it works
 
 - `scripts/syncthing_client.py` talks to Syncthing's REST API directly
-  (`/rest/config/devices`, `/rest/system/connections`,
-  `/rest/system/status`, `/rest/stats/device`, `/rest/db/completion`,
-  `/rest/config/folders`, plus pause/resume/add/rename/remove calls)
+  (`/rest/config/devices`, `/rest/config/folders`,
+  `/rest/system/connections`, `/rest/system/status`,
+  `/rest/stats/device`, `/rest/db/completion`, `/rest/db/status`,
+  `/rest/db/scan`, plus pause/resume/add/rename/remove calls)
 - `scripts/trigger_server.py` exposes this over HTTP for the dashboard,
   same `?key=` auth pattern as every other integration
-- `js/syncthing.js` is the frontend: a connect-once form, then a device
-  list with status/completion/last-seen and pause/resume/add/rename/remove
+- `js/syncthing.js` is the frontend: a connect form (with an editable,
+  deletable saved connection), a device list with
+  status/completion/last-seen/GUI-link and pause/resume/add/rename/remove
+  (plus a global pause/resume all), and a folder list with
+  status/completion and pause/resume/rescan
 
 ## Connecting
 
@@ -39,12 +45,21 @@ established the pattern of keeping a post-setup credential in its own
 gitignored file instead, for exactly this reason -- `syncthing_config.json`
 follows it.
 
-There's deliberately no in-app way to change the URL/API key once
-connected (an earlier "Settings" button that just re-opened the same
-connect form added a click without adding value). To reconnect elsewhere,
-delete `scripts/syncthing_config.json` over SSH and reload the tab -- the
-connect form reappears automatically since `is_configured()` goes back to
-`false`.
+**Edit connection** re-opens the same form, clearly labeled "Editing
+Syncthing Connection" (distinct from the first-time "Connect to
+Syncthing" heading, so it can't be mistaken for a fresh setup) with the
+URL prefilled from the already-saved value. The API key field is left
+blank rather than prefilled -- it's never sent back to the browser in the
+first place, for the same reason `mealie_token.txt`'s value never is.
+Leaving it blank on save means "keep the key I already have": the
+`/api/save-syncthing-config` handler in `trigger_server.py` falls back to
+the existing stored key whenever `apiKey` arrives empty, re-validating
+with `test_connection()` either way. **Delete connection** removes
+`scripts/syncthing_config.json` entirely (behind the shared confirm
+modal) and returns to the first-time connect form. An earlier version had
+neither -- just a "Settings" button that reopened a blank form requiring
+everything retyped, including a key you can't even see to copy -- which
+added a click without adding value.
 
 A connection failure worth knowing about: **403 Forbidden despite a
 correct API key** is a documented Syncthing behavior (DNS-rebinding
@@ -97,17 +112,58 @@ port 8384 (Syncthing's default GUI port) unless overridden.
 
 ## Actions
 
-- **Pause / Resume** -- `POST /rest/system/pause` or `/resume?device=<id>`.
-- **Rename** -- a `window.prompt()` for the new name, same free-text
-  exception `reset_manager.py`'s Factory Reset confirmation uses (a plain
-  yes/no confirm-modal can't take arbitrary text). Fetches the device's
-  current config, updates `name`, `PUT`s it back to
+- **Pause / Resume** (per device) -- `POST /rest/system/pause` or
+  `/resume?device=<id>`.
+- **Pause All / Resume All** (global) -- the same two endpoints called
+  *without* a `device` param, which is Syncthing's own documented
+  behavior for "apply to every device at once." No loop over devices
+  needed on our side.
+- **Rename** -- a `window.prompt()` that names the device being renamed
+  (`Rename "Living Room PC" to:`, not a bare "Rename device:" -- the
+  crude first version left it ambiguous which device you were editing).
+  Same free-text exception `reset_manager.py`'s Factory Reset confirmation
+  uses (a plain yes/no confirm-modal can't take arbitrary text). Fetches
+  the device's current config, updates `name`, `PUT`s it back to
   `/rest/config/devices/{id}`.
 - **Add** -- a small inline form (device ID + name) `PUT`s a new device to
   `/rest/config/devices/{id}`.
 - **Remove** -- `DELETE /rest/config/devices/{id}`, behind the shared
   confirm-modal. Only removes it from this Syncthing instance's known
   devices -- the device itself, and any data on it, is unaffected.
+
+## Folders
+
+A separate "Folders" section lists each shared folder from
+`/rest/config/folders`, joined with live state from `/rest/db/status?
+folder=<id>` (Syncthing doesn't include state/byte-counts in the config
+response, same reasoning as the device list join). Each row shows a
+status dot (green idle, blue syncing/scanning, amber paused, red error),
+sync %, and error count if any, plus:
+
+- **Pause / Resume** -- folders have no dedicated pause endpoint; it's a
+  config field. `set_folder_paused()` fetches the folder's current config,
+  flips `paused`, `PUT`s it back to `/rest/config/folders/{id}` -- same
+  read-modify-write pattern as device rename.
+- **Rescan** -- `POST /rest/db/scan?folder=<id>`.
+
+## Error handling: our backend vs. Syncthing itself
+
+`/data/syncthing-devices` and `/data/syncthing-folders` can fail two
+different ways, and the frontend treats them differently on purpose:
+
+- **`fetch()` itself throws** -- nginx or `trigger_server.py` is
+  unreachable. A real "the dashboard's backend is down" situation, shown
+  via the shared page-level error banner (`showErrorBanner()`), same as
+  every other module uses for actual backend outages.
+- **The response comes back but isn't OK (its body has `.error`)** --
+  our backend is fine; it reached out to *Syncthing* (at the configured
+  URL) and that failed -- most commonly because the configured instance
+  itself is offline or unreachable on the network. This is scoped to the
+  Devices/Folders panel itself as a `.warning-box` with the actual error
+  text, specifically so it doesn't read as "the whole dashboard is
+  broken" when it's really just "your Syncthing instance didn't answer."
+  An earlier version conflated both cases into the same generic page
+  banner, which was actively misleading.
 
 ## Extending this feature
 
