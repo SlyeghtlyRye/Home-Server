@@ -20,7 +20,6 @@ LAYER_COLORS = {
     "container": "#233b2d",
     "host": "#2d2d2d",
     "frontend": "#2f2d4a",
-    "external": "#4a2d2d",
 }
 LAYER_LABELS = {
     "client": "Client",
@@ -28,7 +27,6 @@ LAYER_LABELS = {
     "container": "Docker Containers",
     "host": "Host Scripts (non-Docker)",
     "frontend": "Frontend Modules (js/)",
-    "external": "External Services (not this stack)",
 }
 
 

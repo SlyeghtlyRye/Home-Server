@@ -9,7 +9,7 @@ exists in the actual codebase.
 """
 
 # Layers, top to bottom in the diagram
-LAYERS = ["client", "network", "container", "host", "frontend", "external"]
+LAYERS = ["client", "network", "container", "host", "frontend"]
 
 NODES = {
     "browser":   {"label": "Browser",              "layer": "client"},
@@ -18,6 +18,7 @@ NODES = {
     "pihole":    {"label": "Pi-hole",               "layer": "container"},
     "mealie":    {"label": "Mealie",                "layer": "container"},
     "kanboard":  {"label": "Kanboard",              "layer": "container"},
+    "syncthing": {"label": "Syncthing",             "layer": "container"},
 
     "trigger":   {"label": "trigger_server.py",     "layer": "host"},
     "mwp":       {"label": "mealie_weekly_plan.py", "layer": "host"},
@@ -41,8 +42,6 @@ NODES = {
     "config_js":   {"label": "config.js",             "layer": "frontend"},
     "gendocs":     {"label": "generate_docs_index.py", "layer": "host"},
     "genmap":      {"label": "generate_architecture_map.py", "layer": "host"},
-
-    "syncthing":   {"label": "Syncthing (external)", "layer": "external"},
 }
 
 # (from, to) -- direction of the real request/data flow
@@ -78,6 +77,7 @@ CODE_MAPPING = {
     "pihole": "docker-compose:pihole",
     "mealie": "docker-compose:mealie",
     "kanboard": "docker-compose:kanboard",
+    "syncthing": "docker-compose:syncthing",
     "nginx": "docker-compose:nginx",
     "trigger": "scripts/trigger_server.py",
     "mwp": "scripts/mealie_weekly_plan.py",

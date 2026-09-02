@@ -60,8 +60,26 @@ services:
       - "9000:9000"
     restart: unless-stopped
 
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    hostname: home-server
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TIMEZONE}
+    volumes:
+      - syncthing_data:/var/syncthing
+    ports:
+      - "8384:8384"
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      - "21027:21027/udp"
+    restart: unless-stopped
+
 volumes:
   pihole_etc:
   pihole_dnsmasq:
   kanboard_data:
   mealie_data:
+  syncthing_data:

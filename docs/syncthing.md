@@ -1,15 +1,37 @@
-tags: syncthing, backend, frontend, external
+tags: syncthing, backend, frontend, container, external
 
 # Syncthing Devices
 
-A dashboard panel for managing devices and folders on an existing
-Syncthing instance. Syncthing itself is **not** part of this repo's
-docker-compose stack -- it's assumed to already be running elsewhere on
-the network (this host or another device). The panel talks to that
-instance's REST API to show connection/sync status and let you
-pause/resume (per-device or all at once), add, rename, and remove
-devices, and pause/resume/rescan folders, without needing Syncthing's own
-web GUI for routine management.
+A dashboard panel for managing devices and folders on a Syncthing
+instance. The panel talks to a REST API to show connection/sync status
+and let you pause/resume (per-device or all at once), add, rename, and
+remove devices, and pause/resume/rescan folders, without needing
+Syncthing's own web GUI for routine management.
+
+## Running Syncthing: in this stack, or fully external
+
+Unlike Mealie/Pi-hole/Kanboard, Syncthing has **two** valid setups, and
+the panel's design (connect via URL + API key, saved separately, editable
+later) works identically either way:
+
+- **In this stack** -- `docker-compose.yml` has a `syncthing` service
+  (official `syncthing/syncthing` image, `syncthing_data` named volume,
+  GUI on port 8384, sync protocol on 22000/tcp+udp, local discovery on
+  21027/udp). This makes the server itself an always-on sync hub: push a
+  folder there once, and any future device just needs Syncthing installed
+  and paired to pull it down, without depending on any particular other
+  device (a phone, say) being powered on and connected. Point the panel
+  at `http://<HOST_IP>:8384` and connect the same way as any instance.
+- **Fully external** -- point the panel at a Syncthing instance running
+  somewhere else on the network entirely (another device, not managed by
+  this repo's docker-compose at all). This was the original design and
+  still works unchanged -- the panel doesn't know or care which case it's
+  in, since it's just a URL + API key either way.
+
+Nothing about `scripts/syncthing_client.py`, `trigger_server.py`, or
+`js/syncthing.js` differs between the two cases -- see "Edit connection"
+below if you need to point the panel at a different instance later (e.g.
+migrating from an external device to the in-stack one).
 
 ## How it works
 
