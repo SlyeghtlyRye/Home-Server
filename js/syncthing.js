@@ -1,11 +1,12 @@
-// syncthing.js -- devices panel for an existing Syncthing instance
-// (Syncthing itself is not part of this stack; it's assumed to already be
-// running elsewhere on the network). Connect once with a URL + API key,
-// then view connection/sync status and pause/resume/add/rename/remove
-// devices. Uses the same event-delegation / status-modal patterns as the
-// other modules rather than introducing a new UI pattern.
+// syncthing.js -- devices panel for a Syncthing instance, either the one
+// running in this stack's docker-compose (default) or a fully external
+// one elsewhere on the network. Connect once with a URL + API key, then
+// view connection/sync status and pause/resume/add/rename/remove devices
+// and folders. Uses the same event-delegation / status-modal patterns as
+// the other modules rather than introducing a new UI pattern.
 import { registerApp, showStatusModal, hideStatusModal,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
+import { HOST_IP } from './config.js';
 
 let configured = null; // null = not checked yet, otherwise boolean
 let devices = [];
@@ -127,14 +128,19 @@ async function refreshAll() {
 }
 
 function renderConfigFormHtml(editing) {
-  const urlValue = editing && stBaseUrl ? escapeHtml(stBaseUrl) : '';
+  // First-time connect defaults to the Syncthing container in this stack
+  // (same host as everything else, same reasoning as Mealie's known URL)
+  // -- still fully editable for anyone pointing at a different instance.
+  const urlValue = editing
+    ? (stBaseUrl ? escapeHtml(stBaseUrl) : '')
+    : `http://${escapeHtml(HOST_IP)}:8384`;
   return `
     <div class="week-block">
       <h3>${editing ? 'Editing Syncthing Connection' : 'Connect to Syncthing'}</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
         ${editing
           ? 'Update the URL and/or API key below. Leave the API key blank to keep the one already saved.'
-          : 'URL is just the regular address you use to open Syncthing in a browser. API key is in Syncthing under Actions &rarr; Settings &rarr; General.'}
+          : "We've pre-filled the address for the Syncthing running on this server -- change it if you're connecting to a different instance instead. API key is in Syncthing under Actions &rarr; Settings &rarr; General."}
       </p>
       <div class="preview-row">
         <span class="date">URL</span>

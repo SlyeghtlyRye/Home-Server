@@ -50,13 +50,17 @@ migrating from an external device to the in-stack one).
 
 ## Connecting
 
-Syncthing's REST API needs a base URL and an API key. The URL is just the
-regular address you'd use to open Syncthing in a browser (e.g.
-`http://192.168.1.50:8384`); the API key is in Syncthing under
-Actions -> Settings -> General. The Syncthing tab shows a small form for
-these on first use; **Connect** validates them with a real API call
-(`/rest/system/status`) before saving, so a bad URL or key fails loudly
-right away instead of silently breaking every device call afterward.
+Syncthing's REST API needs a base URL and an API key. The URL field
+defaults to `http://<HOST_IP>:8384` -- the in-stack container -- since
+that's already known the same way Mealie's URL is (`js/config.js`'s
+`HOST_IP`, imported into `js/syncthing.js` just for this default); it's
+still a plain editable text field for anyone pointing at a fully external
+instance instead. The API key can't be defaulted the same way (Syncthing
+generates a unique one per instance) -- it's in Syncthing under
+Actions -> Settings -> General. **Connect** validates both with a real
+API call (`/rest/system/status`) before saving, so a bad URL or key fails
+loudly right away instead of silently breaking every device call
+afterward.
 
 Once saved, both values live in `scripts/syncthing_config.json`
 (gitignored) -- **not** in `.env`. This matters: `.env` gets
