@@ -869,12 +869,42 @@ function renderSelSyncNode(node, parentPath, query) {
   `;
 }
 
+// Synthetic path (not a real Syncthing path -- there's nothing to check
+// or generate an ignore pattern for) for grouping files that sit directly
+// in the folder's root with no subfolder of their own to collapse under
+// -- a ROM library dumped flat at the top level, say. Without this, that
+// could be hundreds of individual checkbox rows with no way to collapse
+// them as a unit, unlike a real subfolder (which already collapses fine).
+const SELSYNC_ROOT_FILES_KEY = '__root_files__';
+
 function renderSelSyncTreeHtml() {
   const query = selSyncSearchQuery.trim().toLowerCase();
-  const nodesHtml = selSyncTree.map(n => renderSelSyncNode(n, '', query)).join('');
   if (!selSyncTree.length) return '<p class="meal-empty">No files found.</p>';
-  if (query && !nodesHtml) return '<p class="meal-empty">No files match your search.</p>';
-  return nodesHtml;
+
+  const dirs = selSyncTree.filter(n => n.type === 'FILE_INFO_TYPE_DIRECTORY');
+  const rootFiles = selSyncTree.filter(n => n.type !== 'FILE_INFO_TYPE_DIRECTORY');
+  const dirsHtml = dirs.map(n => renderSelSyncNode(n, '', query)).join('');
+  const rootFilesHtml = rootFiles.map(n => renderSelSyncNode(n, '', query)).join('');
+
+  let rootFilesBlock = '';
+  if (rootFiles.length && !(query && !rootFilesHtml)) {
+    const isOpen = query ? true : !selSyncCollapsed.has(SELSYNC_ROOT_FILES_KEY);
+    rootFilesBlock = `
+      <details class="st-selsync-dir" data-selsync-dir="${SELSYNC_ROOT_FILES_KEY}" ${isOpen ? 'open' : ''}>
+        <summary>
+          <span class="st-selsync-disclosure">&#x25B6;</span>
+          <span>&#x1F4C4; Files (${rootFiles.length})</span>
+        </summary>
+        <div class="st-selsync-children">
+          ${rootFilesHtml}
+        </div>
+      </details>
+    `;
+  }
+
+  const combined = rootFilesBlock + dirsHtml;
+  if (query && !combined) return '<p class="meal-empty">No files match your search.</p>';
+  return combined;
 }
 
 function renderSelSyncTreeOnly() {
