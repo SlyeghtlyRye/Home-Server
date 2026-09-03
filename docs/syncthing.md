@@ -62,10 +62,16 @@ Syncthing's own web GUI for routine management.
   session), the exact same physical device would render as two side-by-
   side cards: its own "couldn't connect" card, and a second one for "how
   Host sees it" -- reading as a duplicate rather than one device with a
-  connection problem. Only when we've truly never seen that instance's own
-  ID (its first-ever connection attempt failed) does it fall back to a
-  genuinely standalone card with a **"Fix connection"** button
-  (`editErroredConnection()`) -- there's nothing to fold it into yet.
+  connection problem. If we've never learned that instance's own ID either
+  (it's been unreachable since before it was ever successfully connected
+  to in this browser), `renderYourDevicesHtml()` falls back to matching by
+  name instead -- an instance's label and the name it reports for itself
+  are normally the same string, since that's how you knew what to call it
+  when connecting -- and only when that match is unambiguous (exactly one
+  merged card with that name, not already claimed by another error). Only
+  when neither match succeeds does it fall back to a genuinely standalone
+  card with a **"Fix connection"** button (`editErroredConnection()`) --
+  there's nothing to fold it into yet.
   Either way this stays scoped to that one card rather than a page-level
   banner, since a banner at the top would read as "something's wrong with
   the whole page," when it's really just one instance (commonly one

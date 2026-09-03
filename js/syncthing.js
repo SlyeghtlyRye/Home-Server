@@ -1148,7 +1148,20 @@ function renderYourDevicesHtml() {
     const inst = instances.find(i => i.id === e.instanceId);
     if (!inst) continue;
     const selfId = instanceSelfIds[inst.id];
-    const group = selfId ? merged.find(g => g.id === selfId) : null;
+    let group = selfId ? merged.find(g => g.id === selfId) : null;
+    // Fall back to matching by name when we've never learned this
+    // instance's real ID (it's been unreachable since before we ever
+    // connected to it successfully) -- an instance's label and the name
+    // it reports for itself are normally the same string (that's how you
+    // knew what to call it when connecting), so this still catches the
+    // common case immediately instead of only after a lucky reconnect.
+    // Skipped once a group is already claimed by another error, and only
+    // applied when the match is unambiguous (exactly one candidate).
+    if (!group) {
+      const nameMatches = merged.filter(g =>
+        !erroredByGroupId.has(g.id) && g.name.trim().toLowerCase() === inst.label.trim().toLowerCase());
+      if (nameMatches.length === 1) group = nameMatches[0];
+    }
     if (group) erroredByGroupId.set(group.id, inst);
     else standaloneErrored.push({ inst, error: e.error });
   }
