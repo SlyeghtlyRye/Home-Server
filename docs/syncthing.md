@@ -199,6 +199,24 @@ to more than one of your connected instances (Syncthing device IDs are
 per-installation certificates, so the same physical device shows the
 same ID everywhere it's paired).
 
+Host always sorts first, both in the tab bar and in this merged list --
+enforced with an explicit `.sort((a, b) => Number(b.isHost) - Number(a.isHost))`
+in `js/syncthing.js` rather than assumed from `list_instances()`'s
+ordering, so it stays true even if that backend ordering ever changes.
+
+**"Instance" (renamed from "To")** in the Add Device form's picker
+includes a **"+ New instance..."** option that folds "+ Connect Instance"
+into the same form -- pick it and Name/URL/API key fields appear
+(toggled via a `change` listener on the select, not a full re-render) so
+you can pair with a not-yet-connected instance without leaving to a
+different tab first. Choosing "Add" in that state calls
+`/api/add-syncthing-instance` first, then `/api/syncthing-device-add`
+with the resulting `instanceId` -- both the new instance and the paired
+device get created in one submit. The newly-created instance is pushed
+directly into the in-memory `instances` array (not re-fetched via
+`loadInstances()`) purely to avoid a jarring re-render mid-flow -- it'll
+naturally match the server's state on the next real refresh.
+
 ## Per-device GUI links
 
 Each device row has a "GUI" link to jump straight to that device's own
@@ -239,10 +257,14 @@ port 8384 (Syncthing's default GUI port) unless overridden.
 - **Add** -- one form (`renderAddDeviceSectionHtml()`), used identically
   everywhere it appears -- a single instance's own tab, or the All
   Devices overview -- rather than looking like a different control
-  depending on where you are. It always includes a "To" instance picker
-  (defaulting to whichever instance/tab you opened it from, but able to
-  target any configured instance), plus Device ID and Name, and
-  `PUT`s the new device to that instance's `/rest/config/devices/{id}`.
+  depending on where you are. Its "Instance" picker (defaulting to
+  whichever instance/tab you opened it from, but able to target any
+  configured instance) includes a "+ New instance..." option that folds
+  "+ Connect Instance" into the same form -- pick it and Instance
+  Name/URL/API key fields appear so you can create-and-pair in one
+  submit, no detour to a different tab. Otherwise it's just Device ID and
+  Device Name, `PUT`ing the new device to that instance's
+  `/rest/config/devices/{id}`.
 - **Remove** -- `DELETE /rest/config/devices/{id}`, behind the shared
   confirm-modal. Only removes it from that Syncthing instance's known
   devices -- the device itself, and any data on it, is unaffected.
@@ -268,6 +290,45 @@ way devices are merged would mostly just be confusing.
   flips `paused`, `PUT`s it back to `/rest/config/folders/{id}` -- same
   read-modify-write pattern as device rename.
 - **Rescan** -- `POST /rest/db/scan?folder=<id>`.
+- **Selective Sync** -- see below.
+
+## Selective sync
+
+Syncthing calls this "Ignore Patterns" -- a per-folder `.stignore` file,
+gitignore-style, read/written via `/rest/db/ignores?folder=<id>` (GET
+returns `{"ignore": [...]}`, POST replaces it wholesale with a new list).
+Rather than exposing that raw pattern syntax, the panel shows a checkbox
+file tree and translates checkbox state to/from a simple subset of it:
+
+- **Browsing the tree** -- `browse_folder()` calls Syncthing's own
+  `/rest/db/browse?folder=<id>`, which returns the *entire* file tree
+  recursively in one response when no `levels` param is given. Fetched
+  once per modal open, not lazily per directory -- simpler to implement
+  (no incremental fetch-on-expand plumbing) at the cost of one bigger
+  request; fine for ROM-library-sized folders, and Syncthing does support
+  a `prefix` param for lazy per-level loading if this ever needs to scale
+  to huge folders later.
+- **Checked = synced, unchecked = excluded.** Unchecking a file writes an
+  anchored exact-path pattern (`/relative/path/to/file`); unchecking a
+  directory writes `/relative/path/to/dir/**` and cascades the unchecked
+  state to every descendant in the UI (`onSelSyncCheckboxChange()` walks
+  the subtree via `collectSelSyncDescendantPaths()`). This is a two-state
+  model, not tri-state -- a directory checkbox doesn't show "partially
+  excluded" if only some of its children are individually unchecked; it
+  only reflects whether *the directory itself* was explicitly toggled.
+- **Redundant patterns are collapsed on save** -- `selSyncTopLevelIgnoredPaths()`
+  only emits a pattern for the top-most excluded ancestor of any subtree,
+  since a directory's own `/**` pattern already covers everything
+  cascaded into it from unchecking that directory.
+- **Pre-existing patterns we don't generate ourselves are preserved, not
+  discarded.** `classifySelSyncPattern()` only recognizes plain anchored
+  paths (optionally with a trailing `/**`) as "ours" -- anything using
+  wildcards (`*`, `?`, `[...]`, `{...}`), a `!` negation, or a `(?...)`
+  flag prefix is left alone in `selSyncOtherPatterns` and written back
+  unchanged on save. So if a folder already had hand-written ignore rules
+  (from Syncthing's own GUI, say), opening and saving from our panel
+  won't silently clobber them -- only the checkbox-driven ones round-trip
+  through the UI.
 
 ## Error handling: our backend vs. Syncthing itself
 

@@ -107,6 +107,15 @@ server {
     location /data/syncthing-folders {
             proxy_pass http://172.17.0.1:9001/data/syncthing-folders?key=${TRIGGER_SECRET}&instance=$arg_instance;
     }
+    location /data/syncthing-folder-browse {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-folder-browse?key=${TRIGGER_SECRET}&instance=$arg_instance&folder=$arg_folder&prefix=$arg_prefix;
+    }
+    location /data/syncthing-folder-ignores {
+            proxy_pass http://172.17.0.1:9001/data/syncthing-folder-ignores?key=${TRIGGER_SECRET}&instance=$arg_instance&folder=$arg_folder;
+    }
+    location /api/syncthing-folder-ignores {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-folder-ignores?key=${TRIGGER_SECRET};
+    }
     location /api/save-syncthing-instance {
             proxy_pass http://172.17.0.1:9001/api/save-syncthing-instance?key=${TRIGGER_SECRET};
     }

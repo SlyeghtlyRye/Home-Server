@@ -390,6 +390,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/data/syncthing-folder-browse":
+            instance_id = params.get("instance", [None])[0]
+            folder_id = params.get("folder", [None])[0]
+            prefix = params.get("prefix", [None])[0]
+            if not instance_id or not folder_id:
+                self._send_json(400, {"error": "missing instance or folder"})
+                return
+            try:
+                tree = stc.browse_folder(instance_id, folder_id, prefix)
+                self._send_json(200, {"tree": tree})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/syncthing-folder-ignores":
+            instance_id = params.get("instance", [None])[0]
+            folder_id = params.get("folder", [None])[0]
+            if not instance_id or not folder_id:
+                self._send_json(400, {"error": "missing instance or folder"})
+                return
+            try:
+                ignore = stc.get_folder_ignores(instance_id, folder_id)
+                self._send_json(200, {"ignore": ignore})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         self.send_response(404)
         self.end_headers()
 
@@ -558,6 +585,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             try:
                 stc.rescan_folder(instance_id, folder_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/syncthing-folder-ignores":
+            body = self._read_json_body()
+            instance_id = body.get("instanceId")
+            folder_id = body.get("folderId")
+            patterns = body.get("ignore")
+            if not instance_id or not folder_id or patterns is None:
+                self._send_json(400, {"error": "missing instanceId, folderId, or ignore"})
+                return
+            try:
+                stc.set_folder_ignores(instance_id, folder_id, patterns)
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})

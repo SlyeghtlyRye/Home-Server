@@ -159,8 +159,8 @@ def _put(path, config, body):
     _check(resp)
 
 
-def _post(path, config, params=None):
-    resp = requests.post(f"{config['url']}{path}", headers=get_headers(config), params=params, timeout=10)
+def _post(path, config, params=None, body=None):
+    resp = requests.post(f"{config['url']}{path}", headers=get_headers(config), params=params, json=body, timeout=10)
     _check(resp)
 
 
@@ -313,3 +313,30 @@ def set_folder_paused(instance_id, folder_id, paused):
 def rescan_folder(instance_id, folder_id):
     config = _require_instance_config(instance_id)
     _post("/rest/db/scan", config, params={"folder": folder_id})
+
+
+def browse_folder(instance_id, folder_id, prefix=None):
+    """Full recursive file tree for a folder (Syncthing's own "Browse"
+    feature) -- omitting `levels` returns everything at once rather than
+    one directory level at a time, which keeps the selective-sync UI
+    simple (fetch once, render a nested tree with native <details>
+    expand/collapse) at the cost of one bigger request. Fine for
+    ROM-library-sized folders; would need lazy per-level fetching
+    (Syncthing supports it via `prefix`) if this is ever used on folders
+    with hundreds of thousands of files."""
+    config = _require_instance_config(instance_id)
+    params = {"folder": folder_id}
+    if prefix:
+        params["prefix"] = prefix
+    return _get("/rest/db/browse", config, params=params)
+
+
+def get_folder_ignores(instance_id, folder_id):
+    config = _require_instance_config(instance_id)
+    data = _get("/rest/db/ignores", config, params={"folder": folder_id})
+    return data.get("ignore") or []
+
+
+def set_folder_ignores(instance_id, folder_id, patterns):
+    config = _require_instance_config(instance_id)
+    _post("/rest/db/ignores", config, params={"folder": folder_id}, body={"ignore": patterns})

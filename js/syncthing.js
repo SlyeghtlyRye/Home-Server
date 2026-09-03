@@ -19,6 +19,7 @@ import { HOST_IP } from './config.js';
 
 const ALL_DEVICES_TAB = '__all__';
 const ADD_INSTANCE_TAB = '__add__';
+const NEW_INSTANCE_OPTION = '__new_instance__'; // "Instance" picker's inline "+ New instance..." option in Add Device
 
 let instances = []; // [{id, label, isHost, configured, url}], "host" always present
 let activeInstanceId = ALL_DEVICES_TAB;
@@ -33,6 +34,15 @@ let stBaseUrl = null; // active instance's own URL, for the self device's GUI li
 
 let allDevicesList = []; // merged devices across every configured instance, for the overview tab
 let allDevicesErrors = []; // [{instanceId, label, error}] -- one per instance that failed to load, shown as its own card
+
+// Selective sync modal state -- scoped to whichever folder is currently open.
+let selSyncInstanceId = null;
+let selSyncFolderId = null;
+let selSyncFolderLabel = '';
+let selSyncTree = []; // top-level nodes from /rest/db/browse, each with nested .children
+let selSyncNodesByPath = new Map(); // relative path -> node, built by indexSelSyncTree()
+let selSyncIgnored = new Set(); // relative paths currently excluded (unchecked)
+let selSyncOtherPatterns = []; // raw ignore-pattern lines we don't try to interpret as a simple path -- preserved as-is on save
 
 const DEFAULT_GUI_PORT = 8384;
 let stDevicePorts = {}; // per-device GUI port overrides (device ID -> port), local to this browser
@@ -204,7 +214,11 @@ async function refreshAll() {
 
 async function refreshAllDevicesOverview() {
   allDevicesErrors = [];
-  const configured = instances.filter(i => i.configured);
+  // Host sorts first no matter what order instances come back in --
+  // explicit, rather than relying on the backend's list_instances()
+  // already happening to put it first.
+  const configured = instances.filter(i => i.configured)
+    .sort((a, b) => Number(b.isHost) - Number(a.isHost));
   if (configured.length === 0) {
     allDevicesList = [];
     renderSyncthingPanel();
@@ -457,7 +471,11 @@ function renderDeviceRowHtml(d, instanceId, instanceLabel, instanceBaseUrl, asCa
 // on the All Devices overview -- the only difference is which instance
 // is pre-selected in the dropdown. This is deliberately the ONE place
 // device-pairing happens, so it never looks like a different control
-// depending on where you are.
+// depending on where you are. The "Instance" picker's "+ New instance..."
+// option folds "+ Connect Instance" into the same form, so pairing with
+// a not-yet-connected instance doesn't require leaving to a different tab
+// first -- type its name/URL/key right here, and both the new instance
+// and the device get created together on Add.
 function renderAddDeviceSectionHtml(defaultInstanceId) {
   if (!showAddDeviceForm) {
     return `<div class="btn-grid"><button class="btn small" data-action="show-add-device">+ Add Device</button></div>`;
@@ -465,17 +483,30 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
   const configuredInstances = instances.filter(i => i.configured);
   return `
     <div class="preview-row">
-      <span class="date">To</span>
+      <span class="date">Instance</span>
       <select id="st-add-device-instance" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         ${configuredInstances.map(i => `<option value="${escapeHtml(i.id)}" ${i.id === defaultInstanceId ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
+        <option value="${NEW_INSTANCE_OPTION}">+ New instance...</option>
       </select>
+    </div>
+    <div class="preview-row" id="st-add-device-new-instance-row" style="display:none;">
+      <span class="date">Instance Name</span>
+      <input type="text" id="st-add-device-new-instance-label" placeholder="e.g. Laptop's Syncthing" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+    </div>
+    <div class="preview-row" id="st-add-device-new-instance-url-row" style="display:none;">
+      <span class="date">URL</span>
+      <input type="text" id="st-add-device-new-instance-url" placeholder="http://192.168.1.60:8384" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+    </div>
+    <div class="preview-row" id="st-add-device-new-instance-key-row" style="display:none;">
+      <span class="date">API key</span>
+      <input type="password" id="st-add-device-new-instance-key" placeholder="Paste its API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="preview-row">
       <span class="date">Device ID</span>
       <input type="text" id="st-add-device-id" placeholder="XXXXXXX-XXXXXXX-XXXXXXX-..." style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="preview-row">
-      <span class="date">Name</span>
+      <span class="date">Device Name</span>
       <input type="text" id="st-add-device-name" placeholder="e.g. Laptop" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="btn-grid">
@@ -507,14 +538,215 @@ function renderFolderRowHtml(f) {
       <div class="st-device-actions">
         <button class="btn small" data-action="${f.paused ? 'resume-folder' : 'pause-folder'}" data-folder-id="${escapeHtml(f.id)}">${f.paused ? 'Resume' : 'Pause'}</button>
         <button class="btn small" data-action="rescan-folder" data-folder-id="${escapeHtml(f.id)}">Rescan</button>
+        <button class="btn small" data-action="open-selective-sync" data-folder-id="${escapeHtml(f.id)}" data-folder-label="${escapeHtml(f.label)}">Selective Sync</button>
       </div>
+    </div>
+  `;
+}
+
+// ---------- Selective sync (per-folder ignore patterns) ----------
+//
+// Syncthing calls this "Ignore Patterns" -- a .stignore file per folder,
+// gitignore-style. We manage a simple subset directly (checkbox per file
+// /directory, cascading when you uncheck a whole directory) rather than
+// exposing raw pattern syntax. Any pre-existing pattern we can't
+// confidently interpret as "one of ours" (a plain anchored path, with or
+// without a trailing /** for a directory) is preserved as-is in
+// selSyncOtherPatterns and written back unchanged on save, rather than
+// silently dropped.
+
+const GLOB_SPECIAL = /[*?[\]{}]/;
+
+function classifySelSyncPattern(raw) {
+  const trimmed = (raw || '').trim();
+  if (!trimmed || trimmed.startsWith('//') || !trimmed.startsWith('/')) {
+    return { kind: 'other', raw: trimmed };
+  }
+  let inner = trimmed.slice(1);
+  if (inner.endsWith('/**')) inner = inner.slice(0, -3);
+  if (!inner || GLOB_SPECIAL.test(inner) || inner.startsWith('!') || inner.startsWith('(?')) {
+    return { kind: 'other', raw: trimmed };
+  }
+  return { kind: 'simple', path: inner };
+}
+
+function parseSelSyncPatterns(rawPatterns) {
+  const ignoredPaths = new Set();
+  const otherPatterns = [];
+  for (const raw of rawPatterns || []) {
+    const c = classifySelSyncPattern(raw);
+    if (c.kind === 'simple') ignoredPaths.add(c.path);
+    else if (c.raw) otherPatterns.push(c.raw);
+  }
+  return { ignoredPaths, otherPatterns };
+}
+
+function indexSelSyncTree(nodes, parentPath) {
+  for (const node of nodes || []) {
+    const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+    selSyncNodesByPath.set(path, node);
+    if (node.type === 'FILE_INFO_TYPE_DIRECTORY') {
+      indexSelSyncTree(node.children, path);
+    }
+  }
+}
+
+function collectSelSyncDescendantPaths(node, basePath) {
+  const paths = [];
+  for (const child of (node.children || [])) {
+    const childPath = `${basePath}/${child.name}`;
+    paths.push(childPath);
+    if (child.type === 'FILE_INFO_TYPE_DIRECTORY') {
+      paths.push(...collectSelSyncDescendantPaths(child, childPath));
+    }
+  }
+  return paths;
+}
+
+// Only emit a pattern for the top-most excluded ancestor of a subtree --
+// a directory's own /** pattern already covers everything cascaded into
+// it, so writing patterns for its children too would just be redundant.
+function selSyncTopLevelIgnoredPaths() {
+  return [...selSyncIgnored].filter(p => {
+    const parts = p.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      if (selSyncIgnored.has(parts.slice(0, i).join('/'))) return false;
+    }
+    return true;
+  });
+}
+
+function buildSelSyncIgnorePatterns() {
+  const generated = selSyncTopLevelIgnoredPaths().map(path => {
+    const node = selSyncNodesByPath.get(path);
+    const isDir = node && node.type === 'FILE_INFO_TYPE_DIRECTORY';
+    return isDir ? `/${path}/**` : `/${path}`;
+  });
+  return [...selSyncOtherPatterns, ...generated];
+}
+
+async function openSelectiveSync(instanceId, folderId, folderLabel) {
+  selSyncInstanceId = instanceId;
+  selSyncFolderId = folderId;
+  selSyncFolderLabel = folderLabel;
+  selSyncTree = [];
+  selSyncNodesByPath = new Map();
+  selSyncIgnored = new Set();
+  selSyncOtherPatterns = [];
+
+  const overlay = document.getElementById('st-selsync-overlay');
+  const body = document.getElementById('st-selsync-body');
+  body.innerHTML = '<div class="recipe-loading">Loading files...</div>';
+  overlay.style.display = 'flex';
+
+  try {
+    const [ignoresRes, treeRes] = await Promise.all([
+      fetch(`/data/syncthing-folder-ignores?instance=${encodeURIComponent(instanceId)}&folder=${encodeURIComponent(folderId)}`),
+      fetch(`/data/syncthing-folder-browse?instance=${encodeURIComponent(instanceId)}&folder=${encodeURIComponent(folderId)}`)
+    ]);
+    if (!ignoresRes.ok || !treeRes.ok) throw new Error('server error');
+    const ignoresData = await ignoresRes.json();
+    const treeData = await treeRes.json();
+    const { ignoredPaths, otherPatterns } = parseSelSyncPatterns(ignoresData.ignore);
+    selSyncIgnored = ignoredPaths;
+    selSyncOtherPatterns = otherPatterns;
+    selSyncTree = treeData.tree || [];
+    indexSelSyncTree(selSyncTree, '');
+    renderSelectiveSyncBody();
+  } catch (err) {
+    body.innerHTML = '<p class="meal-empty">Couldn\'t load this folder\'s files.</p>';
+  }
+}
+
+function closeSelectiveSync() {
+  const overlay = document.getElementById('st-selsync-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function onSelSyncCheckboxChange(path, checked) {
+  const node = selSyncNodesByPath.get(path);
+  if (checked) selSyncIgnored.delete(path);
+  else selSyncIgnored.add(path);
+
+  if (node && node.type === 'FILE_INFO_TYPE_DIRECTORY') {
+    for (const descendant of collectSelSyncDescendantPaths(node, path)) {
+      if (checked) selSyncIgnored.delete(descendant);
+      else selSyncIgnored.add(descendant);
+    }
+  }
+  renderSelectiveSyncBody();
+}
+
+async function saveSelectiveSync() {
+  showStatusModal('Saving...', 'loading');
+  try {
+    const patterns = buildSelSyncIgnorePatterns();
+    const res = await fetch('/api/syncthing-folder-ignores', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceId: selSyncInstanceId, folderId: selSyncFolderId, ignore: patterns })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to save: ' + (data.error || res.status), 'error'); return; }
+    hideStatusModal();
+    closeSelectiveSync();
+    refreshCurrentView();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+function renderSelSyncNode(node, parentPath) {
+  const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+  const isDir = node.type === 'FILE_INFO_TYPE_DIRECTORY';
+  const checked = !selSyncIgnored.has(path);
+  if (isDir) {
+    return `
+      <details class="st-selsync-dir" open>
+        <summary>
+          <label>
+            <input type="checkbox" data-selsync-path="${escapeHtml(path)}" ${checked ? 'checked' : ''}>
+            &#x1F4C1; ${escapeHtml(node.name)}
+          </label>
+        </summary>
+        <div class="st-selsync-children">
+          ${(node.children || []).map(child => renderSelSyncNode(child, path)).join('')}
+        </div>
+      </details>
+    `;
+  }
+  return `
+    <div class="st-selsync-file">
+      <label>
+        <input type="checkbox" data-selsync-path="${escapeHtml(path)}" ${checked ? 'checked' : ''}>
+        ${escapeHtml(node.name)}
+      </label>
+    </div>
+  `;
+}
+
+function renderSelectiveSyncBody() {
+  const body = document.getElementById('st-selsync-body');
+  if (!body) return;
+  body.innerHTML = `
+    <h2>Selective Sync &mdash; ${escapeHtml(selSyncFolderLabel)}</h2>
+    <p style="color:var(--color-text-muted); font-size:13px;">
+      Uncheck a file or folder to stop syncing it. Unchecking a folder excludes everything inside it.
+    </p>
+    <div class="st-selsync-tree">
+      ${selSyncTree.length ? selSyncTree.map(n => renderSelSyncNode(n, '')).join('') : '<p class="meal-empty">No files found.</p>'}
+    </div>
+    <div class="btn-grid" style="margin-top:15px;">
+      <button class="btn" data-action="save-selective-sync">Save</button>
+      <button class="btn clear" data-action="close-selective-sync">Cancel</button>
     </div>
   `;
 }
 
 function renderTabsHtml() {
   const allTab = `<button data-instance-tab="${ALL_DEVICES_TAB}" class="${activeInstanceId === ALL_DEVICES_TAB ? 'active' : ''}">All Devices</button>`;
-  const tabs = instances.map(inst =>
+  // Host sorts first here too, same explicit guarantee as the merged
+  // device list, rather than relying on backend ordering alone.
+  const orderedInstances = [...instances].sort((a, b) => Number(b.isHost) - Number(a.isHost));
+  const tabs = orderedInstances.map(inst =>
     `<button data-instance-tab="${escapeHtml(inst.id)}" class="${inst.id === activeInstanceId ? 'active' : ''}">${escapeHtml(inst.label)}</button>`
   ).join('');
   const addTab = `<button data-instance-tab="${ADD_INSTANCE_TAB}" class="${activeInstanceId === ADD_INSTANCE_TAB ? 'active' : ''}">+ Connect Instance</button>`;
@@ -739,15 +971,44 @@ async function addDevice() {
   const instanceSelect = document.getElementById('st-add-device-instance');
   const idInput = document.getElementById('st-add-device-id');
   const nameInput = document.getElementById('st-add-device-name');
-  const instanceId = instanceSelect.value;
   const deviceId = idInput.value.trim();
   const name = nameInput.value.trim();
-  if (!instanceId || !deviceId) return;
+  if (!deviceId) return;
+
+  let instanceId = instanceSelect.value;
+
+  if (instanceId === NEW_INSTANCE_OPTION) {
+    const labelInput = document.getElementById('st-add-device-new-instance-label');
+    const urlInput = document.getElementById('st-add-device-new-instance-url');
+    const keyInput = document.getElementById('st-add-device-new-instance-key');
+    const label = labelInput.value.trim();
+    const url = urlInput.value.trim();
+    const apiKey = keyInput.value.trim();
+    if (!label || !url || !apiKey) return;
+    showStatusModal('Connecting new instance...', 'loading');
+    try {
+      const res = await fetch('/api/add-syncthing-instance', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label, url, apiKey })
+      });
+      const data = await res.json();
+      if (!data.valid) {
+        showStatusModal('Could not connect new instance: ' + (data.error || 'check the URL and API key.'), 'error');
+        return;
+      }
+      instanceId = data.instanceId;
+      instances.push({ id: instanceId, label, isHost: false, configured: true, url });
+    } catch (err) {
+      showStatusModal('Error: ' + err, 'error');
+      return;
+    }
+  }
+
   try {
     const res = await fetch('/api/syncthing-device-add', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId, deviceId, name })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to add device: ' + (data.error || res.status), 'error'); return; }
+    hideStatusModal();
     showAddDeviceForm = false;
     refreshCurrentView();
   } catch (err) {
@@ -764,6 +1025,12 @@ function findDeviceRow(instanceId, deviceId) {
 
 function wireDelegatedListeners() {
   const panel = document.getElementById('syncthing-panel');
+  panel.addEventListener('change', (e) => {
+    if (e.target.id !== 'st-add-device-instance') return;
+    const isNew = e.target.value === NEW_INSTANCE_OPTION;
+    ['st-add-device-new-instance-row', 'st-add-device-new-instance-url-row', 'st-add-device-new-instance-key-row']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isNew ? '' : 'none'; });
+  });
   panel.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('[data-instance-tab]');
     if (tabBtn) {
@@ -806,7 +1073,30 @@ function wireDelegatedListeners() {
       case 'pause-folder': return pauseFolder(folderId);
       case 'resume-folder': return resumeFolder(folderId);
       case 'rescan-folder': return rescanFolder(folderId);
+      case 'open-selective-sync': return openSelectiveSync(activeInstanceId, folderId, btn.dataset.folderLabel || folderId);
     }
+  });
+
+  // The selective-sync modal lives outside #syncthing-panel (as a sibling
+  // in #syncthing-root) specifically so renderSyncthingPanel()'s frequent
+  // innerHTML replacement never destroys it mid-use -- same reasoning as
+  // mealie.js's recipe-modal-overlay. Its own listeners are wired here,
+  // once, rather than re-wired on every panel re-render.
+  const root = document.getElementById('syncthing-root');
+  root.addEventListener('click', (e) => {
+    if (e.target.id === 'st-selsync-close' || e.target.id === 'st-selsync-overlay') closeSelectiveSync();
+  });
+  const selSyncOverlay = document.getElementById('st-selsync-overlay');
+  selSyncOverlay.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'save-selective-sync') return saveSelectiveSync();
+    if (btn.dataset.action === 'close-selective-sync') return closeSelectiveSync();
+  });
+  selSyncOverlay.addEventListener('change', (e) => {
+    const input = e.target.closest('[data-selsync-path]');
+    if (!input) return;
+    onSelSyncCheckboxChange(input.dataset.selsyncPath, input.checked);
   });
 }
 
@@ -816,6 +1106,13 @@ registerApp('syncthing', {
     <div id="syncthing-root">
       <div id="conn-error-banner" class="error-banner"></div>
       <div id="syncthing-panel"></div>
+
+      <div class="recipe-modal-overlay" id="st-selsync-overlay">
+        <div class="recipe-modal">
+          <button class="recipe-modal-close" id="st-selsync-close">&#x2716;</button>
+          <div id="st-selsync-body"></div>
+        </div>
+      </div>
     </div>
   `,
   onRender: () => {
@@ -831,6 +1128,12 @@ registerApp('syncthing', {
     stBaseUrl = null;
     allDevicesList = [];
     allDevicesErrors = [];
+    selSyncInstanceId = null;
+    selSyncFolderId = null;
+    selSyncTree = [];
+    selSyncNodesByPath = new Map();
+    selSyncIgnored = new Set();
+    selSyncOtherPatterns = [];
     renderSyncthingPanel();
     loadInstances();
   },
