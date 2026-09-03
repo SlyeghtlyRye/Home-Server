@@ -410,6 +410,17 @@ file tree and translates checkbox state to/from a simple subset of it:
   searching, matching directories are force-open regardless of
   `selSyncCollapsed`, without mutating it -- clearing the search returns
   to whatever you'd manually collapsed before.
+- **Loose files at the folder root** (no subfolder of their own -- a ROM
+  library dumped flat at the top level, say) get grouped under a
+  synthetic **"Files (N)"** entry (`SELSYNC_ROOT_FILES_KEY`) so a
+  potentially huge flat list can still be collapsed as a unit and
+  selected/deselected all at once, the same as a real subfolder already
+  could. It's not a real Syncthing path -- there's nothing to save an
+  ignore pattern for *it* -- so its own checkbox (checked only when every
+  file inside is) is handled as a special case in
+  `onSelSyncCheckboxChange()` that cascades straight to each individual
+  file instead, and it reuses the same folder icon as a real directory,
+  since visually it's just "a group of files."
 - **"Delete Unchecked From Disk"** (Host only -- the button doesn't render
   for any other instance, checked via `instances.find(...).isHost`) goes
   further than excluding: it also deletes the currently-unchecked files

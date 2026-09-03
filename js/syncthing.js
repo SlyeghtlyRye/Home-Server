@@ -741,6 +741,20 @@ function closeSelectiveSync() {
 }
 
 function onSelSyncCheckboxChange(path, checked) {
+  // The root-files group's own checkbox isn't a real Syncthing path (it
+  // has no path of its own to save an ignore pattern for) -- toggling it
+  // cascades straight to every loose top-level file instead, the same
+  // effect a real directory's checkbox has on its descendants.
+  if (path === SELSYNC_ROOT_FILES_KEY) {
+    for (const f of selSyncTree) {
+      if (f.type === 'FILE_INFO_TYPE_DIRECTORY') continue;
+      if (checked) selSyncIgnored.delete(f.name);
+      else selSyncIgnored.add(f.name);
+    }
+    renderSelSyncTreeOnly();
+    return;
+  }
+
   const node = selSyncNodesByPath.get(path);
   if (checked) selSyncIgnored.delete(path);
   else selSyncIgnored.add(path);
@@ -869,12 +883,17 @@ function renderSelSyncNode(node, parentPath, query) {
   `;
 }
 
-// Synthetic path (not a real Syncthing path -- there's nothing to check
-// or generate an ignore pattern for) for grouping files that sit directly
-// in the folder's root with no subfolder of their own to collapse under
-// -- a ROM library dumped flat at the top level, say. Without this, that
-// could be hundreds of individual checkbox rows with no way to collapse
-// them as a unit, unlike a real subfolder (which already collapses fine).
+// Synthetic path (not a real Syncthing path -- there's nothing to save an
+// ignore pattern for) for grouping files that sit directly in the
+// folder's root with no subfolder of their own to collapse under -- a
+// ROM library dumped flat at the top level, say. Without this, that could
+// be hundreds of individual checkbox rows with no way to collapse them as
+// a unit, or to select/deselect them all at once, unlike a real subfolder
+// (which already does both). Its own checkbox (checked only when every
+// file inside is) cascades to all of them via onSelSyncCheckboxChange()'s
+// special-case for this key, same effect a real directory's checkbox has
+// on its descendants -- and it uses the same folder icon as a real one,
+// since visually it's just "a group of files", not worth a separate icon.
 const SELSYNC_ROOT_FILES_KEY = '__root_files__';
 
 function renderSelSyncTreeHtml() {
@@ -889,11 +908,13 @@ function renderSelSyncTreeHtml() {
   let rootFilesBlock = '';
   if (rootFiles.length && !(query && !rootFilesHtml)) {
     const isOpen = query ? true : !selSyncCollapsed.has(SELSYNC_ROOT_FILES_KEY);
+    const allChecked = rootFiles.every(f => !selSyncIgnored.has(f.name));
     rootFilesBlock = `
       <details class="st-selsync-dir" data-selsync-dir="${SELSYNC_ROOT_FILES_KEY}" ${isOpen ? 'open' : ''}>
         <summary>
           <span class="st-selsync-disclosure">&#x25B6;</span>
-          <span>&#x1F4C4; Files (${rootFiles.length})</span>
+          <input type="checkbox" data-selsync-path="${SELSYNC_ROOT_FILES_KEY}" ${allChecked ? 'checked' : ''}>
+          <span>&#x1F4C1; Files (${rootFiles.length})</span>
         </summary>
         <div class="st-selsync-children">
           ${rootFilesHtml}
