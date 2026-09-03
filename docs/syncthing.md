@@ -3,7 +3,7 @@ tags: syncthing, backend, frontend, container
 # Syncthing Devices
 
 A dashboard panel for managing devices and folders across one or more
-Syncthing instances, presented as a single unified **"Your Devices"**
+Syncthing instances, presented as a single unified **"Your Connections"**
 list rather than a tab per instance. For a home setup, "an instance you
 manage via API key" and "a device paired via Syncthing ID" are almost
 always the same physical machine (Host and a10mini are each both at
@@ -24,8 +24,8 @@ Syncthing's own web GUI for routine management.
   removed, only "Clear"ed back to that placeholder state.
 - **Devices you've connected** -- any number of externally-added ones
   (e.g. a phone or handheld running its own Syncthing), added via
-  **"+ Connect another of your devices"**. Each gets its own card, and
-  *can* be fully removed ("Remove instance" instead of "Clear
+  **"+ Add another connection"**. Each gets its own card, and
+  *can* be fully removed ("Remove connection" instead of "Clear
   connection" -- same underlying `clear_instance_config()` call, the
   card just doesn't get synthesized back afterward the way Host's does).
 - **The merge itself** -- `mergeDevicesById()` fetches
@@ -89,7 +89,7 @@ Syncthing's own web GUI for routine management.
   asleep" can't end up silently hiding a genuinely different problem after
   it reconnects tomorrow.
 
-**"+ Connect another of your devices" is deliberately not the same
+**"+ Add another connection" is deliberately not the same
 control as "+ Add Device",** and this distinction is the whole reason the
 underlying multi-instance model exists even though the UI no longer
 shows it as tabs: connecting a device points *our dashboard* at another
@@ -118,23 +118,23 @@ in Syncthing itself.
 
 ## Pairing your own devices without copy-pasting an ID
 
-The **"+ Add Device"** form's **"Which device?"** picker lists every
+The **"+ Add Device"** form's **"Auto-fill from"** picker lists every
 device you manage (i.e. every configured instance) alongside a "not
 managed here" option. Picking one of your own auto-fills the Device ID
 field (read-only) from that instance's own known ID -- found by scanning
 the already-loaded merged device list for that instance's `isSelf: true`
 row -- and pre-fills the Device Name from its label, both wired via a
 `change` listener on `#st-add-device-target` in `js/syncthing.js`. Only
-picking **"A device not managed here"** falls back to a manual, editable
+picking **"Don't auto-fill"** falls back to a manual, editable
 Device ID/Name, since that's the one case where we genuinely don't
 already know the ID (a friend's Syncthing, no API access). A client-side
 guard in `addDevice()` refuses to submit if "Add this device to" and
-"Which device?" resolve to the same instance, since pairing a device with
+"Auto-fill from" resolve to the same instance, since pairing a device with
 itself is never a valid Syncthing operation.
 
 ## Running Syncthing: in this stack, or fully external
 
-The Host card covers one case, "+ Connect another of your devices" covers
+The Host card covers one case, "+ Add another connection" covers
 the other, and both use the exact same underlying save/edit/clear
 machinery:
 
@@ -167,11 +167,11 @@ machinery:
 - `scripts/trigger_server.py` exposes this over HTTP for the dashboard,
   same `?key=` auth pattern as every other integration; devices/folders
   GETs take `?instance=<id>`, action POSTs take `instanceId` in the body
-- `js/syncthing.js` is the frontend: one merged "Your Devices" list
+- `js/syncthing.js` is the frontend: one merged "Your Connections" list
   (`mergeDevicesById()` over every configured instance's device list),
   each managed device's card expandable into a Manage panel (connect/edit
   form, folder list with status/completion/pause/resume/rescan, and
-  bandwidth limit), plus the "+ Connect another of your devices" and
+  bandwidth limit), plus the "+ Add another connection" and
   "+ Add Device" forms
 
 ## Connecting an instance
@@ -207,7 +207,7 @@ never sent back to the browser in the first place, for the same reason
 the key I already have": the `/api/save-syncthing-instance` handler in
 `trigger_server.py` falls back to the existing stored key whenever
 `apiKey` arrives empty, re-validating with `test_connection()` either
-way. **Clear connection** (Host) / **Remove instance** (everything else)
+way. **Clear connection** (Host) / **Remove connection** (everything else)
 both call the same `clear_instance_config()`, deleting that instance's
 entry from the config file -- the only difference is what happens next:
 Host's tab persists (synthesized as a placeholder by `list_instances()`
@@ -274,7 +274,7 @@ directly into the in-memory `instances` array (not re-fetched via
 `loadInstances()`) purely to avoid a jarring re-render mid-flow -- it'll
 naturally match the server's state on the next real refresh. See
 "Pairing your own devices without copy-pasting an ID" above for the
-second picker, **"Which device?"**.
+second picker, **"Auto-fill from"**.
 
 ## Per-device GUI links
 
@@ -313,11 +313,11 @@ port 8384 (Syncthing's default GUI port) unless overridden.
   the device's current config, updates `name`, `PUT`s it back to
   `/rest/config/devices/{id}`.
 - **Add** -- one form (`renderAddDeviceSectionHtml()`), always at the
-  bottom of the "Your Devices" list rather than looking like a different
+  bottom of the "Your Connections" list rather than looking like a different
   control depending on which card you were just looking at. "Add this
   device to" defaults to Host (or whichever instance is configured) and
   includes a "+ New instance..." option that folds the connect flow into
-  the same form. "Which device?" auto-fills Device ID/Name for one of
+  the same form. "Auto-fill from" auto-fills Device ID/Name for one of
   your own managed devices, or falls back to manual entry for one you
   don't have API access to -- see "Pairing your own devices without
   copy-pasting an ID" above. Submitting `PUT`s the new device to the

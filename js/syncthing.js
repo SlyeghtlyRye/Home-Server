@@ -1,28 +1,34 @@
-// syncthing.js -- a unified "Your Devices" panel for one or more Syncthing
-// instances. Each device you manage (the Syncthing container in this
-// stack's own docker-compose, always listed even before it's ever been
-// connected, plus any number of externally-connected ones added via
-// "+ Connect another of your devices") gets one card. Clicking "Manage"
+// syncthing.js -- a unified "Your Connections" panel for one or more
+// Syncthing instances. Each Syncthing you manage (the Syncthing container
+// in this stack's own docker-compose, always listed even before it's
+// ever been connected, plus any number of externally-connected ones
+// added via "+ Add another connection") gets one card. Clicking "Manage"
 // on a card expands its Folders, Bandwidth Limit, and connection details
-// inline -- no separate tab per device, since for a home setup "a device
-// you manage via API key" and "a device paired via Syncthing ID" are
-// almost always the same physical machine. Pairing two of your own
-// managed devices auto-fills the Device ID (we already know it once
-// both sides are connected) instead of manual copy-paste; pairing with
-// someone else's device (no API access) still takes a manual ID.
+// inline -- no separate tab per connection, since for a home setup "a
+// connection you manage via API key" and "a device paired via Syncthing
+// ID" are almost always the same physical machine. "Connection" and
+// "Device" are kept as two deliberately different words throughout this
+// UI -- "Device" is reserved for Syncthing's own meaning (a paired peer
+// in the sync mesh), "Connection" for the thing THIS dashboard manages
+// via a URL + API key, so the two concepts (which frequently describe
+// the same physical machine, just from different angles) don't collide
+// under one overloaded word. Pairing two of your own connections
+// auto-fills the Device ID (we already know it once both sides are
+// connected) instead of manual copy-paste; pairing with someone else's
+// device (no API access) still takes a manual ID.
 // Uses the same event-delegation / status-modal patterns as the other
 // modules rather than introducing a new UI pattern.
 import { registerApp, showStatusModal, hideStatusModal,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
 import { HOST_IP } from './config.js';
 
-const NEW_INSTANCE_OPTION = '__new_instance__'; // "Add this device to" picker's inline "+ New instance..." option
-const MANUAL_DEVICE_OPTION = '__manual__'; // "Which device?" picker's "not managed here, enter ID" option
+const NEW_INSTANCE_OPTION = '__new_instance__'; // "Add this device to" picker's inline "+ New connection..." option
+const MANUAL_DEVICE_OPTION = '__manual__'; // "Auto-fill from" picker's "Don't auto-fill" option
 
 let instances = []; // [{id, label, isHost, configured, url}], "host" always present
-let expandedInstanceId = null; // instance whose Manage panel (folders/bandwidth/connection) is open, if any
-let showConnectForm = false; // show the connect/edit form inside the expanded instance's card
-let showAddInstanceForm = false; // "+ Connect another of your devices" inline form
+let expandedInstanceId = null; // connection whose Manage panel (folders/bandwidth/connection) is open, if any
+let showConnectForm = false; // show the connect/edit form inside the expanded connection's card
+let showAddInstanceForm = false; // "+ Add another connection" inline form
 let showAddDeviceForm = false; // the pairing ("+ Add Device") form
 
 let folders = []; // expanded instance's folders
@@ -295,7 +301,7 @@ async function refreshExpandedInstance() {
   renderSyncthingPanel();
 }
 
-// ---------- All configured instances, merged into "Your Devices" ----------
+// ---------- All configured instances, merged into "Your Connections" ----------
 
 async function refreshAllDevicesOverview() {
   allDevicesErrors = [];
@@ -429,13 +435,13 @@ function cancelEditConfig() {
 function renderAddInstanceFormHtml() {
   return `
     <div class="week-block">
-      <h3>Connect Another of Your Devices</h3>
+      <h3>Add Another Connection</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
         This points the dashboard at another Syncthing you run (e.g. a phone or
         handheld) so you can manage it here too, and pair it with your other
-        devices without copying a Device ID by hand. URL is the regular address
-        you'd use to open its GUI in a browser; API key is under
-        Actions &rarr; Settings &rarr; General on that device.
+        connections without copying a Device ID by hand. URL is the regular
+        address you'd use to open its GUI in a browser; API key is under
+        Actions &rarr; Settings &rarr; General there.
       </p>
       <div class="preview-row">
         <span class="date">Name</span>
@@ -530,14 +536,14 @@ function deviceGuiLinkHtml(d, instanceBaseUrl) {
   `;
 }
 
-// One "Add Device" form -- always the same control, only which instance is
-// pre-selected changes. The "Add this device to" picker's "+ New
-// instance..." option folds the connect flow into the same form, so
-// pairing with a not-yet-connected device doesn't require leaving to add
-// it first. The "Which device?" picker auto-fills the Device ID/Name when
-// you pick one of your other managed devices (we already know its real
-// Syncthing ID once it's connected) -- manual entry is only needed for a
-// device we don't have API access to.
+// One "Add Device" form -- always the same control, only which connection
+// is pre-selected changes. The "Add this device to" picker's "+ New
+// connection..." option folds the connect flow into the same form, so
+// pairing with a not-yet-connected connection doesn't require leaving to
+// add it first. The "Auto-fill from" picker fills the Device ID/Name when
+// you pick one of your other managed connections (we already know its
+// real Syncthing ID once it's connected) -- manual entry is only needed
+// for a device we don't have API access to.
 function renderAddDeviceSectionHtml(defaultInstanceId) {
   if (!showAddDeviceForm) {
     return `<div class="btn-grid"><button class="btn small" data-action="show-add-device">+ Add Device</button></div>`;
@@ -548,11 +554,11 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
       <span class="date">Add this device to</span>
       <select id="st-add-device-instance" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         ${configuredInstances.map(i => `<option value="${escapeHtml(i.id)}" ${i.id === defaultInstanceId ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
-        <option value="${NEW_INSTANCE_OPTION}">+ New instance...</option>
+        <option value="${NEW_INSTANCE_OPTION}">+ New connection...</option>
       </select>
     </div>
     <div class="preview-row" id="st-add-device-new-instance-row" style="display:none;">
-      <span class="date">Instance Name</span>
+      <span class="date">Connection Name</span>
       <input type="text" id="st-add-device-new-instance-label" placeholder="e.g. Laptop's Syncthing" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="preview-row" id="st-add-device-new-instance-url-row" style="display:none;">
@@ -564,9 +570,9 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
       <input type="password" id="st-add-device-new-instance-key" placeholder="Paste its API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="preview-row">
-      <span class="date">Which device?</span>
+      <span class="date">Auto-fill from</span>
       <select id="st-add-device-target" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-        <option value="${MANUAL_DEVICE_OPTION}">A device not managed here (enter ID manually)</option>
+        <option value="${MANUAL_DEVICE_OPTION}">Don't auto-fill (enter Device ID manually)</option>
         ${configuredInstances.map(i => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}</option>`).join('')}
       </select>
     </div>
@@ -969,7 +975,7 @@ function renderInstanceManagePanelHtml(inst) {
       </div>
     `;
   }
-  const clearLabel = inst.isHost ? 'Clear connection' : 'Remove instance';
+  const clearLabel = inst.isHost ? 'Clear connection' : 'Remove connection';
   return `
     <div class="st-manage-panel">
       <div class="shopping-panel-header">
@@ -1122,7 +1128,7 @@ function renderErroredInstanceCardHtml(inst, error) {
         ${isExpanded ? `
           ${renderConnectFormInlineHtml(inst)}
           <div class="st-connection-links">
-            <span class="st-link-action" data-action="clear-instance">${inst.isHost ? 'Clear connection' : 'Remove instance'}</span>
+            <span class="st-link-action" data-action="clear-instance">${inst.isHost ? 'Clear connection' : 'Remove connection'}</span>
           </div>
         ` : ''}
       </div>
@@ -1131,7 +1137,7 @@ function renderErroredInstanceCardHtml(inst, error) {
 }
 
 function renderYourDevicesHtml() {
-  const infoTip = infoTipHtml('Every device you manage here (Host, plus any you\'ve connected) shown once, matched by its real Syncthing ID -- Syncthing itself keeps no shared/global device list, each instance has its own, so a row underneath shows each instance that knows about this device. Click "Manage" on one of your own devices to see its folders, bandwidth limit, and connection details.');
+  const infoTip = infoTipHtml('Every connection you manage here (Host, plus any others you\'ve added) shown once, matched by its real Syncthing device ID -- Syncthing itself keeps no shared/global device list, each connection has its own, so a row underneath shows each connection that knows about this device. Click "Manage" on one of your own connections to see its folders, bandwidth limit, and connection details.');
   const anyConfigured = instances.some(i => i.configured);
   const unconfigured = instances.filter(i => !i.configured);
   const merged = mergeDevicesById(allDevicesList);
@@ -1168,12 +1174,12 @@ function renderYourDevicesHtml() {
   const noneFound = !anyConfigured && unconfigured.length === 0;
   return `
     <div class="week-block">
-      <h3>Your Devices ${infoTip}</h3>
+      <h3>Your Connections ${infoTip}</h3>
       ${standaloneErrored.map(x => renderErroredInstanceCardHtml(x.inst, x.error)).join('')}
       ${unconfigured.map(inst => renderUnconfiguredInstanceCardHtml(inst)).join('')}
       ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : merged.map(g => renderMergedDeviceCardHtml(g, erroredByGroupId.get(g.id))).join('')}
       <div class="btn-grid">
-        <button class="btn small" data-action="show-add-instance">+ Connect another of your devices</button>
+        <button class="btn small" data-action="show-add-instance">+ Add another connection</button>
       </div>
       ${renderAddDeviceSectionHtml(defaultAddInstanceId())}
     </div>
@@ -1406,7 +1412,7 @@ function wireDelegatedListeners() {
         idInput.readOnly = true;
         nameInput.value = targetInst ? targetInst.label : '';
         if (!selfEntry) {
-          showStatusModal("Could not determine that device's ID -- try refreshing, or pick \"A device not managed here\" to enter it manually.", 'error');
+          showStatusModal("Could not determine that device's ID -- try refreshing, or pick \"Don't auto-fill\" to enter it manually.", 'error');
         }
       }
       return;
