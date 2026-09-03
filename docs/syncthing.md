@@ -46,26 +46,42 @@ Syncthing's own web GUI for routine management.
 - **Connection failures** -- a configured instance that fails to connect
   never appears in the merged device list at all (nothing came back to
   group). It usually still gets folded into its existing merged card
-  rather than rendered as a standalone one: `instanceSelfIds` remembers
-  each instance's own real Syncthing ID the last time its fetch
-  succeeded, and if that ID matches an already-built merged group (e.g.
-  Host's device list still shows a10mini as a known, offline peer even
-  while a10mini's own instance-management fetch is failing), the error is
-  attached to that group instead (`renderMergedDeviceCardHtml`'s
-  `erroredInstance` param) -- **"Manage"** becomes **"Fix connection"**
-  and expands the connect form. Without this, the exact same physical
-  device would render as two side-by-side cards: its own "couldn't
-  connect" card, and a second one for "how Host sees it" -- reading as a
-  duplicate rather than one device with a connection problem. Only when
-  we've never successfully seen that instance's own ID this session (its
-  first connection attempt ever failed, say) does it fall back to a
-  genuinely standalone card with the raw error and a **"Fix connection"**
-  button (`editErroredConnection()`) -- there's nothing to fold it into
-  yet. Either way this stays scoped to that one card rather than a
-  page-level banner, since a banner at the top would read as "something's
-  wrong with the whole page," when it's really just one instance
-  (commonly one that's asleep/offline) failing to answer, unrelated to
-  the others.
+  rather than rendered as a standalone one: `instanceSelfIds`
+  (`localStorage`-persisted, not just in-memory -- a real Syncthing device
+  ID never changes, so there's no staleness risk in remembering it
+  indefinitely) remembers each instance's own real Syncthing ID the last
+  time its fetch succeeded, and if that ID matches an already-built merged
+  group (e.g. Host's device list still shows a10mini as a known, offline
+  peer even while a10mini's own instance-management fetch is failing), the
+  error is attached to that group instead (`renderMergedDeviceCardHtml`'s
+  `erroredInstance` param) -- **"Manage"** becomes **"Fix connection"** and
+  expands the connect form. Without this (and specifically without
+  persisting it -- an earlier in-memory-only version still showed the
+  duplicate whenever the page was freshly loaded while that instance was
+  *already* unreachable, since nothing had populated the cache yet that
+  session), the exact same physical device would render as two side-by-
+  side cards: its own "couldn't connect" card, and a second one for "how
+  Host sees it" -- reading as a duplicate rather than one device with a
+  connection problem. Only when we've truly never seen that instance's own
+  ID (its first-ever connection attempt failed) does it fall back to a
+  genuinely standalone card with a **"Fix connection"** button
+  (`editErroredConnection()`) -- there's nothing to fold it into yet.
+  Either way this stays scoped to that one card rather than a page-level
+  banner, since a banner at the top would read as "something's wrong with
+  the whole page," when it's really just one instance (commonly one
+  that's asleep/offline) failing to answer, unrelated to the others.
+- **Dismissing a connection error** -- once you've seen an error and know
+  it's just "that device isn't around right now" rather than something
+  worth fixing, **"Dismiss"** shrinks the standing `.warning-box` down to
+  a one-line marker (a status dot + "Not reachable right now" +
+  **"Show details"** to bring the full box back), via the shared
+  `renderInstanceConnErrorHtml()` used by both the merged-card Manage
+  panel and the standalone fallback card. The dismissal is per instance,
+  `localStorage`-persisted (`dismissedInstanceErrors`), and clears itself
+  automatically the next time that instance connects successfully
+  (`refreshAllDevicesOverview()`) -- so a dismissal from today's "it's
+  asleep" can't end up silently hiding a genuinely different problem after
+  it reconnects tomorrow.
 
 **"+ Connect another of your devices" is deliberately not the same
 control as "+ Add Device",** and this distinction is the whole reason the

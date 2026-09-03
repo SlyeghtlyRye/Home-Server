@@ -38,8 +38,42 @@ let allDevicesErrors = []; // [{instanceId, label, error}] -- one per instance t
 // (asleep, offline) we can still recognize "the device other instances
 // already show as a known peer IS this managed instance" and fold its
 // error into that existing merged card instead of rendering a second,
-// separate card for what's visibly the same device.
+// separate card for what's visibly the same device. Persisted (not just
+// in-memory) specifically so this still works on a fresh page load where
+// that instance was ALREADY unreachable before we ever got a chance to
+// see its ID this session -- a real Syncthing device ID never changes,
+// so there's no staleness risk in remembering it indefinitely.
 let instanceSelfIds = {};
+try {
+  instanceSelfIds = JSON.parse(localStorage.getItem('mealie_syncthingSelfIds') || '{}');
+} catch (err) {
+  instanceSelfIds = {};
+}
+
+function rememberInstanceSelfId(instanceId, deviceId) {
+  if (instanceSelfIds[instanceId] === deviceId) return;
+  instanceSelfIds[instanceId] = deviceId;
+  localStorage.setItem('mealie_syncthingSelfIds', JSON.stringify(instanceSelfIds));
+}
+
+// An instance's connection error, once you've seen it and know it's just
+// "that device isn't around right now" rather than something to fix, can
+// be collapsed to a small marker instead of a standing warning box.
+// Persisted per instance; cleared automatically the next time that
+// instance connects successfully, so a dismissal doesn't silently hide a
+// FUTURE, different problem after it reconnects.
+let dismissedInstanceErrors = {};
+try {
+  dismissedInstanceErrors = JSON.parse(localStorage.getItem('mealie_syncthingDismissedErrors') || '{}');
+} catch (err) {
+  dismissedInstanceErrors = {};
+}
+
+function setInstanceErrorDismissed(instanceId, dismissed) {
+  if (dismissed) dismissedInstanceErrors[instanceId] = true;
+  else delete dismissedInstanceErrors[instanceId];
+  localStorage.setItem('mealie_syncthingDismissedErrors', JSON.stringify(dismissedInstanceErrors));
+}
 
 // Selective sync modal state -- scoped to whichever folder is currently open.
 let selSyncInstanceId = null;
@@ -156,6 +190,16 @@ function editErroredConnection(instanceId) {
   expandedInstanceId = instanceId;
   showConnectForm = true;
   showAddDeviceForm = false;
+  renderSyncthingPanel();
+}
+
+function dismissConnectionError(instanceId) {
+  setInstanceErrorDismissed(instanceId, true);
+  renderSyncthingPanel();
+}
+
+function showConnectionError(instanceId) {
+  setInstanceErrorDismissed(instanceId, false);
   renderSyncthingPanel();
 }
 
@@ -282,9 +326,13 @@ async function refreshAllDevicesOverview() {
         allDevicesErrors.push({ instanceId: r.inst.id, label: r.inst.label, error: r.error });
         continue;
       }
+      // A dismissal only means "I know THIS is down" -- once it
+      // reconnects, a future failure is a new thing worth surfacing
+      // again, not something still covered by the old dismissal.
+      if (dismissedInstanceErrors[r.inst.id]) setInstanceErrorDismissed(r.inst.id, false);
       for (const d of r.devices) {
         allDevicesList.push({ ...d, instanceId: r.inst.id, instanceLabel: r.inst.label });
-        if (d.isSelf) instanceSelfIds[r.inst.id] = d.id;
+        if (d.isSelf) rememberInstanceSelfId(r.inst.id, d.id);
       }
     }
   } catch (err) {
@@ -877,6 +925,32 @@ function mergedStatusClass(group) {
   return 'offline';
 }
 
+// A connection error you've already seen and know about (device asleep,
+// off the network, whatever) can be shrunk to a small marker instead of
+// standing as a permanent warning box -- "Dismiss" collapses it, "Show
+// details" brings the full error back. Dismissal is per instance and
+// clears itself automatically the next time that instance reconnects
+// (see refreshAllDevicesOverview()), so it can't end up silently hiding a
+// later, different problem.
+function renderInstanceConnErrorHtml(instanceId, error) {
+  if (dismissedInstanceErrors[instanceId]) {
+    return `
+      <div class="st-dismissed-error">
+        <span class="st-status-dot offline"></span> Not reachable right now
+        <span class="st-link-action" data-action="show-connection-error" data-instance-id="${escapeHtml(instanceId)}">Show details</span>
+      </div>
+    `;
+  }
+  return `
+    <div class="warning-box">
+      &#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(error)}
+      <div style="margin-top:6px;">
+        <span class="st-link-action" data-action="dismiss-connection-error" data-instance-id="${escapeHtml(instanceId)}">Dismiss -- I know this one isn't around</span>
+      </div>
+    </div>
+  `;
+}
+
 // Folders + Bandwidth Limit + connection details for one managed instance,
 // shown inline under its card when "Manage" is clicked -- replaces what
 // used to be a whole separate tab.
@@ -888,7 +962,7 @@ function renderInstanceManagePanelHtml(inst) {
   if (connError) {
     return `
       <div class="st-manage-panel">
-        <div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(connError.error)}</div>
+        ${renderInstanceConnErrorHtml(inst.id, connError.error)}
         <div class="st-connection-links">
           <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
         </div>
@@ -1044,7 +1118,7 @@ function renderErroredInstanceCardHtml(inst, error) {
           <div class="st-device-name">${escapeHtml(inst.label)}</div>
           ${!isExpanded ? `<button class="btn small" data-action="edit-error-connection" data-instance-id="${escapeHtml(inst.id)}">Fix connection</button>` : ''}
         </div>
-        <div class="warning-box" style="margin-top:6px;">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(error)}</div>
+        <div style="margin-top:6px;">${renderInstanceConnErrorHtml(inst.id, error)}</div>
         ${isExpanded ? `
           ${renderConnectFormInlineHtml(inst)}
           <div class="st-connection-links">
@@ -1334,6 +1408,8 @@ function wireDelegatedListeners() {
     switch (btn.dataset.action) {
       case 'toggle-manage': return toggleInstanceManage(instanceId);
       case 'edit-error-connection': return editErroredConnection(instanceId);
+      case 'dismiss-connection-error': return dismissConnectionError(instanceId);
+      case 'show-connection-error': return showConnectionError(instanceId);
       case 'save-instance-config': return saveInstanceConfig();
       case 'start-edit-config': return startEditConfig();
       case 'cancel-edit-config': return cancelEditConfig();
@@ -1435,7 +1511,10 @@ registerApp('syncthing', {
     rateLimitsError = null;
     allDevicesList = [];
     allDevicesErrors = [];
-    instanceSelfIds = {};
+    // instanceSelfIds and dismissedInstanceErrors are deliberately NOT
+    // reset here -- both are persisted to localStorage precisely so they
+    // survive re-opening this panel (a fresh onRender), not just re-renders
+    // within one visit.
     selSyncInstanceId = null;
     selSyncFolderId = null;
     selSyncTree = [];
