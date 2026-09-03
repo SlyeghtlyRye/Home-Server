@@ -331,6 +331,27 @@ def browse_folder(instance_id, folder_id, prefix=None):
     return _get("/rest/db/browse", config, params=params)
 
 
+def get_rate_limits(instance_id):
+    """Global bandwidth caps in KiB/s (0 = unlimited, Syncthing's own
+    convention). Lives under /rest/config/options alongside a lot of
+    unrelated global settings -- we only ever read/write the two rate
+    fields, read-modify-write same as set_folder_paused()."""
+    config = _require_instance_config(instance_id)
+    options = _get("/rest/config/options", config)
+    return {
+        "maxSendKbps": options.get("maxSendKbps", 0),
+        "maxRecvKbps": options.get("maxRecvKbps", 0),
+    }
+
+
+def set_rate_limits(instance_id, max_send_kbps, max_recv_kbps):
+    config = _require_instance_config(instance_id)
+    options = _get("/rest/config/options", config)
+    options["maxSendKbps"] = max_send_kbps
+    options["maxRecvKbps"] = max_recv_kbps
+    _put("/rest/config/options", config, options)
+
+
 def get_folder_ignores(instance_id, folder_id):
     config = _require_instance_config(instance_id)
     data = _get("/rest/db/ignores", config, params={"folder": folder_id})

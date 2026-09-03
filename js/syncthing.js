@@ -1,38 +1,37 @@
-// syncthing.js -- devices/folders panel for one or more Syncthing
-// instances. A permanent "Host" tab represents the Syncthing container in
-// this stack's own docker-compose (always listed, even before it's ever
-// been connected); any number of externally-connected instances (e.g. a
-// phone/handheld running Syncthing elsewhere) show up as additional
-// tabs, added via "+ Connect Instance" -- deliberately not called "Add
-// Device", since it's a different operation: it points OUR DASHBOARD at
-// another Syncthing's own REST API, rather than pairing two Syncthing
-// instances with each other (that's what "Add Device" does, and it's the
-// same form everywhere, always with an instance picker, rather than
-// looking like a different control depending on which tab you're on).
-// "All Devices" merges every connected instance's devices into one list
-// so there's a single place to see everything without switching tabs.
+// syncthing.js -- a unified "Your Devices" panel for one or more Syncthing
+// instances. Each device you manage (the Syncthing container in this
+// stack's own docker-compose, always listed even before it's ever been
+// connected, plus any number of externally-connected ones added via
+// "+ Connect another of your devices") gets one card. Clicking "Manage"
+// on a card expands its Folders, Bandwidth Limit, and connection details
+// inline -- no separate tab per device, since for a home setup "a device
+// you manage via API key" and "a device paired via Syncthing ID" are
+// almost always the same physical machine. Pairing two of your own
+// managed devices auto-fills the Device ID (we already know it once
+// both sides are connected) instead of manual copy-paste; pairing with
+// someone else's device (no API access) still takes a manual ID.
 // Uses the same event-delegation / status-modal patterns as the other
 // modules rather than introducing a new UI pattern.
 import { registerApp, showStatusModal, hideStatusModal,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
 import { HOST_IP } from './config.js';
 
-const ALL_DEVICES_TAB = '__all__';
-const ADD_INSTANCE_TAB = '__add__';
-const NEW_INSTANCE_OPTION = '__new_instance__'; // "Instance" picker's inline "+ New instance..." option in Add Device
+const NEW_INSTANCE_OPTION = '__new_instance__'; // "Add this device to" picker's inline "+ New instance..." option
+const MANUAL_DEVICE_OPTION = '__manual__'; // "Which device?" picker's "not managed here, enter ID" option
 
 let instances = []; // [{id, label, isHost, configured, url}], "host" always present
-let activeInstanceId = ALL_DEVICES_TAB;
-let showConnectForm = false; // show connect/edit form for the active instance
-let showAddDeviceForm = false; // the (unified, instance-picking) add-device form
+let expandedInstanceId = null; // instance whose Manage panel (folders/bandwidth/connection) is open, if any
+let showConnectForm = false; // show the connect/edit form inside the expanded instance's card
+let showAddInstanceForm = false; // "+ Connect another of your devices" inline form
+let showAddDeviceForm = false; // the pairing ("+ Add Device") form
 
-let devices = [];
-let folders = [];
-let devicesError = null; // set when OUR backend responded but Syncthing itself didn't
+let folders = []; // expanded instance's folders
 let foldersError = null;
-let stBaseUrl = null; // active instance's own URL, for the self device's GUI link
+let rateLimits = { maxSendKbps: 0, maxRecvKbps: 0 }; // 0 = unlimited, Syncthing's own convention
+let rateLimitsError = null;
+let savingRateLimits = false;
 
-let allDevicesList = []; // merged devices across every configured instance, for the overview tab
+let allDevicesList = []; // merged devices across every configured instance
 let allDevicesErrors = []; // [{instanceId, label, error}] -- one per instance that failed to load, shown as its own card
 
 // Selective sync modal state -- scoped to whichever folder is currently open.
@@ -96,7 +95,7 @@ function defaultAddInstanceId() {
   return anyConfigured ? anyConfigured.id : 'host';
 }
 
-// ---------- Instance list + tab selection ----------
+// ---------- Instance list + data loading ----------
 
 async function loadInstances() {
   try {
@@ -112,87 +111,73 @@ async function loadInstances() {
     renderSyncthingPanel();
     return;
   }
-  const isPseudoTab = activeInstanceId === ADD_INSTANCE_TAB || activeInstanceId === ALL_DEVICES_TAB;
-  if (!isPseudoTab && !instances.find(i => i.id === activeInstanceId)) {
-    activeInstanceId = ALL_DEVICES_TAB;
+  if (expandedInstanceId && !instances.find(i => i.id === expandedInstanceId)) {
+    expandedInstanceId = null;
+    showConnectForm = false;
   }
-  await selectInstanceTab(activeInstanceId);
+  await refreshAllDevicesOverview();
+  if (expandedInstanceId && !showConnectForm) await refreshExpandedInstance();
 }
 
-async function selectInstanceTab(id) {
-  activeInstanceId = id;
-  showAddDeviceForm = false;
-
-  if (id === ADD_INSTANCE_TAB) {
+// Toggles a device card's inline Manage panel. Expanding a not-yet-connected
+// instance shows the connect form instead of Folders/Bandwidth (nothing to
+// manage there yet).
+function toggleInstanceManage(id) {
+  if (expandedInstanceId === id) {
+    expandedInstanceId = null;
+    showConnectForm = false;
     renderSyncthingPanel();
     return;
   }
-  if (id === ALL_DEVICES_TAB) {
-    await refreshAllDevicesOverview();
-    return;
-  }
-
+  expandedInstanceId = id;
+  showAddDeviceForm = false;
   const inst = instances.find(i => i.id === id);
   showConnectForm = !inst || !inst.configured;
   if (showConnectForm) {
     renderSyncthingPanel();
-    return;
+  } else {
+    refreshExpandedInstance();
   }
-  await refreshAll();
 }
 
-function showAddInstanceTab() {
-  activeInstanceId = ADD_INSTANCE_TAB;
+// A configured-but-unreachable instance needs to jump straight to its
+// connect form (to fix the URL/key) rather than trying (and failing) to
+// also fetch folders the way a normal expand does.
+function editErroredConnection(instanceId) {
+  expandedInstanceId = instanceId;
+  showConnectForm = true;
+  showAddDeviceForm = false;
+  renderSyncthingPanel();
+}
+
+function openAddInstanceForm() {
+  showAddInstanceForm = true;
   renderSyncthingPanel();
 }
 
 function cancelAddInstance() {
-  selectInstanceTab(ALL_DEVICES_TAB);
+  showAddInstanceForm = false;
+  renderSyncthingPanel();
 }
 
-function refreshCurrentView() {
-  return activeInstanceId === ALL_DEVICES_TAB ? refreshAllDevicesOverview() : refreshAll();
+// After any device-level action (pause/resume/rename/remove/pair), refresh
+// both the always-visible merged list and whichever instance's Manage
+// panel is open -- the action could plausibly affect either.
+async function refreshCurrentView() {
+  await refreshAllDevicesOverview();
+  if (expandedInstanceId && !showConnectForm) await refreshExpandedInstance();
 }
 
-// ---------- Devices / folders data (single active instance) ----------
-
-async function fetchDevicesData() {
-  devicesError = null;
-  let res;
-  try {
-    res = await fetch(`/data/syncthing-devices?instance=${encodeURIComponent(activeInstanceId)}`);
-  } catch (err) {
-    // fetch() itself threw -- our own backend (nginx/trigger_server) is
-    // unreachable. That's a real "check that it's running" situation,
-    // same shared page banner every other module uses for it.
-    console.error("Couldn't reach the server for Syncthing devices", err);
-    showErrorBanner("Couldn't reach the server to load Syncthing devices. Check that it's running and try again.");
-    return;
-  }
-  clearErrorBanner();
-  if (!res.ok) {
-    // Our backend responded, so it's fine -- this is Syncthing itself
-    // (at the configured URL) not answering. Scoped to the panel, not
-    // the page banner, so it isn't mistaken for a dashboard outage.
-    const data = await res.json().catch(() => ({}));
-    devicesError = data.error || `Server responded ${res.status}`;
-    devices = [];
-    console.error('Syncthing devices request failed', devicesError);
-    return;
-  }
-  const data = await res.json();
-  devices = data.devices || [];
-  stBaseUrl = data.baseUrl || null;
-}
+// ---------- Folders / bandwidth data (expanded instance only) ----------
 
 async function fetchFoldersData() {
   foldersError = null;
   let res;
   try {
-    res = await fetch(`/data/syncthing-folders?instance=${encodeURIComponent(activeInstanceId)}`);
+    res = await fetch(`/data/syncthing-folders?instance=${encodeURIComponent(expandedInstanceId)}`);
   } catch (err) {
     console.error("Couldn't reach the server for Syncthing folders", err);
-    return; // fetchDevicesData already surfaces the page banner for this
+    return;
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -205,12 +190,59 @@ async function fetchFoldersData() {
   folders = data.folders || [];
 }
 
-async function refreshAll() {
-  await Promise.all([fetchDevicesData(), fetchFoldersData()]);
+async function fetchRateLimitsData() {
+  rateLimitsError = null;
+  let res;
+  try {
+    res = await fetch(`/data/syncthing-rate-limits?instance=${encodeURIComponent(expandedInstanceId)}`);
+  } catch (err) {
+    console.error("Couldn't reach the server for Syncthing rate limits", err);
+    return;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    rateLimitsError = data.error || `Server responded ${res.status}`;
+    console.error('Syncthing rate limits request failed', rateLimitsError);
+    return;
+  }
+  rateLimits = await res.json();
+}
+
+async function saveRateLimits() {
+  const sendInput = document.getElementById('st-rate-send');
+  const recvInput = document.getElementById('st-rate-recv');
+  if (!sendInput || !recvInput) return;
+  const maxSendKbps = Math.max(0, parseInt(sendInput.value, 10) || 0);
+  const maxRecvKbps = Math.max(0, parseInt(recvInput.value, 10) || 0);
+  savingRateLimits = true;
+  renderSyncthingPanel();
+  try {
+    const res = await fetch('/api/syncthing-rate-limits', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceId: expandedInstanceId, maxSendKbps, maxRecvKbps })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showStatusModal('Failed to save bandwidth limit: ' + (data.error || res.status), 'error');
+      return;
+    }
+    rateLimits = { maxSendKbps, maxRecvKbps };
+    showStatusModal('Bandwidth limit saved.', 'success');
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  } finally {
+    savingRateLimits = false;
+    renderSyncthingPanel();
+  }
+}
+
+async function refreshExpandedInstance() {
+  if (!expandedInstanceId) return;
+  await Promise.all([fetchFoldersData(), fetchRateLimitsData()]);
   renderSyncthingPanel();
 }
 
-// ---------- All Devices overview (every configured instance, merged) ----------
+// ---------- All configured instances, merged into "Your Devices" ----------
 
 async function refreshAllDevicesOverview() {
   allDevicesErrors = [];
@@ -254,22 +286,21 @@ async function refreshAllDevicesOverview() {
 
 // ---------- Connect / edit / add / clear instance ----------
 
-function renderConnectFormHtml() {
-  const inst = instances.find(i => i.id === activeInstanceId);
-  if (!inst) return '';
+// No outer wrapper -- rendered inline inside a device card (either a
+// not-yet-connected placeholder card, or the expanded Manage panel).
+function renderConnectFormInlineHtml(inst) {
   const editing = inst.configured;
   // First-time connect defaults to a sensible URL when we have one (the
-  // Host tab already knows the in-stack container's address, same
+  // Host card already knows the in-stack container's address, same
   // reasoning as Mealie's known URL) -- still fully editable.
   const urlValue = editing
     ? (inst.url ? escapeHtml(inst.url) : '')
     : escapeHtml(inst.url || (inst.isHost ? `http://${HOST_IP}:8384` : ''));
   return `
-    <div class="week-block">
-      <h3>${editing ? `Editing ${escapeHtml(inst.label)} Connection` : `Connect ${escapeHtml(inst.label)}`}</h3>
-      <p style="color:var(--color-text-dim); font-size:14px;">
+    <div class="st-inline-form">
+      <p style="color:var(--color-text-dim); font-size:13px;">
         ${editing
-          ? 'Update the URL and/or API key below. Leave the API key blank to keep the one already saved.'
+          ? 'Update the URL and/or API key. Leave the API key blank to keep the one already saved.'
           : (inst.isHost ? "We've pre-filled the address for the Syncthing running on this server -- change it if needed. " : '')
             + 'API key is in Syncthing under Actions &rarr; Settings &rarr; General.'}
       </p>
@@ -282,8 +313,8 @@ function renderConnectFormHtml() {
         <input type="password" id="st-config-key" placeholder="${editing ? 'Leave blank to keep current key' : 'Paste your API key'}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="btn-grid">
-        <button class="btn" data-action="save-instance-config">${editing ? 'Save' : 'Connect'}</button>
-        ${editing ? '<button class="btn clear" data-action="cancel-edit-config">Cancel</button>' : ''}
+        <button class="btn small" data-action="save-instance-config">${editing ? 'Save' : 'Connect'}</button>
+        <button class="btn small clear" data-action="cancel-edit-config">Cancel</button>
       </div>
     </div>
   `;
@@ -294,7 +325,7 @@ async function saveInstanceConfig() {
   const keyInput = document.getElementById('st-config-key');
   const url = urlInput.value.trim();
   const apiKey = keyInput.value.trim();
-  const inst = instances.find(i => i.id === activeInstanceId);
+  const inst = instances.find(i => i.id === expandedInstanceId);
   const editing = !!(inst && inst.configured);
   if (!url) return;
   if (!editing && !apiKey) return; // first-time connect always needs a key
@@ -303,7 +334,7 @@ async function saveInstanceConfig() {
     const res = await fetch('/api/save-syncthing-instance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instanceId: activeInstanceId, url, apiKey })
+      body: JSON.stringify({ instanceId: expandedInstanceId, url, apiKey })
     });
     const data = await res.json();
     if (!data.valid) {
@@ -324,6 +355,15 @@ function startEditConfig() {
 }
 
 function cancelEditConfig() {
+  // Canceling out of "Edit connection" on an already-healthy instance
+  // falls back to its Folders/Bandwidth view; canceling out of an
+  // unconfigured or errored placeholder has no such view to fall back to,
+  // so collapse the card entirely instead of leaving it stuck open.
+  const inst = instances.find(i => i.id === expandedInstanceId);
+  const hasError = allDevicesErrors.some(e => e.instanceId === expandedInstanceId);
+  if (!inst || !inst.configured || hasError) {
+    expandedInstanceId = null;
+  }
   showConnectForm = false;
   renderSyncthingPanel();
 }
@@ -331,12 +371,13 @@ function cancelEditConfig() {
 function renderAddInstanceFormHtml() {
   return `
     <div class="week-block">
-      <h3>Connect a Syncthing Instance</h3>
+      <h3>Connect Another of Your Devices</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
-        This points OUR DASHBOARD at another Syncthing's own REST API, so you can manage it here too --
-        different from "Add Device" below, which pairs two Syncthing instances with each other.
-        URL is the regular address you'd use to open its GUI in a browser; API key is under
-        Actions &rarr; Settings &rarr; General on that instance.
+        This points the dashboard at another Syncthing you run (e.g. a phone or
+        handheld) so you can manage it here too, and pair it with your other
+        devices without copying a Device ID by hand. URL is the regular address
+        you'd use to open its GUI in a browser; API key is under
+        Actions &rarr; Settings &rarr; General on that device.
       </p>
       <div class="preview-row">
         <span class="date">Name</span>
@@ -379,15 +420,15 @@ async function addInstance() {
       return;
     }
     hideStatusModal();
-    activeInstanceId = data.instanceId;
+    showAddInstanceForm = false;
     await loadInstances();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
 }
 
-async function clearActiveInstance() {
-  const inst = instances.find(i => i.id === activeInstanceId);
+async function clearExpandedInstance() {
+  const inst = instances.find(i => i.id === expandedInstanceId);
   if (!inst) return;
   const confirmMsg = inst.isHost
     ? "Clear the saved connection for Host? You'll need to reconnect (URL + API key) to manage it again -- this doesn't affect the Syncthing container itself."
@@ -395,9 +436,11 @@ async function clearActiveInstance() {
   if (!(await showConfirmModal(confirmMsg))) return;
   try {
     const res = await fetch('/api/clear-syncthing-instance', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+    expandedInstanceId = null;
+    showConnectForm = false;
     await loadInstances();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -429,53 +472,14 @@ function deviceGuiLinkHtml(d, instanceBaseUrl) {
   `;
 }
 
-// instanceId/instanceLabel are the device's OWNING instance -- always
-// passed explicitly (rather than assumed from a global "current tab")
-// so the same row renderer works both on a single instance's tab and in
-// the merged All Devices list, where every row can belong to a different
-// instance. instanceLabel is only shown when set (the merged view).
-function renderDeviceRowHtml(d, instanceId, instanceLabel, instanceBaseUrl, asCard) {
-  const statusLabel = d.paused ? 'Paused' : (d.connected ? 'Connected' : 'Offline');
-  const statusClass = d.paused ? 'paused' : (d.connected ? 'connected' : 'offline');
-  const completionText = d.connected && d.completion != null ? `${Math.round(d.completion)}% synced` : '';
-  const lastSeenText = !d.connected ? formatLastSeen(d.lastSeen) : '';
-  const metaParts = [statusLabel, completionText, lastSeenText ? `last seen ${lastSeenText}` : ''].filter(Boolean);
-  const tagHtml = instanceLabel ? `<span class="st-instance-tag">${escapeHtml(instanceLabel)}</span>` : '';
-  return `
-    <div class="st-device-row${asCard ? ' st-card-style' : ''}" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}">
-      <span class="st-status-dot ${statusClass}" title="${statusLabel}"></span>
-      <div class="st-device-info">
-        <div class="st-device-name">
-          ${tagHtml}
-          ${d.isSelf
-            ? `${escapeHtml(d.name)} <span style="color:var(--color-text-muted); font-size:12px; font-weight:normal;">(itself)</span>`
-            : `<span class="st-device-name-text" data-action="start-rename" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}" title="Click to rename">${escapeHtml(d.name)}</span>`}
-          <span class="st-gui-link-wrap">${deviceGuiLinkHtml(d, instanceBaseUrl)}</span>
-        </div>
-        <div class="st-device-meta">
-          ${metaParts.join(' &middot; ')}
-          ${d.folders.length ? `<br>${d.folders.map(escapeHtml).join(', ')}` : ''}
-        </div>
-      </div>
-      ${!d.isSelf ? `
-        <div class="st-device-actions">
-          <button class="btn small" data-action="${d.paused ? 'resume-device' : 'pause-device'}" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}">${d.paused ? 'Resume' : 'Pause'}</button>
-          <button class="icon-btn-delete" data-action="remove-device" data-instance-id="${escapeHtml(instanceId)}" data-device-id="${escapeHtml(d.id)}" title="Remove device">&#x1F5D1;</button>
-        </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-// One "Add Device" form, used identically on a single instance's tab and
-// on the All Devices overview -- the only difference is which instance
-// is pre-selected in the dropdown. This is deliberately the ONE place
-// device-pairing happens, so it never looks like a different control
-// depending on where you are. The "Instance" picker's "+ New instance..."
-// option folds "+ Connect Instance" into the same form, so pairing with
-// a not-yet-connected instance doesn't require leaving to a different tab
-// first -- type its name/URL/key right here, and both the new instance
-// and the device get created together on Add.
+// One "Add Device" form -- always the same control, only which instance is
+// pre-selected changes. The "Add this device to" picker's "+ New
+// instance..." option folds the connect flow into the same form, so
+// pairing with a not-yet-connected device doesn't require leaving to add
+// it first. The "Which device?" picker auto-fills the Device ID/Name when
+// you pick one of your other managed devices (we already know its real
+// Syncthing ID once it's connected) -- manual entry is only needed for a
+// device we don't have API access to.
 function renderAddDeviceSectionHtml(defaultInstanceId) {
   if (!showAddDeviceForm) {
     return `<div class="btn-grid"><button class="btn small" data-action="show-add-device">+ Add Device</button></div>`;
@@ -483,7 +487,7 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
   const configuredInstances = instances.filter(i => i.configured);
   return `
     <div class="preview-row">
-      <span class="date">Instance</span>
+      <span class="date">Add this device to</span>
       <select id="st-add-device-instance" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         ${configuredInstances.map(i => `<option value="${escapeHtml(i.id)}" ${i.id === defaultInstanceId ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
         <option value="${NEW_INSTANCE_OPTION}">+ New instance...</option>
@@ -500,6 +504,13 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
     <div class="preview-row" id="st-add-device-new-instance-key-row" style="display:none;">
       <span class="date">API key</span>
       <input type="password" id="st-add-device-new-instance-key" placeholder="Paste its API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+    </div>
+    <div class="preview-row">
+      <span class="date">Which device?</span>
+      <select id="st-add-device-target" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <option value="${MANUAL_DEVICE_OPTION}">A device not managed here (enter ID manually)</option>
+        ${configuredInstances.map(i => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}</option>`).join('')}
+      </select>
     </div>
     <div class="preview-row">
       <span class="date">Device ID</span>
@@ -741,79 +752,224 @@ function renderSelectiveSyncBody() {
   `;
 }
 
-function renderTabsHtml() {
-  const allTab = `<button data-instance-tab="${ALL_DEVICES_TAB}" class="${activeInstanceId === ALL_DEVICES_TAB ? 'active' : ''}">All Devices</button>`;
-  // Host sorts first here too, same explicit guarantee as the merged
-  // device list, rather than relying on backend ordering alone.
-  const orderedInstances = [...instances].sort((a, b) => Number(b.isHost) - Number(a.isHost));
-  const tabs = orderedInstances.map(inst =>
-    `<button data-instance-tab="${escapeHtml(inst.id)}" class="${inst.id === activeInstanceId ? 'active' : ''}">${escapeHtml(inst.label)}</button>`
-  ).join('');
-  const addTab = `<button data-instance-tab="${ADD_INSTANCE_TAB}" class="${activeInstanceId === ADD_INSTANCE_TAB ? 'active' : ''}">+ Connect Instance</button>`;
-  return `<div class="mode-toggle" style="margin-bottom:12px; flex-wrap:wrap;">${allTab}${tabs}${addTab}</div>`;
+// Groups the flat per-instance device list by the device's real Syncthing
+// ID -- the one thing that's genuinely global (unlike names/labels, which
+// each instance assigns independently). The same physical device commonly
+// shows up once per instance that knows about it (as "itself" from its
+// own instance, as a known remote from every other instance it's paired
+// with) -- without this, the list would show N x M rows for what's really
+// just N physical devices.
+function mergeDevicesById(list) {
+  const map = new Map();
+  for (const d of list) {
+    if (!map.has(d.id)) map.set(d.id, { id: d.id, name: d.name, folders: [], sources: [] });
+    const group = map.get(d.id);
+    if (d.isSelf) group.name = d.name; // an instance's name for itself is the authoritative one
+    for (const f of d.folders) if (!group.folders.includes(f)) group.folders.push(f);
+    group.sources.push(d);
+  }
+  return Array.from(map.values());
 }
 
-function renderAllDevicesHtml() {
-  const infoTip = infoTipHtml('Merges the separate device list from every connected instance into one view. Syncthing keeps no shared/global device list -- each instance has its own -- so the same physical device can appear more than once here if it\'s known to more than one of your instances.');
-  const anyConfigured = instances.some(i => i.configured);
-  if (!anyConfigured) {
+function mergedStatusClass(group) {
+  if (group.sources.some(s => s.connected)) return 'connected';
+  if (group.sources.some(s => s.paused)) return 'paused';
+  return 'offline';
+}
+
+// Folders + Bandwidth Limit + connection details for one managed instance,
+// shown inline under its card when "Manage" is clicked -- replaces what
+// used to be a whole separate tab.
+function renderInstanceManagePanelHtml(inst) {
+  if (showConnectForm) {
+    return `<div class="st-manage-panel">${renderConnectFormInlineHtml(inst)}</div>`;
+  }
+  const connError = allDevicesErrors.find(e => e.instanceId === inst.id);
+  if (connError) {
     return `
-      <div class="week-block">
-        <h3>All Devices ${infoTip}</h3>
-        <p style="color:var(--color-text-muted);">No Syncthing instances connected yet -- connect Host, or use "+ Connect Instance" to add another, to see devices here.</p>
+      <div class="st-manage-panel">
+        <div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(connError.error)}</div>
+        <div class="st-connection-links">
+          <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
+        </div>
       </div>
     `;
   }
-  const errorCardsHtml = allDevicesErrors.map(e => `
-    <details class="st-instance-error-card">
-      <summary>&#x26A0; ${escapeHtml(e.label)} &mdash; Couldn't connect</summary>
-      <div class="st-instance-error-detail">${escapeHtml(e.error)}</div>
-    </details>
-  `).join('');
-  const noneFound = allDevicesList.length === 0 && allDevicesErrors.length === 0;
+  const clearLabel = inst.isHost ? 'Clear connection' : 'Remove instance';
   return `
-    <div class="week-block">
-      <h3>All Devices ${infoTip}</h3>
-      ${errorCardsHtml}
-      ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : allDevicesList.map(d => {
-        const owningInstance = instances.find(i => i.id === d.instanceId);
-        return renderDeviceRowHtml(d, d.instanceId, d.instanceLabel, owningInstance ? owningInstance.url : null, true);
-      }).join('')}
-      ${renderAddDeviceSectionHtml(defaultAddInstanceId())}
-    </div>
-  `;
-}
-
-function renderDevicesAndFoldersHtml() {
-  const inst = instances.find(i => i.id === activeInstanceId);
-  const clearLabel = inst && inst.isHost ? 'Clear connection' : 'Remove instance';
-  const label = inst ? inst.label : activeInstanceId;
-  const devicesInfoTip = infoTipHtml(`This is ${label}'s own separate list of known Syncthing devices -- Syncthing keeps no shared/global list, each instance has its own. Adding a device here only makes ${label} aware of it; the other side needs the same device added on its own tab (or to accept a connection request) before they'll actually sync with each other.`);
-  return `
-    <div class="week-block">
+    <div class="st-manage-panel">
       <div class="shopping-panel-header">
-        <h3>${escapeHtml(label)}'s Devices ${devicesInfoTip}</h3>
-        ${!devicesError ? `
-          <div class="st-global-actions">
-            <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
-            <button class="btn small" data-action="resume-all" title="Resume all devices">Resume All</button>
-          </div>
-        ` : ''}
+        <h4 style="margin:0;">Folders</h4>
+        <div class="st-global-actions">
+          <button class="btn small" data-action="pause-all" title="Pause all devices">Pause All</button>
+          <button class="btn small" data-action="resume-all" title="Resume all devices">Resume All</button>
+        </div>
       </div>
-      ${devicesError
-        ? `<div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(devicesError)}</div>`
-        : (devices.length === 0 ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : devices.map(d => renderDeviceRowHtml(d, activeInstanceId, null, stBaseUrl)).join(''))}
-      ${!devicesError ? renderAddDeviceSectionHtml(activeInstanceId) : ''}
+      ${foldersError
+        ? `<div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(foldersError)}</div>`
+        : (folders.length === 0 ? '<p style="color:var(--color-text-muted); font-size:13px;">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join(''))}
+      ${renderRateLimitHtml()}
       <div class="st-connection-links">
         <span class="st-link-action" data-action="start-edit-config">Edit connection</span>
         <span class="st-link-action" data-action="clear-instance">${clearLabel}</span>
       </div>
     </div>
+  `;
+}
+
+function renderRateLimitHtml() {
+  const tip = infoTipHtml('Caps how fast this Syncthing instance sends/receives data, globally across all devices and folders. 0 = unlimited. Lowering this trades sync speed for less CPU/disk/network load while a big transfer is happening.');
+  if (rateLimitsError) {
+    return `
+      <div style="margin-top:14px;">
+        <h4 style="margin:0 0 6px;">Bandwidth Limit ${tip}</h4>
+        <div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(rateLimitsError)}</div>
+      </div>
+    `;
+  }
+  return `
+    <div style="margin-top:14px;">
+      <h4 style="margin:0 0 6px;">Bandwidth Limit ${tip}</h4>
+      <div class="st-rate-limit-row">
+        <label>Send (KiB/s)
+          <input type="number" id="st-rate-send" min="0" step="100" value="${rateLimits.maxSendKbps || 0}">
+        </label>
+        <label>Receive (KiB/s)
+          <input type="number" id="st-rate-recv" min="0" step="100" value="${rateLimits.maxRecvKbps || 0}">
+        </label>
+        <button class="btn small" data-action="save-rate-limits" ${savingRateLimits ? 'disabled' : ''}>${savingRateLimits ? 'Saving...' : 'Save'}</button>
+      </div>
+      <p style="color:var(--color-text-muted); font-size:13px;">0 means unlimited. This is Syncthing's own global rate limit, applied here so you don't need to open its native GUI.</p>
+    </div>
+  `;
+}
+
+// One card per physical device (see mergeDevicesById), with a nested row
+// per instance that knows about it -- each such row keeps its own status
+// and its own actions, since pause/resume/rename/remove are genuinely
+// separate per-instance operations even though they're about "the same"
+// device. Cards for a device you manage (has an "itself" source with a
+// configured instance) get a Manage toggle that expands Folders/Bandwidth
+// /connection details inline.
+function renderMergedDeviceCardHtml(group) {
+  const statusClass = mergedStatusClass(group);
+  const statusLabel = statusClass === 'connected' ? 'Connected' : (statusClass === 'paused' ? 'Paused' : 'Offline');
+  const selfSource = group.sources.find(s => s.isSelf);
+  const managedInstance = selfSource ? instances.find(i => i.id === selfSource.instanceId && i.configured) : null;
+  const isExpanded = !!managedInstance && expandedInstanceId === managedInstance.id;
+
+  const sourcesHtml = group.sources.map(d => {
+    const owningInstance = instances.find(i => i.id === d.instanceId);
+    const lastSeenText = !d.isSelf && !d.connected ? formatLastSeen(d.lastSeen) : '';
+    const statusText = d.isSelf
+      ? '(itself)'
+      : (d.paused ? 'Paused' : (d.connected
+          ? `Connected${d.completion != null ? ` &middot; ${Math.round(d.completion)}% synced` : ''}`
+          : `Offline${lastSeenText ? ` &middot; last seen ${lastSeenText}` : ''}`));
+    const nameHtml = !d.isSelf
+      ? `<span class="st-device-name-text" data-action="start-rename" data-instance-id="${escapeHtml(d.instanceId)}" data-device-id="${escapeHtml(d.id)}" title="Click to rename">${escapeHtml(d.name)}</span> &mdash; `
+      : '';
+    const actionsHtml = !d.isSelf ? `
+      <div class="st-device-actions">
+        <button class="btn small" data-action="${d.paused ? 'resume-device' : 'pause-device'}" data-instance-id="${escapeHtml(d.instanceId)}" data-device-id="${escapeHtml(d.id)}">${d.paused ? 'Resume' : 'Pause'}</button>
+        <button class="icon-btn-delete" data-action="remove-device" data-instance-id="${escapeHtml(d.instanceId)}" data-device-id="${escapeHtml(d.id)}" title="Remove device">&#x1F5D1;</button>
+      </div>
+    ` : '';
+    return `
+      <div class="st-merged-source-row">
+        <span class="st-instance-tag">${escapeHtml(d.instanceLabel)}</span>
+        <span class="st-merged-source-status">${nameHtml}${statusText}</span>
+        ${deviceGuiLinkHtml(d, owningInstance ? owningInstance.url : null)}
+        ${actionsHtml}
+      </div>
+    `;
+  }).join('');
+
+  const manageToggleHtml = managedInstance ? `
+    <button class="btn small" data-action="toggle-manage" data-instance-id="${escapeHtml(managedInstance.id)}">${isExpanded ? 'Hide' : 'Manage'}</button>
+  ` : '';
+
+  return `
+    <div class="st-device-row st-card-style st-merged-device-card">
+      <span class="st-status-dot ${statusClass}" title="${statusLabel}"></span>
+      <div class="st-device-info" style="flex:1;">
+        <div class="st-device-name-row">
+          <div class="st-device-name">${escapeHtml(group.name)}</div>
+          ${manageToggleHtml}
+        </div>
+        ${group.folders.length ? `<div class="st-device-meta">${group.folders.map(escapeHtml).join(', ')}</div>` : ''}
+        <div class="st-merged-sources">${sourcesHtml}</div>
+        ${isExpanded ? renderInstanceManagePanelHtml(managedInstance) : ''}
+      </div>
+    </div>
+  `;
+}
+
+// A managed instance that's never been connected yet (Host, before you've
+// entered its URL/API key, or any instance you've cleared) doesn't appear
+// in the merged device list at all -- it needs its own simple placeholder.
+function renderUnconfiguredInstanceCardHtml(inst) {
+  const isExpanded = expandedInstanceId === inst.id;
+  return `
+    <div class="st-device-row st-card-style">
+      <span class="st-status-dot offline" title="Not connected"></span>
+      <div class="st-device-info" style="flex:1;">
+        <div class="st-device-name-row">
+          <div class="st-device-name">${escapeHtml(inst.label)}</div>
+          ${!isExpanded ? `<button class="btn small" data-action="toggle-manage" data-instance-id="${escapeHtml(inst.id)}">Connect</button>` : ''}
+        </div>
+        <div class="st-device-meta">Not connected yet</div>
+        ${isExpanded ? renderConnectFormInlineHtml(inst) : ''}
+      </div>
+    </div>
+  `;
+}
+
+// A configured instance that fails to connect never appears in
+// allDevicesList (nothing to merge into a card), so it needs its own
+// card -- same expand-to-fix-connection pattern as an unconfigured one,
+// just starting from an error instead of a blank form.
+function renderErroredInstanceCardHtml(inst, error) {
+  const isExpanded = expandedInstanceId === inst.id;
+  return `
+    <div class="st-device-row st-card-style">
+      <span class="st-status-dot offline" title="Couldn't connect"></span>
+      <div class="st-device-info" style="flex:1;">
+        <div class="st-device-name-row">
+          <div class="st-device-name">${escapeHtml(inst.label)}</div>
+          ${!isExpanded ? `<button class="btn small" data-action="edit-error-connection" data-instance-id="${escapeHtml(inst.id)}">Fix connection</button>` : ''}
+        </div>
+        <div class="warning-box" style="margin-top:6px;">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(error)}</div>
+        ${isExpanded ? `
+          ${renderConnectFormInlineHtml(inst)}
+          <div class="st-connection-links">
+            <span class="st-link-action" data-action="clear-instance">${inst.isHost ? 'Clear connection' : 'Remove instance'}</span>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderYourDevicesHtml() {
+  const infoTip = infoTipHtml('Every device you manage here (Host, plus any you\'ve connected) shown once, matched by its real Syncthing ID -- Syncthing itself keeps no shared/global device list, each instance has its own, so a row underneath shows each instance that knows about this device. Click "Manage" on one of your own devices to see its folders, bandwidth limit, and connection details.');
+  const anyConfigured = instances.some(i => i.configured);
+  const unconfigured = instances.filter(i => !i.configured);
+  const errored = allDevicesErrors
+    .map(e => ({ e, inst: instances.find(i => i.id === e.instanceId) }))
+    .filter(x => x.inst);
+  const merged = mergeDevicesById(allDevicesList);
+  const noneFound = !anyConfigured && unconfigured.length === 0;
+  return `
     <div class="week-block">
-      <h3>Folders</h3>
-      ${foldersError
-        ? `<div class="warning-box">&#x26A0; Couldn't reach this Syncthing instance: ${escapeHtml(foldersError)}</div>`
-        : (folders.length === 0 ? '<p style="color:var(--color-text-muted);">No folders found.</p>' : folders.map(f => renderFolderRowHtml(f)).join(''))}
+      <h3>Your Devices ${infoTip}</h3>
+      ${errored.map(x => renderErroredInstanceCardHtml(x.inst, x.e.error)).join('')}
+      ${unconfigured.map(inst => renderUnconfiguredInstanceCardHtml(inst)).join('')}
+      ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : merged.map(g => renderMergedDeviceCardHtml(g)).join('')}
+      <div class="btn-grid">
+        <button class="btn small" data-action="show-add-instance">+ Connect another of your devices</button>
+      </div>
+      ${renderAddDeviceSectionHtml(defaultAddInstanceId())}
     </div>
   `;
 }
@@ -825,23 +981,15 @@ function renderSyncthingPanel() {
     el.innerHTML = '<div class="week-block"><p style="color:var(--color-text-muted);">Loading...</p></div>';
     return;
   }
-  let bodyHtml;
-  if (activeInstanceId === ADD_INSTANCE_TAB) {
-    bodyHtml = renderAddInstanceFormHtml();
-  } else if (activeInstanceId === ALL_DEVICES_TAB) {
-    bodyHtml = renderAllDevicesHtml();
-  } else if (showConnectForm) {
-    bodyHtml = renderConnectFormHtml();
-  } else {
-    bodyHtml = renderDevicesAndFoldersHtml();
-  }
-  el.innerHTML = renderTabsHtml() + bodyHtml;
+  el.innerHTML = renderYourDevicesHtml() + (showAddInstanceForm ? renderAddInstanceFormHtml() : '');
 }
 
 // ---------- Device / folder / global actions ----------
-// Every action takes instanceId explicitly (read from the row/button
-// that triggered it) rather than assuming "the current tab", since the
-// All Devices overview mixes rows from several instances at once.
+// Device actions take instanceId explicitly (read from the row/button
+// that triggered it) rather than assuming "the current instance", since
+// the merged list mixes rows from several instances at once. Folder/
+// bandwidth actions apply to whichever instance's Manage panel is open
+// (expandedInstanceId), since those only ever render there.
 
 async function pauseDevice(instanceId, deviceId) {
   try {
@@ -897,10 +1045,10 @@ async function startRenameDevice(instanceId, deviceId, currentName) {
 async function pauseAllDevices() {
   try {
     const res = await fetch('/api/syncthing-pause-all', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause all: ' + (data.error || res.status), 'error'); return; }
-    refreshAll();
+    refreshCurrentView();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -909,10 +1057,10 @@ async function pauseAllDevices() {
 async function resumeAllDevices() {
   try {
     const res = await fetch('/api/syncthing-resume-all', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume all: ' + (data.error || res.status), 'error'); return; }
-    refreshAll();
+    refreshCurrentView();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -921,10 +1069,10 @@ async function resumeAllDevices() {
 async function pauseFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-pause', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to pause folder: ' + (data.error || res.status), 'error'); return; }
-    refreshAll();
+    refreshExpandedInstance();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -933,10 +1081,10 @@ async function pauseFolder(folderId) {
 async function resumeFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-resume', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to resume folder: ' + (data.error || res.status), 'error'); return; }
-    refreshAll();
+    refreshExpandedInstance();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -945,10 +1093,10 @@ async function resumeFolder(folderId) {
 async function rescanFolder(folderId) {
   try {
     const res = await fetch('/api/syncthing-folder-rescan', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: activeInstanceId, folderId })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instanceId: expandedInstanceId, folderId })
     });
     if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to rescan: ' + (data.error || res.status), 'error'); return; }
-    refreshAll();
+    refreshExpandedInstance();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -969,6 +1117,7 @@ function editGuiPort(deviceId) {
 
 async function addDevice() {
   const instanceSelect = document.getElementById('st-add-device-instance');
+  const targetSelect = document.getElementById('st-add-device-target');
   const idInput = document.getElementById('st-add-device-id');
   const nameInput = document.getElementById('st-add-device-name');
   const deviceId = idInput.value.trim();
@@ -976,6 +1125,11 @@ async function addDevice() {
   if (!deviceId) return;
 
   let instanceId = instanceSelect.value;
+
+  if (targetSelect && targetSelect.value !== MANUAL_DEVICE_OPTION && targetSelect.value === instanceId) {
+    showStatusModal("Can't pair a device with itself -- pick a different device.", 'error');
+    return;
+  }
 
   if (instanceId === NEW_INSTANCE_OPTION) {
     const labelInput = document.getElementById('st-add-device-new-instance-label');
@@ -1019,37 +1173,55 @@ async function addDevice() {
 // ---------- Wiring ----------
 
 function findDeviceRow(instanceId, deviceId) {
-  const pool = activeInstanceId === ALL_DEVICES_TAB ? allDevicesList : devices;
-  return pool.find(x => x.id === deviceId && (activeInstanceId !== ALL_DEVICES_TAB || x.instanceId === instanceId));
+  return allDevicesList.find(x => x.id === deviceId && x.instanceId === instanceId);
 }
 
 function wireDelegatedListeners() {
   const panel = document.getElementById('syncthing-panel');
   panel.addEventListener('change', (e) => {
-    if (e.target.id !== 'st-add-device-instance') return;
-    const isNew = e.target.value === NEW_INSTANCE_OPTION;
-    ['st-add-device-new-instance-row', 'st-add-device-new-instance-url-row', 'st-add-device-new-instance-key-row']
-      .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isNew ? '' : 'none'; });
+    if (e.target.id === 'st-add-device-instance') {
+      const isNew = e.target.value === NEW_INSTANCE_OPTION;
+      ['st-add-device-new-instance-row', 'st-add-device-new-instance-url-row', 'st-add-device-new-instance-key-row']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = isNew ? '' : 'none'; });
+      return;
+    }
+    if (e.target.id === 'st-add-device-target') {
+      const idInput = document.getElementById('st-add-device-id');
+      const nameInput = document.getElementById('st-add-device-name');
+      if (!idInput || !nameInput) return;
+      if (e.target.value === MANUAL_DEVICE_OPTION) {
+        idInput.value = '';
+        idInput.readOnly = false;
+        nameInput.value = '';
+      } else {
+        const selfEntry = allDevicesList.find(d => d.instanceId === e.target.value && d.isSelf);
+        const targetInst = instances.find(i => i.id === e.target.value);
+        idInput.value = selfEntry ? selfEntry.id : '';
+        idInput.readOnly = true;
+        nameInput.value = targetInst ? targetInst.label : '';
+        if (!selfEntry) {
+          showStatusModal("Could not determine that device's ID -- try refreshing, or pick \"A device not managed here\" to enter it manually.", 'error');
+        }
+      }
+      return;
+    }
   });
   panel.addEventListener('click', (e) => {
-    const tabBtn = e.target.closest('[data-instance-tab]');
-    if (tabBtn) {
-      const id = tabBtn.dataset.instanceTab;
-      return id === ADD_INSTANCE_TAB ? showAddInstanceTab() : selectInstanceTab(id);
-    }
-
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     const instanceId = btn.dataset.instanceId;
     const deviceId = btn.dataset.deviceId;
     const folderId = btn.dataset.folderId;
     switch (btn.dataset.action) {
+      case 'toggle-manage': return toggleInstanceManage(instanceId);
+      case 'edit-error-connection': return editErroredConnection(instanceId);
       case 'save-instance-config': return saveInstanceConfig();
       case 'start-edit-config': return startEditConfig();
       case 'cancel-edit-config': return cancelEditConfig();
+      case 'show-add-instance': return openAddInstanceForm();
       case 'add-instance': return addInstance();
       case 'cancel-add-instance': return cancelAddInstance();
-      case 'clear-instance': return clearActiveInstance();
+      case 'clear-instance': return clearExpandedInstance();
       case 'pause-all': return pauseAllDevices();
       case 'resume-all': return resumeAllDevices();
       case 'pause-device': return pauseDevice(instanceId, deviceId);
@@ -1073,7 +1245,8 @@ function wireDelegatedListeners() {
       case 'pause-folder': return pauseFolder(folderId);
       case 'resume-folder': return resumeFolder(folderId);
       case 'rescan-folder': return rescanFolder(folderId);
-      case 'open-selective-sync': return openSelectiveSync(activeInstanceId, folderId, btn.dataset.folderLabel || folderId);
+      case 'open-selective-sync': return openSelectiveSync(expandedInstanceId, folderId, btn.dataset.folderLabel || folderId);
+      case 'save-rate-limits': return saveRateLimits();
     }
   });
 
@@ -1118,14 +1291,14 @@ registerApp('syncthing', {
   onRender: () => {
     wireDelegatedListeners();
     instances = [];
-    activeInstanceId = ALL_DEVICES_TAB;
+    expandedInstanceId = null;
     showConnectForm = false;
+    showAddInstanceForm = false;
     showAddDeviceForm = false;
-    devices = [];
     folders = [];
-    devicesError = null;
     foldersError = null;
-    stBaseUrl = null;
+    rateLimits = { maxSendKbps: 0, maxRecvKbps: 0 };
+    rateLimitsError = null;
     allDevicesList = [];
     allDevicesErrors = [];
     selSyncInstanceId = null;

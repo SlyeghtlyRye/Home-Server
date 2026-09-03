@@ -467,6 +467,10 @@
     .st-info-tip { font-size: 13px; color: var(--color-text-muted); cursor: help; vertical-align: middle; }
     .st-info-tip:hover { color: var(--color-accent); }
 
+    .st-rate-limit-row { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+    .st-rate-limit-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--color-text-muted); }
+    .st-rate-limit-row input[type="number"] { width: 110px; }
+
     .st-device-row.st-card-style {
       border: 1px solid var(--color-border-soft);
       border-radius: 6px;
@@ -474,41 +478,13 @@
       margin-bottom: 8px;
       background: var(--color-bg);
     }
-    .st-instance-error-card {
-      background: var(--color-warning-bg);
-      border: 1px solid var(--color-warning-border);
-      border-radius: 6px;
-      padding: 10px 14px;
-      margin-bottom: 8px;
-    }
-    .st-instance-error-card summary {
-      cursor: pointer;
-      list-style: none;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--color-warning);
-      font-weight: bold;
-      font-size: 14px;
-    }
-    .st-instance-error-card summary::-webkit-details-marker { display: none; }
-    .st-instance-error-card summary::before {
-      content: '\25B6';
-      display: inline-block;
-      font-size: 11px;
-      transition: transform 0.15s;
-    }
-    .st-instance-error-card[open] summary::before { transform: rotate(90deg); }
-    .st-instance-error-card .st-instance-error-detail {
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid var(--color-warning-border);
-      font-size: 12px;
-      color: var(--color-text-dim);
-      font-family: monospace;
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
+    .st-merged-sources { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+    .st-merged-source-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-muted); }
+    .st-merged-source-status { color: var(--color-text-dim); }
+    .st-device-name-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .st-manage-panel { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--color-border-soft); }
+    .st-inline-form { margin-top: 8px; }
+    .preview-row input[readonly] { opacity: 0.6; cursor: not-allowed; }
 
     .st-selsync-tree { max-height: 50vh; overflow-y: auto; margin: 10px 0; font-size: 13px; }
     .st-selsync-tree label { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 3px 0; }

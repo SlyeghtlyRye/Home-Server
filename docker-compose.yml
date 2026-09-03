@@ -76,6 +76,11 @@ services:
       - "22000:22000/udp"
       - "21027:21027/udp"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
 
 volumes:
   pihole_etc:
