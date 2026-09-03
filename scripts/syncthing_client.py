@@ -16,6 +16,7 @@ setup/reset, which would silently wipe anything else added to it.
 import json
 import os
 import re
+import subprocess
 import requests
 from config import HOST_IP
 
@@ -350,6 +351,48 @@ def set_rate_limits(instance_id, max_send_kbps, max_recv_kbps):
     options["maxSendKbps"] = max_send_kbps
     options["maxRecvKbps"] = max_recv_kbps
     _put("/rest/config/options", config, options)
+
+
+def delete_folder_files(instance_id, folder_id, relative_paths):
+    """Deletes files/directories from a folder's actual disk storage, not
+    just from sync. Only supported for the host instance -- this process
+    runs directly on the Docker host and has no filesystem access to an
+    externally-connected instance (e.g. a10mini) to delete anything there.
+
+    Deletes via `docker exec` into the syncthing container itself rather
+    than resolving the underlying named volume's real host path: Syncthing
+    reports the folder's `path` (e.g. /var/syncthing/gba) as it appears
+    INSIDE that container's own filesystem, which is exactly where `docker
+    exec` runs commands -- sidesteps having to guess the Compose-generated
+    volume name and inspect its host-side mountpoint, which this process
+    has no reliable way to derive on its own.
+
+    Callers are expected to have already saved an ignore pattern covering
+    each path (see the docstring on the /api/syncthing-folder-delete-files
+    handler) -- deleting a file Syncthing is still actively tracking on a
+    Send & Receive folder looks like a local delete and gets propagated to
+    every other device sharing the folder, which is never the intent here.
+    """
+    if instance_id != HOST_INSTANCE_ID:
+        raise RuntimeError(
+            "Deleting files from disk is only supported for Host -- "
+            "this server has no filesystem access to any other instance."
+        )
+    config = _require_instance_config(instance_id)
+    folder = _get(f"/rest/config/folders/{folder_id}", config)
+    base_path = (folder.get("path") or "").rstrip("/")
+    if not base_path:
+        raise RuntimeError("Could not determine this folder's path.")
+
+    for rel in relative_paths:
+        cleaned = rel.strip("/")
+        if not cleaned or ".." in cleaned.split("/"):
+            raise RuntimeError(f"Refusing an unsafe path: {rel!r}")
+        full_path = f"{base_path}/{cleaned}"
+        subprocess.run(
+            ["docker", "exec", "syncthing", "rm", "-rf", "--", full_path],
+            check=True, timeout=15,
+        )
 
 
 def get_folder_ignores(instance_id, folder_id):

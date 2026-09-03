@@ -489,8 +489,10 @@
     .st-selsync-tree { max-height: 50vh; overflow-y: auto; margin: 10px 0; font-size: 13px; }
     .st-selsync-tree label { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 3px 0; }
     .st-selsync-tree input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
-    .st-selsync-dir > summary { cursor: pointer; list-style: none; }
+    .st-selsync-dir > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 3px 0; }
     .st-selsync-dir > summary::-webkit-details-marker { display: none; }
+    .st-selsync-disclosure { display: inline-block; font-size: 10px; flex-shrink: 0; transition: transform 0.15s; }
+    .st-selsync-dir[open] > summary .st-selsync-disclosure { transform: rotate(90deg); }
     .st-selsync-children { margin-left: 18px; padding-left: 10px; border-left: 1px solid var(--color-border-soft); }
     .st-selsync-file { padding-left: 18px; }
 

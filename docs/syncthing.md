@@ -45,10 +45,24 @@ Syncthing's own web GUI for routine management.
   rows from different instances sit next to each other.
 - **Connection failures** -- a configured instance that fails to connect
   never appears in the merged device list at all (nothing came back to
-  group), so it gets its own card with the raw error and a **"Fix
-  connection"** button that jumps straight to its connect form
-  (`editErroredConnection()`) rather than a page-level banner. That
-  distinction matters: a banner at the top would read as "something's
+  group). It usually still gets folded into its existing merged card
+  rather than rendered as a standalone one: `instanceSelfIds` remembers
+  each instance's own real Syncthing ID the last time its fetch
+  succeeded, and if that ID matches an already-built merged group (e.g.
+  Host's device list still shows a10mini as a known, offline peer even
+  while a10mini's own instance-management fetch is failing), the error is
+  attached to that group instead (`renderMergedDeviceCardHtml`'s
+  `erroredInstance` param) -- **"Manage"** becomes **"Fix connection"**
+  and expands the connect form. Without this, the exact same physical
+  device would render as two side-by-side cards: its own "couldn't
+  connect" card, and a second one for "how Host sees it" -- reading as a
+  duplicate rather than one device with a connection problem. Only when
+  we've never successfully seen that instance's own ID this session (its
+  first connection attempt ever failed, say) does it fall back to a
+  genuinely standalone card with the raw error and a **"Fix connection"**
+  button (`editErroredConnection()`) -- there's nothing to fold it into
+  yet. Either way this stays scoped to that one card rather than a
+  page-level banner, since a banner at the top would read as "something's
   wrong with the whole page," when it's really just one instance
   (commonly one that's asleep/offline) failing to answer, unrelated to
   the others.
@@ -350,6 +364,56 @@ file tree and translates checkbox state to/from a simple subset of it:
   (from Syncthing's own GUI, say), opening and saving from our panel
   won't silently clobber them -- only the checkbox-driven ones round-trip
   through the UI.
+- **Search** filters the tree as you type (`#st-selsync-search`, an
+  `input` listener -- not `change`, so it reacts per keystroke). A node
+  survives the filter if its own name matches, or (for a directory) any
+  descendant's does (`selSyncNodeMatches()`); once an ancestor directory's
+  own name has matched, everything inside it renders unfiltered --
+  searching for a folder means "show me that folder," not "show me only
+  the files inside it that also happen to match." Only the tree container
+  (`#st-selsync-tree-container`) gets re-rendered on each keystroke
+  (`renderSelSyncTreeOnly()`), not the whole modal body -- replacing the
+  search `<input>` itself via `innerHTML` on every keystroke would reset
+  its focus and cursor position mid-typing.
+- **Collapsible directories** track their own open/closed state in
+  `selSyncCollapsed` (a `Set` of paths), rather than relying on the
+  `<details>` element's native state -- the tree gets rebuilt from scratch
+  (`innerHTML`) on every checkbox change and every search keystroke, so
+  without our own persisted state every directory would snap back open on
+  the next re-render. A directory's `<summary>` click is intercepted
+  (`e.preventDefault()`) and handled manually (`onSelSyncDirToggle()`)
+  specifically to avoid relying on the browser's native toggle-on-summary-
+  click behavior, which is inconsistent across browsers when the summary
+  also contains an interactive child (the checkbox). While actively
+  searching, matching directories are force-open regardless of
+  `selSyncCollapsed`, without mutating it -- clearing the search returns
+  to whatever you'd manually collapsed before.
+- **"Delete Unchecked From Disk"** (Host only -- the button doesn't render
+  for any other instance, checked via `instances.find(...).isHost`) goes
+  further than excluding: it also deletes the currently-unchecked files
+  from Host's actual storage. It always saves the ignore patterns FIRST
+  and awaits that call before deleting anything (`deleteSelectedSelSync()`
+  calls `saveSelectiveSyncPatterns()`, extracted out of `saveSelectiveSync()`
+  so both paths share it). This ordering matters for safety, not just
+  correctness: on a Send & Receive folder, deleting a file Syncthing is
+  still actively tracking looks to Syncthing exactly like "this device
+  deleted it," and it propagates that deletion to every other device
+  sharing the folder -- which would delete the file on a10mini too, the
+  opposite of the actual goal ("stop Host from keeping a copy," not
+  "delete this everywhere"). Saving the ignore pattern first removes the
+  file from Syncthing's tracking for that folder, so the local delete
+  afterward is invisible to sync. The delete itself
+  (`delete_folder_files()` in `syncthing_client.py`) runs
+  `docker exec syncthing rm -rf -- <path>` rather than resolving the
+  underlying named volume's real host-side path: Syncthing reports the
+  folder's `path` (e.g. `/var/syncthing/gba`) as it appears *inside* that
+  container's own filesystem, which is exactly where `docker exec` runs
+  commands, so there's no need to guess the Compose-generated volume name
+  or inspect its mountpoint. Every path is checked for `..` segments
+  before being used, and the container name is hardcoded to `syncthing`
+  (matching `docker-compose.yml`'s `container_name`) -- this is
+  deliberately Host-only, since this process has no filesystem or
+  container access to an externally-connected instance like a10mini.
 
 ## Bandwidth limit
 

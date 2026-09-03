@@ -33,6 +33,13 @@ let savingRateLimits = false;
 
 let allDevicesList = []; // merged devices across every configured instance
 let allDevicesErrors = []; // [{instanceId, label, error}] -- one per instance that failed to load, shown as its own card
+// Remembers each instance's own real Syncthing ID (instanceId -> deviceId)
+// once we've seen it, so that if that instance later goes unreachable
+// (asleep, offline) we can still recognize "the device other instances
+// already show as a known peer IS this managed instance" and fold its
+// error into that existing merged card instead of rendering a second,
+// separate card for what's visibly the same device.
+let instanceSelfIds = {};
 
 // Selective sync modal state -- scoped to whichever folder is currently open.
 let selSyncInstanceId = null;
@@ -42,6 +49,8 @@ let selSyncTree = []; // top-level nodes from /rest/db/browse, each with nested 
 let selSyncNodesByPath = new Map(); // relative path -> node, built by indexSelSyncTree()
 let selSyncIgnored = new Set(); // relative paths currently excluded (unchecked)
 let selSyncOtherPatterns = []; // raw ignore-pattern lines we don't try to interpret as a simple path -- preserved as-is on save
+let selSyncCollapsed = new Set(); // directory paths manually collapsed -- everything defaults open
+let selSyncSearchQuery = ''; // lowercased filter text; empty = show everything
 
 const DEFAULT_GUI_PORT = 8384;
 let stDevicePorts = {}; // per-device GUI port overrides (device ID -> port), local to this browser
@@ -275,6 +284,7 @@ async function refreshAllDevicesOverview() {
       }
       for (const d of r.devices) {
         allDevicesList.push({ ...d, instanceId: r.inst.id, instanceLabel: r.inst.label });
+        if (d.isSelf) instanceSelfIds[r.inst.id] = d.id;
       }
     }
   } catch (err) {
@@ -644,6 +654,8 @@ async function openSelectiveSync(instanceId, folderId, folderLabel) {
   selSyncNodesByPath = new Map();
   selSyncIgnored = new Set();
   selSyncOtherPatterns = [];
+  selSyncCollapsed = new Set();
+  selSyncSearchQuery = '';
 
   const overlay = document.getElementById('st-selsync-overlay');
   const body = document.getElementById('st-selsync-body');
@@ -685,41 +697,110 @@ function onSelSyncCheckboxChange(path, checked) {
       else selSyncIgnored.add(descendant);
     }
   }
-  renderSelectiveSyncBody();
+  renderSelSyncTreeOnly(); // not the whole body -- keeps the search input's focus/cursor intact
+}
+
+function onSelSyncDirToggle(path) {
+  if (selSyncCollapsed.has(path)) selSyncCollapsed.delete(path);
+  else selSyncCollapsed.add(path);
+  renderSelSyncTreeOnly();
+}
+
+async function saveSelectiveSyncPatterns() {
+  const patterns = buildSelSyncIgnorePatterns();
+  const res = await fetch('/api/syncthing-folder-ignores', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ instanceId: selSyncInstanceId, folderId: selSyncFolderId, ignore: patterns })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || String(res.status));
+  }
 }
 
 async function saveSelectiveSync() {
   showStatusModal('Saving...', 'loading');
   try {
-    const patterns = buildSelSyncIgnorePatterns();
-    const res = await fetch('/api/syncthing-folder-ignores', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instanceId: selSyncInstanceId, folderId: selSyncFolderId, ignore: patterns })
-    });
-    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Failed to save: ' + (data.error || res.status), 'error'); return; }
+    await saveSelectiveSyncPatterns();
     hideStatusModal();
     closeSelectiveSync();
     refreshCurrentView();
   } catch (err) {
-    showStatusModal('Error: ' + err, 'error');
+    showStatusModal('Failed to save: ' + err.message, 'error');
   }
 }
 
-function renderSelSyncNode(node, parentPath) {
+// Deletes the currently-unchecked items from disk, not just from sync.
+// Only offered for Host, since that's the only Syncthing this server has
+// direct filesystem access to (via `docker exec` into its own container --
+// an externally-connected instance like a10mini has no such access from
+// here). The ignore patterns are saved FIRST and awaited before deleting
+// anything: on a Send & Receive folder, deleting a file Syncthing is still
+// actively tracking looks to Syncthing like "this device deleted it," and
+// it would propagate that deletion to every other device sharing the
+// folder -- exactly what we don't want when the goal is just "stop Host
+// from keeping a copy," not "delete this from a10mini too." Saving the
+// ignore pattern first removes the file from Syncthing's tracking for
+// this folder, so the local delete afterward is invisible to sync.
+async function deleteSelectedSelSync() {
+  const paths = selSyncTopLevelIgnoredPaths();
+  if (paths.length === 0) {
+    showStatusModal('Nothing is unchecked -- uncheck the files/folders you want deleted first.', 'error');
+    return;
+  }
+  const preview = paths.slice(0, 5).join(', ') + (paths.length > 5 ? `, and ${paths.length - 5} more` : '');
+  const confirmed = await showConfirmModal(
+    `Stop syncing AND permanently delete from Host's disk: ${preview}? This only affects Host's own copy -- it will not delete anything on other devices.`
+  );
+  if (!confirmed) return;
+  showStatusModal('Saving and deleting...', 'loading');
+  try {
+    await saveSelectiveSyncPatterns();
+    const res = await fetch('/api/syncthing-folder-delete-files', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceId: selSyncInstanceId, folderId: selSyncFolderId, paths })
+    });
+    if (!res.ok) { const data = await res.json().catch(() => ({})); showStatusModal('Deleted from sync, but failed to delete from disk: ' + (data.error || res.status), 'error'); return; }
+    hideStatusModal();
+    closeSelectiveSync();
+    refreshCurrentView();
+  } catch (err) {
+    showStatusModal('Failed: ' + err.message, 'error');
+  }
+}
+
+// True if this node's own name matches the search, or (for a directory)
+// any descendant's does -- used to decide whether a node survives the
+// filter at all.
+function selSyncNodeMatches(node, query) {
+  if (node.name.toLowerCase().includes(query)) return true;
+  if (node.type === 'FILE_INFO_TYPE_DIRECTORY') {
+    return (node.children || []).some(child => selSyncNodeMatches(child, query));
+  }
+  return false;
+}
+
+function renderSelSyncNode(node, parentPath, query) {
   const path = parentPath ? `${parentPath}/${node.name}` : node.name;
+  const selfMatches = !!query && node.name.toLowerCase().includes(query);
+  if (query && !selfMatches && !selSyncNodeMatches(node, query)) return '';
   const isDir = node.type === 'FILE_INFO_TYPE_DIRECTORY';
   const checked = !selSyncIgnored.has(path);
   if (isDir) {
+    // Once an ancestor folder's own name has matched, show everything
+    // inside it unfiltered -- searching for a folder means "show me that
+    // folder", not "show me only the files inside it that also match".
+    const childQuery = selfMatches ? '' : query;
+    const isOpen = query ? true : !selSyncCollapsed.has(path);
     return `
-      <details class="st-selsync-dir" open>
+      <details class="st-selsync-dir" data-selsync-dir="${escapeHtml(path)}" ${isOpen ? 'open' : ''}>
         <summary>
-          <label>
-            <input type="checkbox" data-selsync-path="${escapeHtml(path)}" ${checked ? 'checked' : ''}>
-            &#x1F4C1; ${escapeHtml(node.name)}
-          </label>
+          <span class="st-selsync-disclosure">&#x25B6;</span>
+          <input type="checkbox" data-selsync-path="${escapeHtml(path)}" ${checked ? 'checked' : ''}>
+          <span>&#x1F4C1; ${escapeHtml(node.name)}</span>
         </summary>
         <div class="st-selsync-children">
-          ${(node.children || []).map(child => renderSelSyncNode(child, path)).join('')}
+          ${(node.children || []).map(child => renderSelSyncNode(child, path, childQuery)).join('')}
         </div>
       </details>
     `;
@@ -734,19 +815,38 @@ function renderSelSyncNode(node, parentPath) {
   `;
 }
 
+function renderSelSyncTreeHtml() {
+  const query = selSyncSearchQuery.trim().toLowerCase();
+  const nodesHtml = selSyncTree.map(n => renderSelSyncNode(n, '', query)).join('');
+  if (!selSyncTree.length) return '<p class="meal-empty">No files found.</p>';
+  if (query && !nodesHtml) return '<p class="meal-empty">No files match your search.</p>';
+  return nodesHtml;
+}
+
+function renderSelSyncTreeOnly() {
+  const container = document.getElementById('st-selsync-tree-container');
+  if (container) container.innerHTML = renderSelSyncTreeHtml();
+}
+
 function renderSelectiveSyncBody() {
   const body = document.getElementById('st-selsync-body');
   if (!body) return;
+  const inst = instances.find(i => i.id === selSyncInstanceId);
+  const deleteButtonHtml = inst && inst.isHost
+    ? `<button class="btn small clear" data-action="delete-selective-sync" title="Also delete the unchecked items from Host's disk">Delete Unchecked From Disk</button>`
+    : '';
   body.innerHTML = `
     <h2>Selective Sync &mdash; ${escapeHtml(selSyncFolderLabel)}</h2>
     <p style="color:var(--color-text-muted); font-size:13px;">
       Uncheck a file or folder to stop syncing it. Unchecking a folder excludes everything inside it.
     </p>
-    <div class="st-selsync-tree">
-      ${selSyncTree.length ? selSyncTree.map(n => renderSelSyncNode(n, '')).join('') : '<p class="meal-empty">No files found.</p>'}
+    <input type="text" id="st-selsync-search" placeholder="Search files..." value="${escapeHtml(selSyncSearchQuery)}" style="width:100%; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px; margin-bottom:8px;">
+    <div class="st-selsync-tree" id="st-selsync-tree-container">
+      ${renderSelSyncTreeHtml()}
     </div>
     <div class="btn-grid" style="margin-top:15px;">
       <button class="btn" data-action="save-selective-sync">Save</button>
+      ${deleteButtonHtml}
       <button class="btn clear" data-action="close-selective-sync">Cancel</button>
     </div>
   `;
@@ -851,11 +951,16 @@ function renderRateLimitHtml() {
 // device. Cards for a device you manage (has an "itself" source with a
 // configured instance) get a Manage toggle that expands Folders/Bandwidth
 // /connection details inline.
-function renderMergedDeviceCardHtml(group) {
-  const statusClass = mergedStatusClass(group);
-  const statusLabel = statusClass === 'connected' ? 'Connected' : (statusClass === 'paused' ? 'Paused' : 'Offline');
+function renderMergedDeviceCardHtml(group, erroredInstance) {
+  const statusClass = erroredInstance ? 'offline' : mergedStatusClass(group);
+  const statusLabel = erroredInstance ? "Couldn't connect" : (statusClass === 'connected' ? 'Connected' : (statusClass === 'paused' ? 'Paused' : 'Offline'));
   const selfSource = group.sources.find(s => s.isSelf);
-  const managedInstance = selfSource ? instances.find(i => i.id === selfSource.instanceId && i.configured) : null;
+  // A managed instance that's currently unreachable has no "itself" source
+  // in this group (its own fetch failed) -- erroredInstance is how the
+  // caller tells us "this group IS one of your managed instances anyway,
+  // matched by its previously-seen self ID" so we still show one card
+  // (with Manage -> Fix connection) instead of a second, duplicate one.
+  const managedInstance = erroredInstance || (selfSource ? instances.find(i => i.id === selfSource.instanceId && i.configured) : null);
   const isExpanded = !!managedInstance && expandedInstanceId === managedInstance.id;
 
   const sourcesHtml = group.sources.map(d => {
@@ -955,17 +1060,31 @@ function renderYourDevicesHtml() {
   const infoTip = infoTipHtml('Every device you manage here (Host, plus any you\'ve connected) shown once, matched by its real Syncthing ID -- Syncthing itself keeps no shared/global device list, each instance has its own, so a row underneath shows each instance that knows about this device. Click "Manage" on one of your own devices to see its folders, bandwidth limit, and connection details.');
   const anyConfigured = instances.some(i => i.configured);
   const unconfigured = instances.filter(i => !i.configured);
-  const errored = allDevicesErrors
-    .map(e => ({ e, inst: instances.find(i => i.id === e.instanceId) }))
-    .filter(x => x.inst);
   const merged = mergeDevicesById(allDevicesList);
+  // An erroring instance whose self ID we've seen before (instanceSelfIds)
+  // and that matches an existing merged card gets folded into that card
+  // (via renderMergedDeviceCardHtml's erroredInstance param) instead of
+  // rendering as a second, separate card for what's visibly the same
+  // device -- e.g. a10mini asleep still shows up in Host's own device
+  // list as a known (offline) peer, so without this both that entry and
+  // a10mini's own "can't connect" card would appear side by side.
+  const erroredByGroupId = new Map();
+  const standaloneErrored = [];
+  for (const e of allDevicesErrors) {
+    const inst = instances.find(i => i.id === e.instanceId);
+    if (!inst) continue;
+    const selfId = instanceSelfIds[inst.id];
+    const group = selfId ? merged.find(g => g.id === selfId) : null;
+    if (group) erroredByGroupId.set(group.id, inst);
+    else standaloneErrored.push({ inst, error: e.error });
+  }
   const noneFound = !anyConfigured && unconfigured.length === 0;
   return `
     <div class="week-block">
       <h3>Your Devices ${infoTip}</h3>
-      ${errored.map(x => renderErroredInstanceCardHtml(x.inst, x.e.error)).join('')}
+      ${standaloneErrored.map(x => renderErroredInstanceCardHtml(x.inst, x.error)).join('')}
       ${unconfigured.map(inst => renderUnconfiguredInstanceCardHtml(inst)).join('')}
-      ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : merged.map(g => renderMergedDeviceCardHtml(g)).join('')}
+      ${noneFound ? '<p style="color:var(--color-text-muted);">No devices found.</p>' : merged.map(g => renderMergedDeviceCardHtml(g, erroredByGroupId.get(g.id))).join('')}
       <div class="btn-grid">
         <button class="btn small" data-action="show-add-instance">+ Connect another of your devices</button>
       </div>
@@ -1261,15 +1380,30 @@ function wireDelegatedListeners() {
   });
   const selSyncOverlay = document.getElementById('st-selsync-overlay');
   selSyncOverlay.addEventListener('click', (e) => {
+    // A directory's disclosure arrow/name (anything in its <summary>
+    // except the checkbox) manually drives open/closed state instead of
+    // the browser's native <details> toggle, so it survives the tree
+    // re-rendering on every checkbox change or search keystroke.
+    const summary = e.target.closest('.st-selsync-dir > summary');
+    if (summary && !e.target.closest('input')) {
+      e.preventDefault();
+      return onSelSyncDirToggle(summary.parentElement.dataset.selsyncDir);
+    }
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     if (btn.dataset.action === 'save-selective-sync') return saveSelectiveSync();
+    if (btn.dataset.action === 'delete-selective-sync') return deleteSelectedSelSync();
     if (btn.dataset.action === 'close-selective-sync') return closeSelectiveSync();
   });
   selSyncOverlay.addEventListener('change', (e) => {
     const input = e.target.closest('[data-selsync-path]');
     if (!input) return;
     onSelSyncCheckboxChange(input.dataset.selsyncPath, input.checked);
+  });
+  selSyncOverlay.addEventListener('input', (e) => {
+    if (e.target.id !== 'st-selsync-search') return;
+    selSyncSearchQuery = e.target.value;
+    renderSelSyncTreeOnly();
   });
 }
 
@@ -1301,6 +1435,7 @@ registerApp('syncthing', {
     rateLimitsError = null;
     allDevicesList = [];
     allDevicesErrors = [];
+    instanceSelfIds = {};
     selSyncInstanceId = null;
     selSyncFolderId = null;
     selSyncTree = [];

@@ -617,6 +617,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/api/syncthing-folder-delete-files":
+            body = self._read_json_body()
+            instance_id = body.get("instanceId")
+            folder_id = body.get("folderId")
+            paths = body.get("paths")
+            if not instance_id or not folder_id or not paths:
+                self._send_json(400, {"error": "missing instanceId, folderId, or paths"})
+                return
+            try:
+                stc.delete_folder_files(instance_id, folder_id, paths)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         if parsed.path == "/api/syncthing-folder-ignores":
             body = self._read_json_body()
             instance_id = body.get("instanceId")

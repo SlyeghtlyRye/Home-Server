@@ -116,6 +116,9 @@ server {
     location /api/syncthing-folder-ignores {
             proxy_pass http://172.17.0.1:9001/api/syncthing-folder-ignores?key=${TRIGGER_SECRET};
     }
+    location /api/syncthing-folder-delete-files {
+            proxy_pass http://172.17.0.1:9001/api/syncthing-folder-delete-files?key=${TRIGGER_SECRET};
+    }
     location /data/syncthing-rate-limits {
             proxy_pass http://172.17.0.1:9001/data/syncthing-rate-limits?key=${TRIGGER_SECRET}&instance=$arg_instance;
     }
