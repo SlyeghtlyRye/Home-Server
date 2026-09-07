@@ -723,16 +723,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = self._read_json_body()
             list_id = body.get("listId")
             text = (body.get("text") or "").strip()
+            recipe_id = body.get("recipeId") or None
             if not list_id or not text:
                 self._send_json(400, {"error": "missing listId or text"})
                 return
             try:
-                item = mwp.create_shopping_item(list_id, text)
+                item = mwp.create_shopping_item(list_id, text, recipe_id)
                 self._send_json(200, {
                     "id": item.get("id"),
                     "display": item.get("display") or item.get("note") or text,
                     "checked": item.get("checked", False),
                 })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/sync-recipe-ingredients":
+            body = self._read_json_body()
+            recipe_id = body.get("recipeId")
+            items = body.get("items")
+            if not recipe_id or items is None:
+                self._send_json(400, {"error": "missing recipeId or items"})
+                return
+            try:
+                mwp.sync_recipe_ingredients(recipe_id, items)
+                self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

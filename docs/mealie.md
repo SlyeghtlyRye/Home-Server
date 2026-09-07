@@ -70,6 +70,39 @@ The Mealie tab renders, top to bottom:
    two recipes (Mealie merges identical ingredient lines) appears under
    each relevant meal.
 
+   **Adding a freeform item to a specific meal** -- in By Meal mode, the
+   add row grows a "which meal is this for?" `<select>` (only when the
+   list actually has more than one group to choose from -- otherwise it'd
+   just restate "Other"). Picking a meal sends `recipeId` along with
+   `/api/shopping-item-add`, which `create_shopping_item()` turns into the
+   same `recipeReferences: [{"recipeId": ...}]` shape Mealie itself sets
+   on items generated from a recipe -- so a manually-typed item files
+   under that meal's group exactly like the grouping logic above already
+   expects, no separate code path needed for it.
+
+   **"Sync to Recipe"** (per meal group, not shown for "Other" since it
+   has no recipe to sync to) reconciles that recipe's actual ingredient
+   list against whatever's currently in its shopping-list group --
+   additions AND removals both propagate, not just one direction.
+   `syncRecipeIngredients()` reads item text straight out of the DOM
+   (`.shopping-item-text` within that group), confirms via the shared
+   confirm-modal (this mutates real recipe data), then posts to
+   `/api/sync-recipe-ingredients` -> `mwp.sync_recipe_ingredients()`.
+   That function does a read-modify-write of the *entire* recipe object
+   (Mealie's recipe update endpoint wants the complete body, not a
+   partial patch -- same reasoning as `syncthing_client.py`'s
+   `set_folder_paused()`): fetch the recipe fresh, keep any existing
+   ingredient whose text (`display`/`note`/`originalText`, the same
+   fallback chain `get_recipe_detail()` already uses) is still present in
+   the shopping list, drop any that aren't, append a plain-note ingredient
+   for any shopping-list text with no existing match, then `PUT` the
+   whole recipe back. Matching is by plain text rather than structured
+   quantity/unit/food specifically because a manually-typed shopping item
+   only ever has plain text -- there's nothing structured on that side to
+   match against symmetrically. New ingredients get a fresh
+   `referenceId` (`uuid.uuid4()`), matching the field Mealie's own
+   ingredient rows carry.
+
 Recipe detail (ingredients/steps) is fetched by recipe ID via
 `/data/recipe-detail`, which looks up the recipe's slug from the recipe
 list (Mealie's detail endpoint is slug-keyed, not ID-keyed) before

@@ -89,6 +89,9 @@ server {
     location /api/shopping-item-add {
             proxy_pass http://172.17.0.1:9001/api/shopping-item-add?key=${TRIGGER_SECRET};
     }
+    location /api/sync-recipe-ingredients {
+            proxy_pass http://172.17.0.1:9001/api/sync-recipe-ingredients?key=${TRIGGER_SECRET};
+    }
     location /api/shopping-item-delete {
             proxy_pass http://172.17.0.1:9001/api/shopping-item-delete?key=${TRIGGER_SECRET};
     }

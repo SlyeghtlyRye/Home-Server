@@ -1098,15 +1098,25 @@ function renderShoppingListsPanel() {
 }
 
 function renderShoppingListDetailsHtml(l) {
+  const groups = l.groups || [];
   const body = shoppingFilterMode === 'meal'
     ? renderGroupedItemsHtml(l)
     : `<ul class="shopping-items" data-list-id="${l.id}">${l.items.map(i => renderShoppingItemHtml(i)).join('')}</ul>`;
+  // Only worth offering a meal picker when there's actually more than one
+  // place a new item could go -- otherwise it's just "Other" restated.
+  const mealPickerHtml = shoppingFilterMode === 'meal' && groups.length > 0 ? `
+    <select class="add-item-meal" data-list-id="${l.id}" title="Which meal is this for?">
+      <option value="">Other (no meal)</option>
+      ${groups.map(g => `<option value="${escapeHtml(g.recipeId)}">${escapeHtml(g.recipeName)}</option>`).join('')}
+    </select>
+  ` : '';
   return `
     <details class="list-dropdown" data-label="${escapeHtml(l.week_label || l.name)}" data-list-id="${l.id}">
       <summary>${escapeHtml(l.week_label || l.name)} &mdash; ${l.items.length} item${l.items.length === 1 ? '' : 's'}</summary>
       ${body}
       <div class="shopping-add-row">
         <input type="text" class="add-item-input" data-list-id="${l.id}" placeholder="Add item...">
+        ${mealPickerHtml}
         <button class="btn small" data-action="add-item" data-list-id="${l.id}">Add</button>
       </div>
     </details>
@@ -1118,7 +1128,10 @@ function renderGroupedItemsHtml(l) {
   const otherItems = l.otherItems || [];
   const groupsHtml = groups.map(g => `
     <div class="shopping-group" data-group="${g.recipeId}">
-      <h4 class="shopping-group-title">${escapeHtml(g.recipeName)}</h4>
+      <div class="shopping-group-header">
+        <h4 class="shopping-group-title">${escapeHtml(g.recipeName)}</h4>
+        <span class="st-link-action" data-action="sync-recipe" data-recipe-id="${g.recipeId}" data-list-id="${l.id}" title="Add/remove ingredients on this recipe to match what's currently in this list">Sync to Recipe</span>
+      </div>
       <ul class="shopping-items" data-list-id="${l.id}">${g.items.map(i => renderShoppingItemHtml(i)).join('')}</ul>
     </div>
   `).join('');
@@ -1163,13 +1176,20 @@ function updateListItemCount(listId) {
   summary.textContent = `${label} — ${count} item${count === 1 ? '' : 's'}`;
 }
 
-function appendItemToList(listId, itemData) {
+// groupKey is the recipeId the item was filed under, or 'other' -- only
+// meaningful in "By Meal" mode, where each recipe's items live in their
+// own container. A groupKey naming a real meal always already has a
+// rendered group (the picker only ever lists currently-visible groups);
+// "other" is created on demand since a list with no freeform items yet
+// won't have one.
+function appendItemToList(listId, itemData, groupKey) {
   const details = document.querySelector(`.list-dropdown[data-list-id="${CSS.escape(listId)}"]`);
   if (!details) return;
   let ul;
   if (shoppingFilterMode === 'meal') {
-    let group = details.querySelector('.shopping-group[data-group="other"]');
-    if (!group) {
+    const key = groupKey || 'other';
+    let group = details.querySelector(`.shopping-group[data-group="${CSS.escape(key)}"]`);
+    if (!group && key === 'other') {
       const addRow = details.querySelector('.shopping-add-row');
       addRow.insertAdjacentHTML('beforebegin', `
         <div class="shopping-group" data-group="other">
@@ -1179,7 +1199,7 @@ function appendItemToList(listId, itemData) {
       `);
       group = details.querySelector('.shopping-group[data-group="other"]');
     }
-    ul = group.querySelector('.shopping-items');
+    ul = group ? group.querySelector('.shopping-items') : details.querySelector('.shopping-items');
   } else {
     ul = details.querySelector('.shopping-items');
   }
@@ -1187,18 +1207,50 @@ function appendItemToList(listId, itemData) {
   updateListItemCount(listId);
 }
 
-async function addShoppingItem(listId, text) {
+async function addShoppingItem(listId, text, recipeId) {
   text = (text || '').trim();
   if (!text) return;
   try {
     const res = await fetch('/api/shopping-item-add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ listId, text })
+      body: JSON.stringify({ listId, text, recipeId: recipeId || undefined })
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal('Failed to add item: ' + (data.error || res.status), 'error'); return; }
-    appendItemToList(listId, data);
+    appendItemToList(listId, data, recipeId || 'other');
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+// Reconciles a recipe's ingredients against what's currently in its
+// shopping-list group -- reads item text straight from the DOM (not
+// re-fetching the list) so it picks up whatever's been added/removed in
+// this session, including anything not yet saved anywhere else, since
+// the shopping list items themselves ARE the saved state for each add/
+// delete already made through this panel.
+async function syncRecipeIngredients(recipeId, recipeName, groupEl) {
+  const texts = Array.from(groupEl.querySelectorAll('.shopping-item-text'))
+    .map(el => el.textContent.trim())
+    .filter(Boolean);
+  const confirmed = await showConfirmModal(
+    `Update "${recipeName}"'s ingredients to match this list? Anything you've added here gets added to the recipe; anything you've removed from this list gets removed from the recipe too.`
+  );
+  if (!confirmed) return;
+  showStatusModal('Syncing...', 'loading');
+  try {
+    const res = await fetch('/api/sync-recipe-ingredients', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipeId, items: texts })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showStatusModal('Failed to sync: ' + (data.error || res.status), 'error');
+      return;
+    }
+    showStatusModal('Recipe updated.', 'success');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -1363,8 +1415,9 @@ function wireDelegatedListeners() {
     if (addBtn) {
       const listId = addBtn.dataset.listId;
       const input = shoppingPanel.querySelector(`.add-item-input[data-list-id="${CSS.escape(listId)}"]`);
+      const mealSelect = shoppingPanel.querySelector(`.add-item-meal[data-list-id="${CSS.escape(listId)}"]`);
       if (input) {
-        addShoppingItem(listId, input.value);
+        addShoppingItem(listId, input.value, mealSelect ? mealSelect.value : '');
         input.value = '';
       }
       return;
@@ -1374,13 +1427,21 @@ function wireDelegatedListeners() {
       const li = delBtn.closest('li');
       const listId = li.closest('.shopping-items').dataset.listId;
       deleteShoppingItem(delBtn.dataset.itemId, listId);
+      return;
+    }
+    const syncBtn = e.target.closest('[data-action="sync-recipe"]');
+    if (syncBtn) {
+      const groupEl = syncBtn.closest('.shopping-group');
+      const recipeName = groupEl.querySelector('.shopping-group-title').textContent;
+      syncRecipeIngredients(syncBtn.dataset.recipeId, recipeName, groupEl);
     }
   });
   shoppingPanel.addEventListener('keydown', (e) => {
     if (e.target.classList.contains('add-item-input') && e.key === 'Enter') {
       e.preventDefault();
       const listId = e.target.dataset.listId;
-      addShoppingItem(listId, e.target.value);
+      const mealSelect = shoppingPanel.querySelector(`.add-item-meal[data-list-id="${CSS.escape(listId)}"]`);
+      addShoppingItem(listId, e.target.value, mealSelect ? mealSelect.value : '');
       e.target.value = '';
     }
   });

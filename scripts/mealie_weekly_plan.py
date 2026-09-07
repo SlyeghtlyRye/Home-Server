@@ -2,6 +2,7 @@ import sys
 import re
 import json
 import random
+import uuid
 import requests
 from collections import defaultdict
 from datetime import date, timedelta
@@ -199,12 +200,73 @@ def add_recipe_to_list(list_id, recipe_id):
         print(f"  FAILED adding recipe {recipe_id}: {resp.status_code} {resp.text}")
 
 
-def create_shopping_item(list_id, text):
+def create_shopping_item(list_id, text, recipe_id=None):
     body = {"shoppingListId": list_id, "note": text, "checked": False, "isFood": False, "quantity": 1}
+    if recipe_id:
+        # This is the same recipeReferences shape Mealie sets on items it
+        # generates from a recipe's own ingredients (see the grouping code
+        # in trigger_server.py's _fetch_list_detail()) -- setting it on a
+        # manually-typed item is what makes it show up filed under that
+        # meal in the "By Meal" view instead of falling into "Other".
+        body["recipeReferences"] = [{"recipeId": recipe_id}]
     resp = requests.post(f"{MEALIE_URL}/api/households/shopping/items", headers=get_headers(), json=body)
     if not resp.ok:
         raise RuntimeError(f"Mealie rejected the new item: {resp.status_code} {resp.text}")
     return resp.json()
+
+
+def sync_recipe_ingredients(recipe_id, ingredient_texts):
+    """Reconciles a recipe's ingredient list against a plain-text set --
+    normally the current contents of that recipe's shopping-list group,
+    after the user has added/removed items there by hand. Read-modify-
+    write against the full recipe object: Mealie's recipe update endpoint
+    expects the complete recipe body, not a partial patch, so this fetches
+    it fresh, splices just the ingredient list, and PUTs the whole thing
+    back otherwise untouched -- same pattern as syncthing_client.py's
+    set_folder_paused()/set_rate_limits().
+
+    Matching is by plain text (an ingredient's display/note/originalText,
+    the same fallback chain get_recipe_detail() already uses to show
+    ingredients) rather than structured quantity/unit/food -- a manually-
+    typed shopping list item only ever has plain text, so there's nothing
+    structured to match against symmetrically anyway. An existing
+    ingredient whose text isn't in `ingredient_texts` is dropped (you
+    removed it from the shopping list, so it comes out of the recipe
+    too); a text with no matching existing ingredient is appended as a
+    new plain-note one, the same kind of freeform entry Mealie's own UI
+    creates when you type an ingredient without using its quantity/unit
+    pickers.
+    """
+    match = next((r for r in get_recipe_summaries() if r["id"] == recipe_id), None)
+    if not match:
+        raise ValueError(f"recipe {recipe_id} not found")
+    resp = requests.get(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers())
+    resp.raise_for_status()
+    recipe = resp.json()
+
+    def ing_text(ing):
+        return (ing.get("display") or ing.get("note") or ing.get("originalText") or "").strip()
+
+    wanted = [t.strip() for t in ingredient_texts if t and t.strip()]
+    wanted_set = set(wanted)
+    existing = recipe.get("recipeIngredient") or []
+    kept = [ing for ing in existing if ing_text(ing) in wanted_set]
+    kept_texts = {ing_text(ing) for ing in kept}
+    added = [
+        {
+            "quantity": None, "unit": None, "food": None,
+            "note": text, "isFood": False, "disableAmount": True,
+            "display": text, "title": None, "originalText": text,
+            "referenceId": str(uuid.uuid4()),
+        }
+        for text in wanted if text not in kept_texts
+    ]
+    recipe["recipeIngredient"] = kept + added
+
+    put_resp = requests.put(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers(), json=recipe)
+    if not put_resp.ok:
+        raise RuntimeError(f"Mealie rejected the recipe update: {put_resp.status_code} {put_resp.text[:300]}")
+    return put_resp.json()
 
 
 def delete_shopping_item(item_id):

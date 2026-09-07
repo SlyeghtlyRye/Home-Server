@@ -213,13 +213,16 @@
     .shopping-item-text.checked { text-decoration: line-through; color: var(--color-text-muted); }
     .shopping-item-del { background: transparent; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 14px; padding: 2px 6px; flex-shrink: 0; }
     .shopping-item-del:hover { color: #ff9d9d; }
-    .shopping-add-row { display: flex; gap: 8px; margin-top: 10px; }
-    .shopping-add-row input[type="text"] { flex: 1; background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+    .shopping-add-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .shopping-add-row input[type="text"] { flex: 1; min-width: 120px; background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
+    .add-item-meal { background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
 
     .shopping-panel-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
     .shopping-panel-header h3 { margin: 0; }
     .shopping-group { margin-bottom: 12px; }
+    .shopping-group-header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     .shopping-group-title { font-size: 12px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 4px; }
+    .shopping-group-header .st-link-action { font-size: 11px; }
 
     .preview-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--color-border-soft); flex-wrap: wrap; }
     .preview-row:last-of-type { border-bottom: none; }
