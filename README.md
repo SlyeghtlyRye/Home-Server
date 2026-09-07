@@ -83,7 +83,15 @@ proxies every `/data/*` and `/api/*` request to `trigger_server.py`, with
 secret exists only in `.env`, never hardcoded in the config itself. Also
 proxies three separate `server_name` blocks (`home.pihole.local`,
 `home.meals.local`, `home.chores.local`) straight through to their
-respective containers for direct access outside the dashboard.
+respective containers for direct access outside the dashboard. Each
+`server_name` also lists a `.internal` alias alongside its `.local` name
+(e.g. `home.dashboard.local home.dashboard.internal`) -- `.local` is
+reserved for mDNS/Bonjour, and iOS/macOS enforce that strictly, refusing
+to resolve a `.local` name via a normal DNS server (Pi-hole's Local DNS
+Records, in this case) the way every other platform does. Add a matching
+Local DNS Record for the `.internal` name in Pi-hole and iOS devices can
+use that instead, without touching the `.local` names other devices
+already rely on.
 
 ### `scripts/trigger_server.py`
 The main backend API server. Plain stdlib `http.server.ThreadingHTTPServer`

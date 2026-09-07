@@ -9,7 +9,7 @@ upstream kanboard {
 }
 server {
     listen 80;
-    server_name home.dashboard.local;
+    server_name home.dashboard.local home.dashboard.internal;
     location / {
         root /usr/share/nginx/html;
         try_files $uri $uri/ /index.html;
@@ -207,7 +207,7 @@ server {
 }
 server {
     listen 80;
-    server_name home.pihole.local;
+    server_name home.pihole.local home.pihole.internal;
     location / {
         proxy_pass http://pihole;
         proxy_set_header Host $host;
@@ -217,7 +217,7 @@ server {
 }
 server {
     listen 80;
-    server_name home.meals.local;
+    server_name home.meals.local home.meals.internal;
     location / {
         proxy_pass http://mealie;
         proxy_set_header Host $host;
@@ -227,7 +227,7 @@ server {
 }
 server {
     listen 80;
-    server_name home.chores.local;
+    server_name home.chores.local home.chores.internal;
     location / {
         proxy_pass http://kanboard;
         proxy_set_header Host $host;
