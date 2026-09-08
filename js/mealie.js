@@ -116,6 +116,15 @@ function renderModeToggle() {
 
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
+  // View and Edit are both fundamentally "look at one day" -- switching
+  // between them (e.g. viewing a meal, then switching to Edit to change
+  // it) hands the selected day across rather than forcing it to be
+  // reselected. Plan mode's selection is a different shape (a multi-day
+  // range/preview, not a single day) so it doesn't participate in this.
+  const carryIso = calendarMode === 'view' ? viewSelectedIso
+    : calendarMode === 'edit' ? editSelectedIso
+    : null;
+
   calendarMode = mode;
   localStorage.setItem('mealie_calendarMode', mode);
   weekSelection = null;
@@ -126,6 +135,14 @@ function setCalendarMode(mode) {
   editSelectedIso = null;
   editPick = null;
   modePanelShowModeSwitcher = false;
+
+  if (carryIso && mode === 'view') {
+    viewSelectedIso = carryIso;
+  } else if (carryIso && mode === 'edit') {
+    editSelectedIso = carryIso;
+    editPick = buildEditPick(carryIso);
+  }
+
   renderModeToggle();
   renderCalendar();
   renderModePanel();
@@ -341,12 +358,16 @@ function closeViewDayDetail() {
 
 // ---------- Edit mode (single-day change / swap) ----------
 
-function onEditDayClick(iso) {
-  editSelectedIso = iso;
+function buildEditPick(iso) {
   const current = plannedMap[iso];
-  editPick = current
+  return current
     ? { date: iso, recipeId: current.id, recipeName: current.name, isNew: false }
     : { date: iso, recipeId: null, recipeName: '', isNew: false };
+}
+
+function onEditDayClick(iso) {
+  editSelectedIso = iso;
+  editPick = buildEditPick(iso);
   renderCalendar();
   renderModePanel();
 }
