@@ -133,10 +133,19 @@ Docker container status, host systemd services). Used by both the CLI
 report (`status.py`) and the dashboard's `/data/system-status` endpoint.
 
 ### `dashboard.html`
-The frontend shell — HTML structure, CSS (with a `:root` custom-properties
-design system), and the `<script type="module">` tags that load each
-feature module below. No feature-specific logic lives here directly
-anymore; each feature is its own ES module.
+The frontend shell — HTML structure and the `<script type="module">` tags
+that load each feature module below. No feature-specific logic lives here
+directly anymore; each feature is its own ES module.
+
+### `css/dashboard.css`
+All styling (with a `:root` custom-properties design system), split into
+named sections (base/layout, forms, modals, one per feature panel, mobile
+overrides last) — extracted from what used to be a single 500+ line inline
+`<style>` block in `dashboard.html` with no internal organization. Mounted
+as a directory bind mount in `docker-compose.yml` (same pattern as `js/`),
+not a single-file one — see `js/*.js` below and `scripts/updater.py`'s
+module docstring for why that distinction matters (a single-file mount can
+go stale after a deploy; a directory mount can't).
 
 ### `js/core.js`
 Application shell: the app registry (`registerApp`), view switching,
@@ -214,6 +223,8 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 ├── nginx.conf
 ├── nginx/templates/default.conf.template
 ├── dashboard.html
+├── css/
+│ └── dashboard.css (all styling, organized into named sections)
 ├── js/
 │ ├── core.js (shell, registry, modals, nav)
 │ ├── config.js (generated — browser-side HOST_IP)

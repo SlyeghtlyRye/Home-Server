@@ -8,10 +8,39 @@ for routine checks.
 
 ## Status reporting
 
-`scripts/system_status.py` is the single source of truth for system health
--- used by both the CLI (`status.py`) and the dashboard's
-`/data/system-status` endpoint, so there's one place that logic lives, not
-two copies that can drift apart.
+`scripts/system_status.py` is the source of truth the dashboard's endpoints
+call into (`status.py`, the CLI report, is a separate standalone script
+with its own copy of this logic -- predates this module and hasn't been
+consolidated onto it).
+
+**Split into three independently-fetchable pieces, not one bundle.**
+`collect_basics()` (uptime/memory/disk/temp -- a handful of near-instant
+reads), `collect_containers()` (`docker ps` + `docker stats --no-stream`,
+which has to sample CPU over a brief interval and commonly takes 1-2+
+seconds on its own), and `collect_services()` (three systemd services, two
+`systemctl` calls each) are exposed as their own endpoints
+(`/data/system-status-basics`, `-containers`, `-services`), each rendering
+its own `week-block` card in `js/system.js` (`loadBasicsCard()`,
+`loadContainersCard()`, `loadServicesCard()`) as soon as ITS fetch
+resolves. `collect_status()` still exists and combines all three for a
+caller that wants everything in one call, and the original
+`/data/system-status` endpoint still works too -- nothing that depended on
+the bundled shape broke, the dashboard just stopped using it.
+
+This fixes a real reported problem: the panel used to show one blank
+"Loading..." for the whole page, for as long as its slowest piece took --
+in practice, `docker stats` gating uptime/memory/disk, which are otherwise
+instant. Each card now fetches and fails independently (a broken
+containers lookup doesn't block Device or Host Services from rendering),
+following the same fetch-throws-vs-non-OK-response split used throughout
+this codebase (see `docs/syncthing.md`'s "Error handling" section) --
+`fetch()` throwing means our own backend is unreachable (shared page
+banner), a non-OK response is scoped to just that one card's own text.
+
+**This is meant as the reference pattern for other panels with more than
+one independent data source going forward**, not a one-off fix scoped to
+System -- extend it incrementally as a panel is touched anyway, rather
+than rewriting every existing panel's loading logic in one pass.
 
 ## Factory Reset vs Fake Factory Reset
 
@@ -73,7 +102,7 @@ any new `.env` key got backfilled) and decides the minimum needed:
 
 | Changed paths | What restarts |
 |---|---|
-| `js/`, `docs/` only | Nothing -- both are DIRECTORY bind mounts, so nginx resolves files inside them fresh on every request, live on next browser refresh |
+| `js/`, `css/`, `docs/` only | Nothing -- all three are DIRECTORY bind mounts, so nginx resolves files inside them fresh on every request, live on next browser refresh |
 | `scripts/`, `audiobooks/` | `mealie-trigger.service` only (never Docker -- the containers run pinned images, not this repo's code) |
 | `nginx.conf`, `nginx/templates/`, `dashboard.html` | Just the `nginx` container recreated |
 | `docker-compose.yml`, a new `.env` key, or any path not listed above | Everything -- all containers force-recreated plus the trigger service, same as before this existed |

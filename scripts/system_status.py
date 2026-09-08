@@ -74,8 +74,12 @@ def get_systemd_status(service):
     return active, enabled
 
 
-def collect_status():
-    """Returns a plain dict, safe to json.dumps directly."""
+def collect_basics():
+    """Uptime/memory/disk/temp -- a handful of near-instant reads, split
+    out from collect_containers()/collect_services() specifically so the
+    dashboard can show this immediately without waiting on `docker stats`
+    (which samples CPU over an interval and commonly takes 1-2+ seconds)
+    or several sequential `systemctl` calls."""
     uptime = run("uptime | awk -F'up' '{print $2}' | awk -F',' '{print $1}'").strip()
     memory = run("free -h | grep Mem | awk '{print $3 \"/\" $2}'")
     disk = run("df -h / | tail -1 | awk '{print $3 \"/\" $2}'")
@@ -83,7 +87,12 @@ def collect_status():
         cpu_temp = run("cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{print $1/1000}'")
     except Exception:
         cpu_temp = None
+    return {'uptime': uptime, 'memory': memory, 'disk': disk, 'cpu_temp': cpu_temp}
 
+
+def collect_containers():
+    """The slow one -- `docker stats --no-stream` has to sample CPU usage
+    over a brief interval rather than just reading a cached value."""
     raw_containers = get_container_info()
     stats = get_container_stats()
 
@@ -103,7 +112,12 @@ def collect_status():
             'cpu_percent': stat.get('CPUPerc', '').replace('%', '') if stat else None,
             'memory_usage': stat.get('MemUsage') if stat else None,
         })
+    return {'containers': containers}
 
+
+def collect_services():
+    """Three systemd services, two `systemctl` calls each -- moderate,
+    but still no reason to make collect_basics() wait on it."""
     host_services = []
     for svc in SYSTEMD_SERVICES:
         active, enabled = get_systemd_status(svc)
@@ -113,12 +127,15 @@ def collect_status():
             'enabled': enabled,
             'healthy': active == 'active',
         })
+    return {'host_services': host_services}
 
-    return {
-        'uptime': uptime,
-        'memory': memory,
-        'disk': disk,
-        'cpu_temp': cpu_temp,
-        'containers': containers,
-        'host_services': host_services,
-    }
+
+def collect_status():
+    """Full combined report, for a caller that wants everything in one
+    call (e.g. a future CLI use) rather than the three split ones the
+    dashboard itself uses to render each card as its own data arrives."""
+    result = {}
+    result.update(collect_basics())
+    result.update(collect_containers())
+    result.update(collect_services())
+    return result

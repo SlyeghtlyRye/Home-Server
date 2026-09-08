@@ -9,9 +9,9 @@ a request being served BY nginx is fragile (the connection would likely
 drop mid-restart). Instead it diffs the pulled commit range and schedules
 only the restart(s) that diff actually requires, fully detached in the
 background:
-  - js/ or docs/ changes need nothing -- both are DIRECTORY bind mounts,
-    so nginx resolves files inside them fresh on every request, live on
-    next browser refresh.
+  - js/, css/, or docs/ changes need nothing -- all three are DIRECTORY
+    bind mounts, so nginx resolves files inside them fresh on every
+    request, live on next browser refresh.
   - scripts/ or audiobooks/ changes restart mealie-trigger.service only.
   - nginx.conf, nginx/templates, or dashboard.html changes recreate just
     the nginx container. dashboard.html is grouped with the nginx.conf
@@ -26,6 +26,7 @@ background:
 See _classify_restart() for the actual rules.
 """
 import os
+import re
 import subprocess
 
 ROOT = "/root"
@@ -63,6 +64,45 @@ def get_changed_files(local, remote):
 def has_local_changes():
     result = _run(["git", "status", "--porcelain", "--untracked-files=no"])
     return bool(result.stdout.strip())
+
+
+_HASH_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
+
+def get_commit_detail(commit_hash):
+    """Full author/date/subject/body for one commit, fetched lazily (a
+    "Details" toggle per commit line) rather than upfront -- most commits
+    are never expanded, and `--oneline` already covers the common case.
+    Fields are joined with \\x1f (unit separator, effectively never
+    appears in real commit text) rather than newlines, since a commit
+    body can itself contain blank lines that would otherwise break a
+    naive split. The hash is validated before being handed to git at
+    all -- it reaches this function from a query param, and an
+    unvalidated string starting with "-" could otherwise be interpreted
+    as a git flag rather than a revision."""
+    if not _HASH_RE.match(commit_hash):
+        raise ValueError(f"not a valid commit hash: {commit_hash!r}")
+    result = _run(["git", "show", "-s", "--format=%H%x1f%an%x1f%ad%x1f%s%x1f%b", "--date=short", commit_hash])
+    parts = result.stdout.strip("\n").split("\x1f", 4)
+    parts += [""] * (5 - len(parts))
+    full_hash, author, commit_date, subject, body = parts
+    return {
+        "hash": full_hash[:8],
+        "author": author,
+        "date": commit_date,
+        "subject": subject,
+        "body": body.strip(),
+    }
+
+
+def get_past_commits(skip, limit):
+    """Already-applied commits, oldest-first cutoff at HEAD, fetched one
+    page at a time -- `--skip`/`-n` keep this to exactly the requested
+    slice rather than ever loading the whole repo history for a
+    "show past updates" click. Same --oneline shape as get_commit_log(),
+    so the frontend renders both through the same commit-line component."""
+    result = _run(["git", "log", "--oneline", f"--skip={skip}", f"-n{limit}", "HEAD"])
+    return [line for line in result.stdout.strip().split("\n") if line]
 
 
 def check_for_update():
@@ -118,11 +158,11 @@ def _auto_fill_new_env_values(log_lines):
     return True
 
 
-# js/ and docs/ are DIRECTORY bind mounts (see docker-compose.yml) -- nginx
-# resolves paths inside them fresh on every request, so a changed file here
-# needs no restart at all, live on the next browser refresh.
+# js/, css/, and docs/ are DIRECTORY bind mounts (see docker-compose.yml)
+# -- nginx resolves paths inside them fresh on every request, so a changed
+# file here needs no restart at all, live on the next browser refresh.
 _STATIC_FILES = set()
-_STATIC_PREFIXES = ("js/", "docs/")
+_STATIC_PREFIXES = ("js/", "css/", "docs/")
 
 # Anything trigger_server.py imports, directly or transitively, lives under
 # one of these two directories -- a change here needs mealie-trigger.service

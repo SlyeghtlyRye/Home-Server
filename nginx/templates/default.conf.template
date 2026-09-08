@@ -29,6 +29,15 @@ server {
     location /data/system-status {
             proxy_pass http://172.17.0.1:9001/data/system-status?key=${TRIGGER_SECRET};
     }
+    location /data/system-status-basics {
+            proxy_pass http://172.17.0.1:9001/data/system-status-basics?key=${TRIGGER_SECRET};
+    }
+    location /data/system-status-containers {
+            proxy_pass http://172.17.0.1:9001/data/system-status-containers?key=${TRIGGER_SECRET};
+    }
+    location /data/system-status-services {
+            proxy_pass http://172.17.0.1:9001/data/system-status-services?key=${TRIGGER_SECRET};
+    }
     location /api/reset-preview {
             proxy_pass http://172.17.0.1:9001/api/reset-preview?key=${TRIGGER_SECRET};
     }
@@ -37,6 +46,12 @@ server {
     }
     location /api/check-update {
             proxy_pass http://172.17.0.1:9001/api/check-update?key=${TRIGGER_SECRET};
+    }
+    location /data/commit-detail {
+            proxy_pass http://172.17.0.1:9001/data/commit-detail?key=${TRIGGER_SECRET}&hash=$arg_hash;
+    }
+    location /data/past-updates {
+            proxy_pass http://172.17.0.1:9001/data/past-updates?key=${TRIGGER_SECRET}&skip=$arg_skip&limit=$arg_limit;
     }
     location /api/apply-update {
             proxy_pass http://172.17.0.1:9001/api/apply-update?key=${TRIGGER_SECRET};

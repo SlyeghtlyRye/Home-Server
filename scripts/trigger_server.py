@@ -132,8 +132,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {"filename": filename, "content": content})
             return
         if parsed.path == "/data/system-status":
+            # Kept for any caller that wants the full bundle in one call;
+            # the dashboard itself uses the three split endpoints below so
+            # each card can render as soon as its own data is ready,
+            # rather than the whole panel waiting on `docker stats` (the
+            # slowest piece, by a wide margin).
             try:
                 self._send_json(200, system_status.collect_status())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/data/system-status-basics":
+            try:
+                self._send_json(200, system_status.collect_basics())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/data/system-status-containers":
+            try:
+                self._send_json(200, system_status.collect_containers())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/data/system-status-services":
+            try:
+                self._send_json(200, system_status.collect_services())
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
@@ -166,6 +189,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/check-update":
             try:
                 self._send_json(200, updater.check_for_update())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/commit-detail":
+            commit_hash = params.get("hash", [None])[0]
+            if not commit_hash:
+                self._send_json(400, {"error": "missing hash"})
+                return
+            try:
+                self._send_json(200, updater.get_commit_detail(commit_hash))
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/past-updates":
+            try:
+                skip = int(params.get("skip", ["0"])[0])
+                limit = int(params.get("limit", ["10"])[0])
+            except ValueError:
+                self._send_json(400, {"error": "skip/limit must be integers"})
+                return
+            try:
+                self._send_json(200, {"commits": updater.get_past_commits(skip, limit)})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
