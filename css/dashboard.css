@@ -123,6 +123,19 @@
       z-index: 50;
       box-shadow: 0 6px 14px rgba(0,0,0,0.4);
     }
+    /* Opens above the input instead of below when there isn't enough
+       room below -- typically the mobile keyboard covering most of the
+       lower viewport once the input is focused. Toggled in JS
+       (positionComboDropdown() in mealie.js), not pure CSS, since
+       "enough room" depends on the input's actual on-screen position. */
+    .combo-dropdown.flip-up {
+      top: auto;
+      bottom: 100%;
+      border-top: 1px solid var(--color-border);
+      border-bottom: none;
+      border-radius: 6px 6px 0 0;
+      box-shadow: 0 -6px 14px rgba(0,0,0,0.4);
+    }
     .combo-item { padding: 9px 10px; cursor: pointer; font-size: 14px; overflow-wrap: anywhere; }
     .combo-item:hover { background: var(--color-selected-bg); }
     .combo-item.info { color: var(--color-text-muted); font-style: italic; cursor: default; }
@@ -537,4 +550,12 @@
       .preview-row { flex-direction: column; align-items: stretch; }
       .preview-row .date { min-width: 0; }
       .combo-wrap { min-width: 0; width: 100%; }
+
+      /* The mode panel's 70vh cap (below) leaves plenty of calendar
+         visible above it on desktop, but on a phone the calendar itself
+         already eats most of the screen -- 70vh of an already-small
+         viewport is cramped for View mode's day detail. Raising the cap
+         here (both the CSS max-height and the matching JS clamp in
+         mealie.js's startModePanelResize()) lets it be dragged taller. */
+      .mode-panel-inner { max-height: 90vh; }
     }

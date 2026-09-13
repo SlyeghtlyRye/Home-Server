@@ -283,7 +283,12 @@ function startModePanelResize(e) {
   const minWidth = 320;
   const maxWidth = window.innerWidth - 32; // matches #mode-panel's CSS width cap: calc(100% - 32px)
   const minHeight = 160; // matches .mode-panel-inner's CSS min-height -- lower would be a no-op dead zone
-  const maxHeight = window.innerHeight * 0.7; // matches .mode-panel-inner's CSS max-height: 70vh
+  // Matches .mode-panel-inner's CSS max-height, which raises its own cap
+  // the same way at the same breakpoint (a phone's calendar already
+  // fills most of a small screen, so 70vh of it is cramped for View
+  // mode's day detail -- 90vh on mobile leaves just enough room to see
+  // there's a calendar above it at all).
+  const maxHeight = window.innerHeight * (window.innerWidth <= 600 ? 0.9 : 0.7);
 
   function onMove(ev) {
     const p = ev.touches ? ev.touches[0] : ev;
@@ -446,7 +451,7 @@ function onEditComboFocus(inputEl) {
   const dropdown = document.getElementById('edit-dropdown');
   if (!dropdown) return;
   dropdown.innerHTML = renderComboDropdownHtml(inputEl.value);
-  dropdown.style.display = 'block';
+  positionComboDropdown(dropdown, inputEl);
 }
 
 function onEditComboType(inputEl) {
@@ -549,10 +554,22 @@ async function saveEditPick() {
 function onDayClick(iso) {
   modePanelShowModeSwitcher = false;
   if (calendarMode === 'view') {
-    viewSelectedIso = (viewSelectedIso === iso) ? null : iso;
+    const wasSelected = viewSelectedIso === iso;
+    viewSelectedIso = wasSelected ? null : iso;
     viewInlineRecipeState = null;
     renderCalendar();
-    renderModePanel();
+    // Selecting a day (not deselecting it) with a real recipe attached
+    // auto-loads its details instead of waiting for a second tap on
+    // "View details" -- showViewRecipeDetailInline() already does its own
+    // loading-state render followed by the loaded render, so skip the
+    // extra render here rather than showing an instant, pointless flash
+    // of the link before it's immediately replaced.
+    const meal = viewSelectedIso ? plannedMap[viewSelectedIso] : null;
+    if (!wasSelected && meal && meal.id) {
+      showViewRecipeDetailInline(meal.id);
+    } else {
+      renderModePanel();
+    }
     return;
   }
   if (calendarMode === 'edit') {
@@ -724,11 +741,48 @@ function renderComboDropdownHtml(term) {
   ).join('');
 }
 
+// The visual viewport (not window.innerHeight, which most mobile browsers
+// leave unchanged when the on-screen keyboard opens) is what actually
+// shrinks when a text input is focused on a phone -- falls back to
+// innerHeight on browsers without the Visual Viewport API.
+function getVisibleViewportHeight() {
+  return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+}
+
+// Decides whether a combo dropdown has room to open downward (its normal
+// position) or needs to flip above the input instead -- normally because
+// the mobile keyboard is covering most of the space below. Called again
+// on visualViewport "resize" (see the listener below), since focusing the
+// input can trigger the keyboard's opening animation AFTER this first
+// runs, when the initial measurement would still see the pre-keyboard
+// (taller) viewport.
+function positionComboDropdown(dropdown, inputEl) {
+  dropdown.style.display = 'block';
+  const inputRect = inputEl.getBoundingClientRect();
+  const viewportHeight = getVisibleViewportHeight();
+  const spaceBelow = viewportHeight - inputRect.bottom;
+  const spaceAbove = inputRect.top;
+  const MIN_COMFORTABLE_SPACE = 120; // enough to see a couple of options, not just one sliver
+  dropdown.classList.toggle('flip-up', spaceBelow < MIN_COMFORTABLE_SPACE && spaceAbove > spaceBelow);
+}
+
+function repositionOpenComboDropdowns() {
+  document.querySelectorAll('.combo-dropdown').forEach(dropdown => {
+    if (dropdown.style.display !== 'block') return;
+    const wrap = dropdown.closest('.combo-wrap');
+    const input = wrap && wrap.querySelector('.recipe-combo');
+    if (input) positionComboDropdown(dropdown, input);
+  });
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', repositionOpenComboDropdowns);
+}
+
 function onComboFocus(dateStr, inputEl) {
   const dropdown = document.getElementById('dropdown-' + dateStr);
   if (!dropdown) return;
   dropdown.innerHTML = renderComboDropdownHtml(inputEl.value);
-  dropdown.style.display = 'block';
+  positionComboDropdown(dropdown, inputEl);
 }
 
 function onComboType(dateStr, inputEl) {
