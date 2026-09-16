@@ -91,6 +91,48 @@ backend), so `restartService()` requires observing it actually go down
 at least once (a failed fetch) before a later successful fetch counts as
 "back up" -- otherwise it would falsely report success immediately.
 
+**A silent bug worth remembering:** `restartService()`'s confirm dialog
+calls `showConfirmModal()`, which was never added to `system.js`'s import
+list from `core.js` -- so every click threw `ReferenceError:
+showConfirmModal is not defined` before the dialog could ever appear,
+which looked exactly like "the button does nothing" from the outside (no
+popup, no error visible anywhere except the browser console). Caught only
+by actually opening DevTools and reading the real exception -- a reminder
+that "no visible effect" and "no error" are not the same claim, and it's
+worth checking the console specifically before assuming a click handler
+never fired at all.
+
+## Container actions: Restart and Details, same pattern as Host Services
+
+Each Containers row also has a **Restart** button and a **Details**
+toggle (`docker logs --tail 50 <name>`, via `toggleContainerLogs()`/
+`get_container_logs()`) -- the exact same shape as Host Services'
+actions, including the "why not a shell" reasoning above.
+
+**The allow-list here is the live `docker ps` output, not a second
+hardcoded name list.** `restart_container()` and `get_container_logs()`
+(`scripts/system_status.py`) validate `name` against
+`get_container_info()`'s current keys rather than `CONTAINER_INFO` (which
+is metadata-only -- description/image/link for the dashboard cards -- and
+deliberately doesn't cover every container Compose might run, `syncthing`
+being a real example that's missing from it). Using the live container
+list instead means the allow-list can never drift out of sync with
+whatever `docker-compose.yml` actually defines, without a second list to
+remember to update.
+
+**`nginx` restarts itself detached, for the same reason `mealie-trigger`
+does.** Every dashboard request -- this restart request included -- is
+proxied through the `nginx` container on its way back to the browser, so
+restarting it synchronously risks dropping that very response mid-flight.
+`restart_container()` special-cases just that one name to the same
+detached `setsid` + short delay pattern as `restart_service()`; every
+other container isn't in the request's own path and restarts directly.
+`restartContainer()` on the frontend mirrors this: `nginx` gets the same
+down-then-up polling treatment (against `/data/system-status-basics`,
+since that's what actually confirms the whole dashboard -- not just one
+container's `healthy` flag -- is reachable again) that `mealie-trigger`
+gets in `restartService()`.
+
 ## Factory Reset vs Fake Factory Reset
 
 Both share the exact same code path in `scripts/reset_manager.py`

@@ -112,6 +112,53 @@ def get_service_logs(name, lines=50):
     return [line for line in result.stdout.strip("\n").split("\n") if line]
 
 
+def restart_container(name):
+    """Re-validates against the actual list of currently running
+    containers (`docker ps`, via get_container_info()) rather than a
+    hardcoded name list -- same effect as restart_service()'s fixed
+    SYSTEMD_SERVICES allow-list (never restarts anything a request didn't
+    already have independent, verified reason to believe exists and is
+    part of this stack), but self-updating if the compose file's services
+    ever change, rather than a second list to keep in sync with
+    CONTAINER_INFO (which is metadata-only and deliberately doesn't cover
+    every container -- syncthing, say -- so isn't suitable as the allow-
+    list itself).
+
+    nginx restarts itself detached, same self-referential reasoning as
+    restart_service()'s mealie-trigger case: this request's own HTTP
+    response travels back to the browser THROUGH nginx, so restarting it
+    synchronously risks dropping that very response mid-flight. Every
+    other container isn't in this request's own path and restarts
+    directly."""
+    running = get_container_info()
+    if name not in running:
+        raise ValueError(f"not a currently running container: {name!r}")
+    if name == "nginx":
+        subprocess.Popen(
+            ["setsid", "bash", "-c", "sleep 2 && docker restart nginx"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    else:
+        subprocess.run(["docker", "restart", name], check=True, timeout=30)
+
+
+def get_container_logs(name, lines=50):
+    """Same dynamic allow-list as restart_container() -- `name` never
+    reaches a shell here (list-form subprocess.run, no shell=True)."""
+    running = get_container_info()
+    if name not in running:
+        raise ValueError(f"not a currently running container: {name!r}")
+    result = subprocess.run(
+        ["docker", "logs", "--tail", str(lines), name],
+        capture_output=True, text=True, timeout=15,
+    )
+    # docker logs interleaves stdout/stderr for the container -- combine
+    # them the same way `docker logs` on a real terminal would show them.
+    combined = (result.stdout or "") + (result.stderr or "")
+    return [line for line in combined.strip("\n").split("\n") if line]
+
+
 def collect_basics():
     """Uptime/memory/disk/temp -- a handful of near-instant reads, split
     out from collect_containers()/collect_services() specifically so the

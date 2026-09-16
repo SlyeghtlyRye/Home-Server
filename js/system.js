@@ -115,14 +115,113 @@ async function loadContainersCard() {
   const data = await res.json();
   card.innerHTML = `
     <h3>Containers</h3>
-    ${data.containers.map(c => `
-      <div class="preview-row">
-        <span class="date">${c.healthy ? '&#x2705;' : '&#x26A0;'} ${escapeHtml(c.name)}</span>
-        <span style="color:var(--color-text-muted); font-size:13px; flex:1;">${escapeHtml(c.status)}</span>
-        ${c.cpu_percent ? `<span style="color:var(--color-text-muted); font-size:12px;">${escapeHtml(c.cpu_percent)}% CPU</span>` : ''}
-      </div>
-    `).join('')}
+    ${data.containers.map(c => renderContainerRowHtml(c)).join('')}
   `;
+}
+
+// Restart/Details for containers mirror renderServiceRowHtml()'s pattern
+// exactly, just against /api/restart-container and /data/container-logs
+// -- see restart_container()'s docstring in system_status.py for why the
+// allow-list there is the live `docker ps` output rather than a second
+// hardcoded name list.
+function renderContainerRowHtml(c) {
+  const detailId = `container-log-${c.name}`;
+  return `
+    <div class="preview-row">
+      <span class="date">${c.healthy ? '&#x2705;' : '&#x26A0;'} ${escapeHtml(c.name)}</span>
+      <span style="color:var(--color-text-muted); font-size:13px; flex:1;">${escapeHtml(c.status)}</span>
+      ${c.cpu_percent ? `<span style="color:var(--color-text-muted); font-size:12px;">${escapeHtml(c.cpu_percent)}% CPU</span>` : ''}
+      <span class="st-link-action" data-action="toggle-container-logs" data-container="${escapeHtml(c.name)}" data-target="${detailId}">Details</span>
+      <button class="btn small" data-action="restart-container" data-container="${escapeHtml(c.name)}">Restart</button>
+    </div>
+    <div class="expandable-detail" id="${detailId}" hidden></div>
+  `;
+}
+
+async function toggleContainerLogs(containerName, targetId) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  if (el.dataset.loaded === '1') {
+    el.hidden = !el.hidden;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = '<p style="color:var(--color-text-muted); font-size:12px; margin:4px 0 0;">Loading...</p>';
+  try {
+    const res = await fetch(`/data/container-logs?name=${encodeURIComponent(containerName)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
+    const lines = data.lines || [];
+    el.innerHTML = lines.length
+      ? `<pre>${escapeHtml(lines.join('\n'))}</pre>`
+      : '<p style="font-size:12px; color:var(--color-text-muted); margin:0;">No recent log lines.</p>';
+    el.dataset.loaded = '1';
+  } catch (err) {
+    el.innerHTML = `<p style="color:var(--color-warning); font-size:12px; margin:4px 0 0;">Couldn't load logs.</p>`;
+  }
+}
+
+async function restartContainer(containerName) {
+  if (!(await showConfirmModal(`Restart the "${containerName}" container?`))) return;
+  showStatusModal('Restarting...', 'loading');
+  try {
+    const res = await fetch('/api/restart-container', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: containerName })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+
+    if (containerName === 'nginx') {
+      // nginx is what's proxying this very request back to the browser
+      // (and every other dashboard request) -- same down-then-up
+      // requirement as restartService()'s mealie-trigger case, for the
+      // same reason: the first poll would otherwise still see the
+      // pre-restart container still up and falsely report done at once.
+      showStatusModal('Restarting nginx -- the dashboard itself will blip...', 'loading');
+      let sawDown = false;
+      const backUp = await pollUntil(async () => {
+        try {
+          const r = await fetch('/data/system-status-basics');
+          if (r.ok) return sawDown;
+          sawDown = true;
+          return false;
+        } catch (e) {
+          sawDown = true;
+          return false;
+        }
+      }, { intervalMs: 500, timeoutMs: 25000 });
+      if (backUp) {
+        showStatusModal('nginx is back up.', 'success');
+        loadBasicsCard();
+        loadContainersCard();
+        loadServicesCard();
+      } else {
+        showStatusModal("nginx hasn't come back up after 25s -- something may have gone wrong restarting it.", 'error');
+      }
+      return;
+    }
+
+    showStatusModal(`Waiting for "${containerName}" to come back up...`, 'loading');
+    const backUp = await pollUntil(async () => {
+      try {
+        const r = await fetch('/data/system-status-containers');
+        if (!r.ok) return false;
+        const d = await r.json();
+        const cont = (d.containers || []).find(c => c.name === containerName);
+        return !!(cont && cont.healthy);
+      } catch (e) {
+        return false;
+      }
+    }, { intervalMs: 1000, timeoutMs: 30000 });
+    showStatusModal(
+      backUp ? `"${containerName}" is back up.` : `"${containerName}" hasn't come back up after 30s -- check Details for why.`,
+      backUp ? 'success' : 'error'
+    );
+    loadContainersCard();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
 }
 
 async function loadServicesCard() {
@@ -500,6 +599,10 @@ function wireDelegatedListeners() {
     if (svcLogBtn) { toggleServiceLogs(svcLogBtn.dataset.service, svcLogBtn.dataset.target); return; }
     const svcRestartBtn = e.target.closest('[data-action="restart-service"]');
     if (svcRestartBtn) { restartService(svcRestartBtn.dataset.service); return; }
+    const containerLogBtn = e.target.closest('[data-action="toggle-container-logs"]');
+    if (containerLogBtn) { toggleContainerLogs(containerLogBtn.dataset.container, containerLogBtn.dataset.target); return; }
+    const containerRestartBtn = e.target.closest('[data-action="restart-container"]');
+    if (containerRestartBtn) { restartContainer(containerRestartBtn.dataset.container); return; }
   });
 }
 
