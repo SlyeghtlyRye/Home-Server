@@ -3,7 +3,7 @@
 // typed confirmation, does not restart services itself -- see the log
 // message it returns for the manual follow-up step).
 import { registerApp, showStatusModal, hideStatusModal, showErrorBanner,
-         clearErrorBanner, escapeHtml } from './core.js';
+         clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
 
 // Three independent cards (Device, Containers, Host Services) instead of
 // one combined /data/system-status fetch the whole panel used to wait on
