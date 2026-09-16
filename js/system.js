@@ -172,8 +172,8 @@ async function toggleServiceLogs(serviceName, targetId) {
   el.innerHTML = '<p style="color:var(--color-text-muted); font-size:12px; margin:4px 0 0;">Loading...</p>';
   try {
     const res = await fetch(`/data/service-logs?name=${encodeURIComponent(serviceName)}`);
-    if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
     const lines = data.lines || [];
     el.innerHTML = lines.length
       ? `<pre>${escapeHtml(lines.join('\n'))}</pre>`
@@ -266,8 +266,8 @@ async function previewReset() {
   showStatusModal('Running dry-run preview...', 'loading');
   try {
     const res = await fetch('/api/reset-preview');
-    if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
     showResetLog(data.log, 'This is a preview only -- nothing was changed.', false);
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -348,8 +348,8 @@ async function toggleCommitDetail(hash, targetId) {
   el.innerHTML = '<p style="color:var(--color-text-muted); font-size:12px; margin:4px 0 0;">Loading...</p>';
   try {
     const res = await fetch(`/data/commit-detail?hash=${encodeURIComponent(hash)}`);
-    if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
     el.innerHTML = `
       <p style="font-size:12px; color:var(--color-text-muted); margin:4px 0;">${escapeHtml(data.author)} &middot; ${escapeHtml(data.date)}</p>
       ${data.body ? `<pre>${escapeHtml(data.body)}</pre>` : '<p style="font-size:12px; color:var(--color-text-muted); margin:0;">No additional details.</p>'}
@@ -365,8 +365,8 @@ async function checkUpdate() {
   statusEl.innerHTML = '<p style="color:var(--color-text-muted); font-size:13px;">Checking...</p>';
   try {
     const res = await fetch('/api/check-update');
-    if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
     if (data.update_available) {
       statusEl.innerHTML = `
         <div class="warning-box">
@@ -400,8 +400,8 @@ async function loadPastUpdates() {
   controls.innerHTML = '<p style="color:var(--color-text-muted); font-size:13px;">Loading...</p>';
   try {
     const res = await fetch(`/data/past-updates?skip=${pastUpdatesSkip}&limit=${PAST_UPDATES_PAGE_SIZE}`);
-    if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
     const commits = data.commits || [];
     list.insertAdjacentHTML('beforeend', commits.map(c => renderCommitLineHtml(c, 'past')).join(''));
     pastUpdatesSkip += commits.length;
