@@ -160,6 +160,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
+        if parsed.path == "/data/service-logs":
+            name = params.get("name", [None])[0]
+            if not name:
+                self._send_json(400, {"error": "missing name"})
+                return
+            try:
+                self._send_json(200, {"lines": system_status.get_service_logs(name)})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
         if parsed.path == "/api/reset-preview":
             host_ip = reset_manager.read_current_host_ip()
             timezone = reset_manager.read_current_timezone()
@@ -509,6 +519,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/apply-update":
             try:
                 self._send_json(200, updater.apply_update())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/api/restart-service":
+            body = self._read_json_body()
+            name = body.get("name")
+            if not name:
+                self._send_json(400, {"error": "missing name"})
+                return
+            try:
+                system_status.restart_service(name)
+                self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

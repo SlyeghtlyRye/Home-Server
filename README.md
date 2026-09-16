@@ -132,6 +132,26 @@ Single source of truth for system/container health (uptime, memory, disk,
 Docker container status, host systemd services). Used by both the CLI
 report (`status.py`) and the dashboard's `/data/system-status` endpoint.
 
+### `scripts/dev-up.sh`
+Local test environment, **for a real Linux machine** -- not part of a real
+deployment, and not intended for Windows: the repo hardcodes `/root` as
+its install path in several places (`trigger_server.py`'s
+`sys.path.insert(0, "/root/scripts")`, `updater.py`'s `ROOT`, etc.), and
+`system_status.py` shells out to Linux-only commands (`systemctl`,
+`journalctl`, `/sys/class/thermal/...`). One command
+(`sudo bash scripts/dev-up.sh`, from wherever the repo actually lives)
+does everything: bind-mounts your actual working copy to `/root` (only
+needed once per reboot -- it detects and skips this on later runs), so
+there's one working copy to edit, not a separate clone to keep in sync;
+starts `trigger_server.py` as a plain background process (no systemd);
+brings up `docker compose`; waits for nginx to actually respond; then
+opens the dashboard via `xdg-open`. Host Services will show as inactive
+there (nothing's installed as a real systemd unit in a dev environment)
+-- cosmetic only, every actual feature/API works normally. (WSL2 can work
+here too, in principle, the same real-Linux-kernel way -- it just wasn't
+worth fighting the Windows-side setup friction for; ordinary Linux is the
+straightforward path.)
+
 ### `dashboard.html`
 The frontend shell — HTML structure and the `<script type="module">` tags
 that load each feature module below. No feature-specific logic lives here
@@ -245,7 +265,8 @@ Following the existing pattern for e.g. a hypothetical new "Notes" feature:
 │ ├── generate_architecture_map.py
 │ ├── trigger_server.py
 │ ├── mealie_weekly_plan.py
-│ └── syncthing_client.py
+│ ├── syncthing_client.py
+│ └── dev-up.sh (local test environment -- not part of a real deployment)
 ├── audiobooks/
 │ ├── audiobook_lib.py
 │ └── add_book.py

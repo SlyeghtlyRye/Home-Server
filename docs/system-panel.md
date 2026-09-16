@@ -42,6 +42,38 @@ one independent data source going forward**, not a one-off fix scoped to
 System -- extend it incrementally as a panel is touched anyway, rather
 than rewriting every existing panel's loading logic in one pass.
 
+## Host service actions: Restart and Details, deliberately not a shell
+
+Each Host Services row has a **Restart** button and a **Details** toggle
+(recent `journalctl -u <name>` output, lazy-fetched and cached the same
+way as the update history's commit details -- see `toggleServiceLogs()`).
+
+**This exists instead of a general "run any command" feature, on
+purpose.** The request that led here was "let me manage the box from the
+dashboard, like being SSH'd in" -- but every endpoint on this dashboard is
+gated by the same shared secret (`TRIGGER_SECRET`, passed as a URL query
+param), which is a reasonable bar for "only I can check my shopping
+list" and a much lower bar than what "arbitrary remote code execution as
+whatever user runs mealie-trigger" deserves. That secret can end up
+somewhere unexpected (browser history, server access logs, a `Referer`
+header) in ways nobody needs to worry about today because the worst case
+is "someone pauses my Syncthing" -- a shell endpoint changes the worst
+case to "full compromise of the machine." `restart_service()` and
+`get_service_logs()` (`scripts/system_status.py`) instead validate `name`
+against the exact same fixed `SYSTEMD_SERVICES` list already used for
+status reporting -- there is no code path where a request body's string
+reaches a shell verbatim, restart or logs.
+
+**`mealie-trigger` restarts itself asynchronously, everything else
+restarts synchronously.** `mealie-trigger` is the process serving the
+restart request itself -- doing that synchronously would drop the
+connection mid-restart, the exact self-referential problem
+`_schedule_background_restart()` (see "Software updates" below) already
+exists to avoid for the same reason. `restart_service()` special-cases
+just that one name to a detached `setsid` + short delay; `icecast2` and
+`tailscaled` restart directly, since neither is the process handling the
+request.
+
 ## Factory Reset vs Fake Factory Reset
 
 Both share the exact same code path in `scripts/reset_manager.py`

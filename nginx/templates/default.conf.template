@@ -56,6 +56,12 @@ server {
     location /api/apply-update {
             proxy_pass http://172.17.0.1:9001/api/apply-update?key=${TRIGGER_SECRET};
     }
+    location /api/restart-service {
+            proxy_pass http://172.17.0.1:9001/api/restart-service?key=${TRIGGER_SECRET};
+    }
+    location /data/service-logs {
+            proxy_pass http://172.17.0.1:9001/data/service-logs?key=${TRIGGER_SECRET}&name=$arg_name;
+    }
     location /data/setup-status {
             proxy_pass http://172.17.0.1:9001/data/setup-status?key=${TRIGGER_SECRET};
     }

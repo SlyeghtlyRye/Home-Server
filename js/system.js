@@ -139,13 +139,76 @@ async function loadServicesCard() {
   const data = await res.json();
   card.innerHTML = `
     <h3>Host Services</h3>
-    ${data.host_services.map(s => `
-      <div class="preview-row">
-        <span class="date">${s.healthy ? '&#x2705;' : '&#x26A0;'} ${escapeHtml(s.name)}</span>
-        <span style="color:var(--color-text-muted); font-size:13px;">${escapeHtml(s.active)}</span>
-      </div>
-    `).join('')}
+    ${data.host_services.map(s => renderServiceRowHtml(s)).join('')}
   `;
+}
+
+// Restart/Details are deliberately only offered for the fixed three names
+// system_status.py already knows about (SYSTEMD_SERVICES) -- the backend
+// re-validates against that same list regardless, but there's no reason
+// to even render controls implying a broader command surface than exists.
+function renderServiceRowHtml(s) {
+  const detailId = `svc-log-${s.name}`;
+  return `
+    <div class="preview-row">
+      <span class="date">${s.healthy ? '&#x2705;' : '&#x26A0;'} ${escapeHtml(s.name)}</span>
+      <span style="color:var(--color-text-muted); font-size:13px; flex:1;">${escapeHtml(s.active)}</span>
+      <span class="st-link-action" data-action="toggle-service-logs" data-service="${escapeHtml(s.name)}" data-target="${detailId}">Details</span>
+      <button class="btn small" data-action="restart-service" data-service="${escapeHtml(s.name)}">Restart</button>
+    </div>
+    <div class="expandable-detail" id="${detailId}" hidden></div>
+  `;
+}
+
+async function toggleServiceLogs(serviceName, targetId) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  if (el.dataset.loaded === '1') {
+    el.hidden = !el.hidden;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = '<p style="color:var(--color-text-muted); font-size:12px; margin:4px 0 0;">Loading...</p>';
+  try {
+    const res = await fetch(`/data/service-logs?name=${encodeURIComponent(serviceName)}`);
+    if (!res.ok) throw new Error('server responded ' + res.status);
+    const data = await res.json();
+    const lines = data.lines || [];
+    el.innerHTML = lines.length
+      ? `<pre>${escapeHtml(lines.join('\n'))}</pre>`
+      : '<p style="font-size:12px; color:var(--color-text-muted); margin:0;">No recent log lines.</p>';
+    el.dataset.loaded = '1';
+  } catch (err) {
+    el.innerHTML = `<p style="color:var(--color-warning); font-size:12px; margin:4px 0 0;">Couldn't load logs.</p>`;
+  }
+}
+
+async function restartService(serviceName) {
+  if (!(await showConfirmModal(`Restart "${serviceName}"?`))) return;
+  showStatusModal('Restarting...', 'loading');
+  try {
+    const res = await fetch('/api/restart-service', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: serviceName })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+    // Restarting mealie-trigger restarts the very process serving this
+    // request (a few seconds after the response, on the backend side --
+    // see system_status.py's restart_service()), so this tab's own next
+    // request would otherwise race that restart. A plain status message
+    // instead of immediately re-fetching the Services card avoids that.
+    hideStatusModal();
+    showStatusModal(
+      serviceName === 'mealie-trigger'
+        ? 'Restarting -- this restarts the dashboard backend itself, give it about 10 seconds then refresh.'
+        : `"${serviceName}" restarted.`,
+      'success'
+    );
+    if (serviceName !== 'mealie-trigger') loadServicesCard();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
 }
 
 async function previewReset() {
@@ -218,7 +281,7 @@ function renderCommitLineHtml(line, idPrefix) {
     <li>
       <code>${escapeHtml(hash)}</code> ${escapeHtml(subject)}
       <span class="st-link-action" data-action="toggle-commit-detail" data-hash="${escapeHtml(hash)}" data-target="${detailId}">Details</span>
-      <div class="commit-detail" id="${detailId}" hidden></div>
+      <div class="expandable-detail" id="${detailId}" hidden></div>
     </li>
   `;
 }
@@ -335,6 +398,10 @@ function wireDelegatedListeners() {
     if (pastBtn) { loadPastUpdates(); return; }
     const detailBtn = e.target.closest('[data-action="toggle-commit-detail"]');
     if (detailBtn) { toggleCommitDetail(detailBtn.dataset.hash, detailBtn.dataset.target); return; }
+    const svcLogBtn = e.target.closest('[data-action="toggle-service-logs"]');
+    if (svcLogBtn) { toggleServiceLogs(svcLogBtn.dataset.service, svcLogBtn.dataset.target); return; }
+    const svcRestartBtn = e.target.closest('[data-action="restart-service"]');
+    if (svcRestartBtn) { restartService(svcRestartBtn.dataset.service); return; }
   });
 }
 

@@ -74,6 +74,44 @@ def get_systemd_status(service):
     return active, enabled
 
 
+def restart_service(name):
+    """Deliberately scoped to exactly the three names in SYSTEMD_SERVICES
+    -- never accepts an arbitrary string from a request, so this can't
+    become a general command-execution surface no matter what a caller
+    passes in.
+
+    mealie-trigger is the process serving THIS very request, so
+    restarting it synchronously would drop the connection mid-restart --
+    the same self-referential problem updater.py's
+    _schedule_background_restart() already exists to avoid for software
+    updates. Only that one name needs the detached-background treatment;
+    icecast2/tailscaled restart normally, since neither is the process
+    handling the request."""
+    if name not in SYSTEMD_SERVICES:
+        raise ValueError(f"not a recognized host service: {name!r}")
+    if name == "mealie-trigger":
+        subprocess.Popen(
+            ["setsid", "bash", "-c", "sleep 2 && systemctl restart mealie-trigger.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    else:
+        subprocess.run(["systemctl", "restart", name], check=True, timeout=15)
+
+
+def get_service_logs(name, lines=50):
+    """Same fixed allow-list as restart_service() -- `name` never reaches
+    a shell here (list-form subprocess.run, no shell=True), so even if
+    validation were somehow bypassed there's no shell-injection surface."""
+    if name not in SYSTEMD_SERVICES:
+        raise ValueError(f"not a recognized host service: {name!r}")
+    result = subprocess.run(
+        ["journalctl", "-u", name, "-n", str(lines), "--no-pager"],
+        capture_output=True, text=True, timeout=15,
+    )
+    return [line for line in result.stdout.strip("\n").split("\n") if line]
+
+
 def collect_basics():
     """Uptime/memory/disk/temp -- a handful of near-instant reads, split
     out from collect_containers()/collect_services() specifically so the

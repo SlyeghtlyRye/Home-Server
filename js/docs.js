@@ -29,7 +29,7 @@ function renderMarkdown(text) {
       const alt = imgMatch[1];
       const src = imgMatch[2];
       if (/^docs\/[\w.-]+\.svg$/.test(src)) {
-        html += `<div class="svg-embed" data-svg-src="/${src}" data-svg-alt="${escapeHtml(alt)}" style="background:white; border-radius:6px; padding:10px; margin:10px 0; overflow:auto;"><p style="color:#888; margin:0;">Loading diagram...</p></div>`;
+        html += `<div class="svg-embed" data-svg-src="/${src}" data-svg-alt="${escapeHtml(alt)}"><p style="color:#888; margin:0;">Loading diagram...</p></div>`;
       }
     } else if (/^# /.test(line)) {
       closeList();
@@ -115,7 +115,10 @@ async function inlineEmbeddedSvgs(container) {
       const svgText = await res.text();
       el.innerHTML = svgText;
       const svgEl = el.querySelector('svg');
-      if (svgEl) makeSvgDraggable(svgEl);
+      if (svgEl) {
+        makeSvgDraggable(svgEl);
+        initSvgZoomControls(el, svgEl);
+      }
     } catch (err) {
       console.error('Failed to load diagram', err);
       el.innerHTML = '<p style="color:#888; margin:0;">Couldn\'t load the diagram.</p>';
@@ -194,6 +197,140 @@ function makeSvgDraggable(svgEl) {
   };
   svgEl.addEventListener('pointerup', endDrag);
   svgEl.addEventListener('pointerleave', endDrag);
+}
+
+// The generated SVG has a `viewBox` but no fixed width/height, so it
+// already stretches to fill its container -- which is exactly why text
+// goes tiny on a narrow phone: the whole diagram (built for a wide
+// desktop view) gets scaled down to fit. Rather than fighting that with
+// CSS, this zooms by shrinking/shifting the viewBox itself, so it stays
+// perfectly coordinated with makeSvgDraggable()'s own coordinate math
+// (getScreenCTM() already accounts for whatever viewBox is active) with
+// zero changes needed there. Buttons are the primary, always-discoverable
+// control; wheel (desktop) and pinch (mobile) are convenience shortcuts
+// for the same underlying zoomBy()/panBy().
+function initSvgZoomControls(container, svgEl) {
+  const [origMinX, origMinY, origW, origH] = (svgEl.getAttribute('viewBox') || '0 0 800 600')
+    .split(/\s+/).map(Number);
+  let vb = { minX: origMinX, minY: origMinY, w: origW, h: origH };
+  const MIN_SCALE = 1; // the original viewBox already shows the whole diagram -- no reason to zoom out past that
+  const MAX_SCALE = 8;
+
+  const currentScale = () => origW / vb.w;
+  const applyViewBox = () => svgEl.setAttribute('viewBox', `${vb.minX} ${vb.minY} ${vb.w} ${vb.h}`);
+
+  // Keeps the visible viewBox from panning past the diagram's own edges
+  // -- past there is just the container's padding, nothing to see.
+  const clampPan = () => {
+    vb.minX = Math.max(origMinX, Math.min(origMinX + origW - vb.w, vb.minX));
+    vb.minY = Math.max(origMinY, Math.min(origMinY + origH - vb.h, vb.minY));
+  };
+
+  // Screen pixels -> the SVG's own coordinate space, using whichever
+  // viewBox is in effect right now -- needed so "zoom toward this point"
+  // keeps that exact point stationary under the cursor/fingers.
+  function screenToSvgPoint(clientX, clientY) {
+    const rect = container.getBoundingClientRect();
+    return {
+      x: vb.minX + ((clientX - rect.left) / rect.width) * vb.w,
+      y: vb.minY + ((clientY - rect.top) / rect.height) * vb.h,
+    };
+  }
+
+  function zoomBy(factor, clientX, clientY) {
+    const focal = screenToSvgPoint(clientX, clientY);
+    const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, currentScale() * factor));
+    const newW = origW / newScale;
+    const newH = origH / newScale;
+    vb.minX = focal.x - (focal.x - vb.minX) * (newW / vb.w);
+    vb.minY = focal.y - (focal.y - vb.minY) * (newH / vb.h);
+    vb.w = newW;
+    vb.h = newH;
+    clampPan();
+    applyViewBox();
+  }
+
+  function panBy(dxPixels, dyPixels) {
+    const rect = container.getBoundingClientRect();
+    vb.minX -= (dxPixels / rect.width) * vb.w;
+    vb.minY -= (dyPixels / rect.height) * vb.h;
+    clampPan();
+    applyViewBox();
+  }
+
+  function resetZoom() {
+    vb = { minX: origMinX, minY: origMinY, w: origW, h: origH };
+    applyViewBox();
+  }
+
+  const controls = document.createElement('div');
+  controls.className = 'svg-zoom-controls';
+  controls.innerHTML = `
+    <button type="button" data-zoom="in" title="Zoom in">+</button>
+    <button type="button" data-zoom="out" title="Zoom out">&minus;</button>
+    <button type="button" data-zoom="reset" title="Reset view">&#x21BA;</button>
+  `;
+  container.appendChild(controls);
+  controls.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-zoom]');
+    if (!btn) return;
+    const rect = container.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    if (btn.dataset.zoom === 'in') zoomBy(1.4, cx, cy);
+    else if (btn.dataset.zoom === 'out') zoomBy(1 / 1.4, cx, cy);
+    else resetZoom();
+  });
+
+  // Desktop: wheel zooms toward the cursor.
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX, e.clientY);
+  }, { passive: false });
+
+  // Mobile: pinch (two fingers) zooms, drag (one finger, not on a node --
+  // makeSvgDraggable() owns that case) pans. Both tracked through the
+  // same pointer map so a second finger landing mid-drag hands off from
+  // panning to pinching smoothly instead of the two features fighting.
+  const pointers = new Map();
+  let lastPinchDist = null;
+  const pinchDistance = () => {
+    const [a, b] = [...pointers.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  const pinchMidpoint = () => {
+    const [a, b] = [...pointers.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+
+  container.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('[data-node-id]') || e.target.closest('.svg-zoom-controls')) return;
+    container.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) lastPinchDist = pinchDistance();
+  });
+
+  container.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    const prev = pointers.get(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {
+      const dist = pinchDistance();
+      const mid = pinchMidpoint();
+      if (lastPinchDist) zoomBy(dist / lastPinchDist, mid.x, mid.y);
+      lastPinchDist = dist;
+    } else if (pointers.size === 1) {
+      panBy(e.clientX - prev.x, e.clientY - prev.y);
+    }
+  });
+
+  const releasePointer = (e) => {
+    pointers.delete(e.pointerId);
+    lastPinchDist = pointers.size === 2 ? pinchDistance() : null;
+  };
+  container.addEventListener('pointerup', releasePointer);
+  container.addEventListener('pointercancel', releasePointer);
+  container.addEventListener('pointerleave', releasePointer);
 }
 
 function redrawEdge(edge) {
