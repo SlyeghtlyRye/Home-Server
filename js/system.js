@@ -41,8 +41,9 @@ function renderShellHtml() {
       <h3>Software Update</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">
         Check for the latest version of this project on GitHub. Installing
-        pulls the update and restarts everything automatically in the
-        background -- no SSH needed. Give it about 15 seconds, then refresh.
+        pulls the update and restarts only what's needed automatically in
+        the background -- no SSH needed, and no need to guess when it's
+        done; the page refreshes itself once everything's confirmed back up.
       </p>
       <div id="update-status"></div>
       <div class="btn-grid">
@@ -183,6 +184,20 @@ async function toggleServiceLogs(serviceName, targetId) {
   }
 }
 
+// Polls `checkFn` (should return true/false, never throw) every
+// `intervalMs` until it returns true or `timeoutMs` elapses -- used
+// instead of guessing a fixed "wait N seconds" delay, which is either
+// too short (still down, user refreshes into a stale page) or too long
+// (long done, user waits pointlessly). Returns whether it came up.
+async function pollUntil(checkFn, { intervalMs = 1000, timeoutMs = 20000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await checkFn()) return true;
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 async function restartService(serviceName) {
   if (!(await showConfirmModal(`Restart "${serviceName}"?`))) return;
   showStatusModal('Restarting...', 'loading');
@@ -193,19 +208,55 @@ async function restartService(serviceName) {
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
-    // Restarting mealie-trigger restarts the very process serving this
-    // request (a few seconds after the response, on the backend side --
-    // see system_status.py's restart_service()), so this tab's own next
-    // request would otherwise race that restart. A plain status message
-    // instead of immediately re-fetching the Services card avoids that.
-    hideStatusModal();
+
+    if (serviceName === 'mealie-trigger') {
+      // mealie-trigger is the process serving THIS request, restarting
+      // itself a couple seconds after the response (see
+      // system_status.py's restart_service()) -- so the very first poll
+      // would still see the pre-restart process still up and falsely
+      // report "done" immediately. Require seeing it actually go down at
+      // least once before counting a later success as "back up".
+      showStatusModal('Restarting the dashboard backend...', 'loading');
+      let sawDown = false;
+      const backUp = await pollUntil(async () => {
+        try {
+          const r = await fetch('/data/system-status-basics');
+          if (r.ok) return sawDown;
+          sawDown = true;
+          return false;
+        } catch (e) {
+          sawDown = true;
+          return false;
+        }
+      }, { intervalMs: 500, timeoutMs: 25000 });
+      if (backUp) {
+        showStatusModal('Backend is back up.', 'success');
+        loadBasicsCard();
+        loadContainersCard();
+        loadServicesCard();
+      } else {
+        showStatusModal("Backend hasn't come back up after 25s -- something may have gone wrong restarting it.", 'error');
+      }
+      return;
+    }
+
+    showStatusModal(`Waiting for "${serviceName}" to come back up...`, 'loading');
+    const backUp = await pollUntil(async () => {
+      try {
+        const r = await fetch('/data/system-status-services');
+        if (!r.ok) return false;
+        const d = await r.json();
+        const svc = (d.host_services || []).find(s => s.name === serviceName);
+        return !!(svc && svc.healthy);
+      } catch (e) {
+        return false;
+      }
+    }, { intervalMs: 1000, timeoutMs: 15000 });
     showStatusModal(
-      serviceName === 'mealie-trigger'
-        ? 'Restarting -- this restarts the dashboard backend itself, give it about 10 seconds then refresh.'
-        : `"${serviceName}" restarted.`,
-      'success'
+      backUp ? `"${serviceName}" is back up.` : `"${serviceName}" hasn't come back up after 15s -- check Details for why.`,
+      backUp ? 'success' : 'error'
     );
-    if (serviceName !== 'mealie-trigger') loadServicesCard();
+    loadServicesCard();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -233,7 +284,7 @@ function showResetLog(logLines, footerNote, wasReal) {
     <div style="text-align:left; max-height:300px; overflow-y:auto; font-family:monospace; font-size:12px; margin-bottom:10px;">
       ${logLines.map(l => `<div>${escapeHtml(l)}</div>`).join('')}
     </div>
-    <div style="font-weight:bold; ${wasReal ? 'color:var(--color-warning);' : ''}">${escapeHtml(footerNote)}</div>
+    <div id="reset-log-footer" style="font-weight:bold; ${wasReal ? 'color:var(--color-warning);' : ''}">${escapeHtml(footerNote)}</div>
   `;
   overlay.style.display = 'flex';
 }
@@ -367,6 +418,45 @@ async function loadPastUpdates() {
   }
 }
 
+// Same "poll instead of guess" reasoning as restartService()'s
+// mealie-trigger case, generalized: a software update might restart
+// nothing at all (js/docs-only changes), just the trigger service, or a
+// full `docker compose` recreate -- there's no single fixed wait time
+// that's right for all three, and a full recreate can genuinely take
+// longer than any short guess. Every one of those restart shapes sits
+// between the browser and trigger_server.py behind nginx, so polling
+// system-status-basics (which needs both nginx and trigger_server.py up)
+// covers all three cases through one check. Unlike the single-service
+// restart case, "nothing needed restarting" is a real, common outcome
+// here (nginx/trigger never even blip) -- requiring several consecutive
+// successful checks before declaring done (instead of requiring an
+// observed down-then-up transition) handles that case correctly too,
+// without waiting out the full timeout for something that was never down.
+async function pollForBackendRecovery({ timeoutMs = 60000 } = {}) {
+  let sawDown = false;
+  let consecutiveUp = 0;
+  const REQUIRED_CONSECUTIVE_UP_IF_NEVER_DOWN = 3;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let up;
+    try {
+      const r = await fetch('/data/system-status-basics');
+      up = r.ok;
+    } catch (e) {
+      up = false;
+    }
+    if (up) {
+      consecutiveUp++;
+      if (sawDown || consecutiveUp >= REQUIRED_CONSECUTIVE_UP_IF_NEVER_DOWN) return true;
+    } else {
+      sawDown = true;
+      consecutiveUp = 0;
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 async function installUpdate() {
   showStatusModal('Installing update...', 'loading');
   try {
@@ -376,8 +466,16 @@ async function installUpdate() {
       showStatusModal(data.message || 'Update failed.', 'error');
       return;
     }
-    showResetLog(data.log || [data.message], 'Services are restarting in the background. Refresh in about 15 seconds.', false);
-    checkUpdate();
+    showResetLog(data.log || [data.message], 'Applying -- waiting for services to come back up...', false);
+    const backUp = await pollForBackendRecovery();
+    const footer = document.getElementById('reset-log-footer');
+    if (backUp) {
+      if (footer) footer.textContent = 'Back up. Reloading...';
+      setTimeout(() => window.location.reload(), 1200);
+    } else if (footer) {
+      footer.textContent = "Still not responding after 60s -- something may have gone wrong. Check via SSH (docker compose ps).";
+      footer.style.color = 'var(--color-warning)';
+    }
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }

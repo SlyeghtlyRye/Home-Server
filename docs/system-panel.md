@@ -74,6 +74,23 @@ just that one name to a detached `setsid` + short delay; `icecast2` and
 `tailscaled` restart directly, since neither is the process handling the
 request.
 
+**The frontend polls for the restart actually finishing, rather than
+guessing a fixed wait time.** An earlier version said "give it about 10
+seconds, then refresh" -- which is either too short (still down, the
+person refreshes into a stale/broken page) or too long (long since done,
+they wait pointlessly) depending on how long the restart actually takes,
+which varies. `pollUntil()` instead re-checks every second (every 500ms
+for `mealie-trigger`) until the thing being restarted actually reports
+healthy again, or a generous timeout elapses, and drives the status
+modal's message off of that real outcome. For `icecast2`/`tailscaled`
+this means polling `/data/system-status-services` until that specific
+service's `healthy` flag flips true. For `mealie-trigger` it's slightly
+trickier: the very first poll would still see the *pre-restart* process
+still running (the actual restart is a couple seconds delayed on the
+backend), so `restartService()` requires observing it actually go down
+at least once (a failed fetch) before a later successful fetch counts as
+"back up" -- otherwise it would falsely report success immediately.
+
 ## Factory Reset vs Fake Factory Reset
 
 Both share the exact same code path in `scripts/reset_manager.py`
@@ -117,6 +134,23 @@ diff -- they just act on that recommendation differently (see below).
   since a web request can't wait on terminal input), regenerates the docs
   index and architecture map, then **restarts only what the pulled diff
   actually touched, automatically, in the background** -- no SSH needed.
+
+  **The frontend polls for the restart actually finishing, rather than
+  guessing a fixed wait time.** An earlier version said "refresh in about
+  15 seconds" -- but a pulled diff might restart nothing at all (js/docs-
+  only changes), just `mealie-trigger`, or a full `docker compose`
+  recreate, and there's no single fixed time that's right for all three
+  (a full recreate can genuinely take longer than any short guess).
+  `pollForBackendRecovery()` (`js/system.js`) instead re-fetches
+  `/data/system-status-basics` every second -- which needs both nginx and
+  `mealie-trigger` up, so it naturally covers whichever of those actually
+  restarted -- until it's confirmed up, or a 60s timeout elapses. Unlike a
+  single-service restart, "nothing needed restarting" is common and real
+  here (nginx/trigger never even blip), so it also accepts several
+  consecutive successful checks as "done" without requiring an observed
+  down-then-up transition, which would otherwise wait out the full
+  timeout for something that was never down. The page auto-reloads once
+  confirmed up, rather than asking the person to remember to refresh.
 
 **How the automatic restart avoids the same self-referential problem as
 Factory Reset:** it doesn't restart synchronously inside the request.
