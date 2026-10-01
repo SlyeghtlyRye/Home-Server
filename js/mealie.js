@@ -14,6 +14,20 @@ let previewConflicts = [];
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
 
+// Which weekdays (0=Sun..6=Sat) get excluded by default whenever a new
+// week block is added to a selection -- e.g. a household that never
+// plans Friday dinners. Per-browser (localStorage), not server-side: this
+// dashboard can be used by more than one household, so a preference like
+// "always skip Friday" belongs to whoever's looking at it, never baked
+// into the shared codebase as a hardcoded default for everyone.
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let defaultExcludedWeekdays = [];
+try {
+  defaultExcludedWeekdays = JSON.parse(localStorage.getItem('mealie_defaultExcludedWeekdays') || '[]');
+} catch (err) {
+  defaultExcludedWeekdays = [];
+}
+
 const CALENDAR_MODES = ['plan', 'view', 'edit'];
 let calendarMode = CALENDAR_MODES.includes(localStorage.getItem('mealie_calendarMode')) ? localStorage.getItem('mealie_calendarMode') : 'plan';
 let viewSelectedIso = null;
@@ -402,7 +416,7 @@ function editPanelBodyHtml() {
       </div>
       <button class="btn small" data-action="edit-reroll">Reroll</button>
     </div>
-    <div class="btn-grid" style="margin-top:12px;">
+    <div class="btn-stack" style="margin-top:12px;">
       <button class="btn" data-action="edit-save">Save</button>
       <button class="btn clear" data-action="edit-cancel">Cancel</button>
     </div>
@@ -581,7 +595,7 @@ function onDayClick(iso) {
     for (let i = 0; i < 7; i++) {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
-      days[isoOf(d)] = true;
+      days[isoOf(d)] = !defaultExcludedWeekdays.includes(d.getDay());
     }
     weekSelection = { days };
   } else if (!(iso in weekSelection.days)) {
@@ -591,7 +605,7 @@ function onDayClick(iso) {
       d.setDate(d.getDate() + i);
       const key = isoOf(d);
       if (!(key in weekSelection.days)) {
-        weekSelection.days[key] = true;
+        weekSelection.days[key] = !defaultExcludedWeekdays.includes(d.getDay());
       }
     }
   } else {
@@ -611,15 +625,27 @@ function clearSelection() {
   refreshShoppingPanel();
 }
 
-function excludeAllFridays() {
-  if (!weekSelection) return;
-  Object.keys(weekSelection.days).forEach(iso => {
-    const d = new Date(iso + 'T00:00:00');
-    if (d.getDay() === 5) {
-      weekSelection.days[iso] = false;
-    }
-  });
-  previewPicks = null;
+// Toggling a weekday chip does two things at once: persists it as the
+// default for every FUTURE week block (see onDayClick()'s use of
+// defaultExcludedWeekdays), and immediately applies the same include/
+// exclude flip to any matching day already in the CURRENT selection --
+// this is what "Exclude All Fridays" used to do as a one-shot action,
+// now just generalized to any day and remembered going forward.
+function toggleDefaultExcludedWeekday(dayNum) {
+  const idx = defaultExcludedWeekdays.indexOf(dayNum);
+  const nowExcluded = idx === -1;
+  if (nowExcluded) defaultExcludedWeekdays.push(dayNum);
+  else defaultExcludedWeekdays.splice(idx, 1);
+  localStorage.setItem('mealie_defaultExcludedWeekdays', JSON.stringify(defaultExcludedWeekdays));
+
+  if (weekSelection) {
+    Object.keys(weekSelection.days).forEach(iso => {
+      if (new Date(iso + 'T00:00:00').getDay() === dayNum) {
+        weekSelection.days[iso] = !nowExcluded;
+      }
+    });
+    previewPicks = null;
+  }
   renderCalendar();
   renderModePanel();
   refreshShoppingPanel();
@@ -635,6 +661,16 @@ function toggleAvoidRepeats(checked) {
   localStorage.setItem('mealie_avoidRepeats', checked ? 'true' : 'false');
 }
 
+function weekdayChipsHtml() {
+  return `
+    <div class="weekday-chip-row">
+      ${WEEKDAY_LABELS.map((label, i) => `
+        <button type="button" class="weekday-chip ${defaultExcludedWeekdays.includes(i) ? 'excluded' : ''}" data-action="toggle-default-excluded-weekday" data-day="${i}">${label}</button>
+      `).join('')}
+    </div>
+  `;
+}
+
 function actionPanelBodyHtml() {
   const included = includedDates();
   const totalSelected = Object.keys(weekSelection.days).length;
@@ -648,13 +684,14 @@ function actionPanelBodyHtml() {
       <input type="checkbox" id="avoid-repeats-check" ${avoidRepeats ? 'checked' : ''}>
       Avoid recipes used in the last week
     </label>
-    <div class="btn-grid">
-      <button class="btn small" data-action="exclude-fridays">Exclude All Fridays</button>
-    </div>
-    <div class="btn-grid">
+    <p style="color:var(--color-text-dim); font-size:13px; margin-bottom:4px;">
+      Always skip these days (remembered on this device, applies to future weeks too):
+    </p>
+    ${weekdayChipsHtml()}
+    <div class="btn-stack">
       <button class="btn" data-action="plan-selected">Plan Selected Days</button>
-      <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
       <button class="btn" data-action="cancel-selection">Cancel Selection</button>
+      <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
     </div>
   `;
 }
@@ -1445,7 +1482,7 @@ function wireDelegatedListeners() {
       case 'toggle-mode-switcher':
         modePanelShowModeSwitcher = !modePanelShowModeSwitcher;
         return renderModePanel();
-      case 'exclude-fridays': return excludeAllFridays();
+      case 'toggle-default-excluded-weekday': return toggleDefaultExcludedWeekday(parseInt(btn.dataset.day, 10));
       case 'plan-selected': return planSelected();
       case 'clear-selected-days': return clearSelectedDays();
       case 'cancel-selection': return clearSelection();

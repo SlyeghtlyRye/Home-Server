@@ -35,9 +35,37 @@ The Mealie tab renders, top to bottom:
    dismisses it.
    - *Plan* is the original flow -- click a day to select a 7-day block,
      which opens the panel showing selection controls (avoid-repeats,
-     exclude Fridays, Plan/Clear/Cancel); "Plan Selected Days" swaps the
-     panel to a preview of random picks per day, with reroll/override,
-     then commit.
+     default-excluded weekday chips, a stacked Plan/Cancel/Clear button
+     group); "Plan Selected Days" swaps the panel to a preview of random
+     picks per day, with reroll/override, then commit.
+
+     **Default-excluded weekdays** (`defaultExcludedWeekdays` in
+     `js/mealie.js`) replaced an earlier hardcoded "Exclude All Fridays"
+     button -- a household that never plans Friday dinners is a real,
+     common case, but baking that specific day into the shared codebase
+     would be wrong for any other household using the same dashboard.
+     Toggling a weekday chip does two things: persists it to
+     `localStorage` (per-browser, not server-side) so every *future* week
+     block defaults that weekday to excluded, and immediately re-applies
+     the same include/exclude flip to any matching day already in the
+     *current* selection -- so it still works as an immediate one-shot
+     action, not just a setting for next time. A fixed set of 7 toggle
+     chips was chosen over a free-text "type the days you want" input
+     specifically because the set of options (weekdays) is small, fixed,
+     and already has natural labels -- a parser for freeform day-name
+     text would be solving a problem a fixed set of buttons already
+     solves with less code and no ambiguity.
+
+     **Buttons that stack vertically (`.btn-stack`) instead of
+     `.btn-grid`'s side-by-side cluster** are used here and in Edit mode's
+     Save/Cancel, specifically where the buttons' *order* carries meaning
+     -- the primary action first, a destructive one (Clear Selected Days,
+     which deletes the actual planned meals via `/api/clear-dates` --
+     not to be confused with Cancel Selection, which only clears the
+     local in-progress UI selection) last and visually set apart in red.
+     A multi-column grid that reflows differently at different container
+     widths doesn't reliably preserve that top-to-bottom ordering the way
+     a single flex column does.
    - *View* is read-only -- click a single day to highlight it and open its
      meal (if any) in the panel, with a link to the recipe detail modal.
    - *Edit* opens the panel for a single day: change its recipe (same
