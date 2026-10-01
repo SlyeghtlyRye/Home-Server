@@ -97,18 +97,26 @@ The Mealie tab renders, top to bottom:
      mode's own stack (primary action first, destructive last), so
      don't assume one panel's button ordering/coloring convention
      applies to the other.
-   Switching modes carries the currently-selected day across rather than
-   discarding it (`setCalendarMode()`'s `carryIso`) -- View/Edit hand off
-   their single selected day to each other directly, and handing off into
-   Plan builds a fresh 7-day selection starting at that day
+   Switching modes always tries to land on some data instead of an empty
+   panel: the currently-selected day carries across rather than being
+   discarded (`setCalendarMode()`'s `carryIso`), in both directions,
+   between all three modes. View and Edit hand their single selected day
+   (`viewSelectedIso`/`editSelectedIso`) to each other directly; handing a
+   day to Plan builds a fresh 7-day selection starting there
    (`buildWeekSelectionStartingAt()`, the same helper a calendar click
-   uses in Plan mode itself), so switching from View or Edit into Plan
-   opens the panel already showing that week instead of requiring the day
-   to be clicked again. Any in-progress preview/commit state is still
-   cleared on every switch; which mode's body renders is decided purely
-   by which piece of state is currently set (`previewPicks`/
-   `weekSelection` for Plan, `viewSelectedIso` for View, `editPick` for
-   Edit).
+   uses in Plan mode itself). Plan has no single "selected day" of its own
+   (`weekSelection` is a multi-day range) so it tracks one separately,
+   purely for this handoff: `lastPlanClickedIso` is set on every Plan-mode
+   day click and cleared by `resetPlanSelection()` (the shared helper
+   every full selection-clear -- Cancel Selection, a successful commit, a
+   successful Clear Selected Days, initial tab mount -- runs through, so
+   there's one place that keeps `weekSelection`/`previewPicks`/
+   `previewConflicts`/`lastPlanClickedIso` in sync instead of four
+   separate copies of the same four-line reset). Any in-progress preview/
+   commit state is still cleared on every mode switch; which mode's body
+   renders is decided purely by which piece of state is currently set
+   (`previewPicks`/`weekSelection` for Plan, `viewSelectedIso` for View,
+   `editPick` for Edit).
 3. **Meals of the week** -- a week picker (populated from
    `/data/available-weeks`, which lists any week with a planned meal plus
    the current week) driving a day-by-day list. Clicking a day with a

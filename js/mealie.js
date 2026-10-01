@@ -11,6 +11,13 @@ let plannedMap = {};
 let weekSelection = null;
 let previewPicks = null;
 let previewConflicts = [];
+// The day most recently clicked in Plan mode. Plan's own selection
+// (weekSelection) is a multi-day range, not a single day, so unlike
+// View/Edit (viewSelectedIso/editSelectedIso) it has no single "selected
+// day" of its own -- this exists purely so switching away from Plan can
+// still hand a day across to View/Edit, the same way switching between
+// any other two modes does (see setCalendarMode()).
+let lastPlanClickedIso = null;
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
 
@@ -130,19 +137,18 @@ function renderModeToggle() {
 
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
-  // View, Edit, and Plan all center on "the day I was just looking at" --
-  // switching between any two of them (viewing a meal then switching to
-  // Edit to change it, or to Plan to build a week starting there) hands
-  // that day across rather than forcing it to be reselected.
+  // Plan, View, and Edit all center on "the day I was just looking at" --
+  // switching between any two of them hands that day across rather than
+  // forcing it to be reselected, so every switch tries to land on some
+  // data instead of an empty panel.
   const carryIso = calendarMode === 'view' ? viewSelectedIso
     : calendarMode === 'edit' ? editSelectedIso
+    : calendarMode === 'plan' ? lastPlanClickedIso
     : null;
 
   calendarMode = mode;
   localStorage.setItem('mealie_calendarMode', mode);
-  weekSelection = null;
-  previewPicks = null;
-  previewConflicts = [];
+  resetPlanSelection();
   viewSelectedIso = null;
   viewInlineRecipeState = null;
   editSelectedIso = null;
@@ -156,6 +162,7 @@ function setCalendarMode(mode) {
     editPick = buildEditPick(carryIso);
   } else if (carryIso && mode === 'plan') {
     weekSelection = buildWeekSelectionStartingAt(carryIso);
+    lastPlanClickedIso = carryIso;
     refreshShoppingPanel();
   }
 
@@ -643,6 +650,7 @@ function onDayClick(iso) {
   if (calendarMode === 'edit') {
     return onEditDayClick(iso);
   }
+  lastPlanClickedIso = iso;
   if (!weekSelection) {
     weekSelection = buildWeekSelectionStartingAt(iso);
   } else if (!(iso in weekSelection.days)) {
@@ -664,9 +672,18 @@ function onDayClick(iso) {
   refreshShoppingPanel();
 }
 
-function clearSelection() {
+// Fully clears Plan mode's selection state, including the carry-over
+// tracker above -- once a selection is gone there's no "day" left to hand
+// to another mode on a subsequent switch.
+function resetPlanSelection() {
   weekSelection = null;
   previewPicks = null;
+  previewConflicts = [];
+  lastPlanClickedIso = null;
+}
+
+function clearSelection() {
+  resetPlanSelection();
   renderCalendar();
   renderModePanel();
   refreshShoppingPanel();
@@ -1041,9 +1058,7 @@ async function commitPreview() {
     if (!res.ok) { showStatusModal('Failed to start save.', 'error'); return; }
     showStatusModal('Saving meal plan and updating shopping list...', 'loading');
     await pollUntilDone();
-    weekSelection = null;
-    previewPicks = null;
-    previewConflicts = [];
+    resetPlanSelection();
     await loadMonthMealplan();
     await loadAvailableWeeks();
     renderModePanel();
@@ -1066,9 +1081,7 @@ async function clearSelectedDays() {
     });
     if (!res.ok) { showStatusModal('Failed to start clear.', 'error'); return; }
     await pollUntilDone();
-    weekSelection = null;
-    previewPicks = null;
-    previewConflicts = [];
+    resetPlanSelection();
     await loadMonthMealplan();
     await loadAvailableWeeks();
     renderModePanel();
@@ -1650,9 +1663,7 @@ registerApp('mealie', {
   onRender: () => {
     wireDelegatedListeners();
     calendarMonth = new Date();
-    weekSelection = null;
-    previewPicks = null;
-    previewConflicts = [];
+    resetPlanSelection();
     viewSelectedIso = null;
     editSelectedIso = null;
     editPick = null;
