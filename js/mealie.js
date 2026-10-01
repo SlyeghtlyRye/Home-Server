@@ -130,11 +130,10 @@ function renderModeToggle() {
 
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
-  // View and Edit are both fundamentally "look at one day" -- switching
-  // between them (e.g. viewing a meal, then switching to Edit to change
-  // it) hands the selected day across rather than forcing it to be
-  // reselected. Plan mode's selection is a different shape (a multi-day
-  // range/preview, not a single day) so it doesn't participate in this.
+  // View, Edit, and Plan all center on "the day I was just looking at" --
+  // switching between any two of them (viewing a meal then switching to
+  // Edit to change it, or to Plan to build a week starting there) hands
+  // that day across rather than forcing it to be reselected.
   const carryIso = calendarMode === 'view' ? viewSelectedIso
     : calendarMode === 'edit' ? editSelectedIso
     : null;
@@ -155,6 +154,9 @@ function setCalendarMode(mode) {
   } else if (carryIso && mode === 'edit') {
     editSelectedIso = carryIso;
     editPick = buildEditPick(carryIso);
+  } else if (carryIso && mode === 'plan') {
+    weekSelection = buildWeekSelectionStartingAt(carryIso);
+    refreshShoppingPanel();
   }
 
   renderModeToggle();
@@ -430,14 +432,10 @@ function editPanelBodyHtml() {
       <input type="date" id="edit-swap-target">
       <button class="btn small" data-action="edit-swap">Swap</button>
     </div>
-    ${plannedMap[editPick.date] ? `
-      <div class="btn-stack" style="margin-top:12px;">
-        <button class="btn clear" data-action="edit-delete">Delete Meal</button>
-      </div>
-    ` : ''}
     <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn" data-action="edit-save">Save</button>
-      <button class="btn clear" data-action="edit-cancel">Cancel</button>
+      <button class="btn cancel" data-action="edit-cancel">Cancel</button>
+      ${plannedMap[editPick.date] ? `<button class="btn clear" data-action="edit-delete">Delete Meal</button>` : ''}
+      <button class="btn save" data-action="edit-save">Save</button>
     </div>
   `;
 }
@@ -607,6 +605,20 @@ async function saveEditPick() {
   }
 }
 
+// Builds the same 7-day Plan-mode selection whether it starts from a
+// calendar click (onDayClick) or from carrying a day over when switching
+// into Plan mode from View/Edit (setCalendarMode).
+function buildWeekSelectionStartingAt(iso) {
+  const start = new Date(iso + 'T00:00:00');
+  const days = {};
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    days[isoOf(d)] = !defaultExcludedWeekdays.includes(d.getDay());
+  }
+  return { days };
+}
+
 function onDayClick(iso) {
   modePanelShowModeSwitcher = false;
   if (calendarMode === 'view') {
@@ -632,14 +644,7 @@ function onDayClick(iso) {
     return onEditDayClick(iso);
   }
   if (!weekSelection) {
-    const start = new Date(iso + 'T00:00:00');
-    const days = {};
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(start);
-      d.setDate(d.getDate() + i);
-      days[isoOf(d)] = !defaultExcludedWeekdays.includes(d.getDay());
-    }
-    weekSelection = { days };
+    weekSelection = buildWeekSelectionStartingAt(iso);
   } else if (!(iso in weekSelection.days)) {
     const start = new Date(iso + 'T00:00:00');
     for (let i = 0; i < 7; i++) {

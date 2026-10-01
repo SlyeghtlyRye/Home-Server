@@ -89,15 +89,26 @@ The Mealie tab renders, top to bottom:
      uses. It has its own "cannot be undone" confirm, same as Clear
      Selected Days in Plan mode.
 
-     The panel is laid out recipe/reroll controls, then Swap, then
-     Delete (if applicable), with Save/Cancel stacked at the very
-     bottom -- the opposite of Plan mode's primary-action-first
-     ordering in its own stack, by explicit request, so don't assume
-     one panel's button ordering convention applies to the other.
-   Switching modes clears any in-progress plan selection and closes the
-   panel; which mode's body renders is decided purely by which piece of
-   state is currently set (`previewPicks`/`weekSelection` for Plan,
-   `viewSelectedIso` for View, `editPick` for Edit).
+     The panel ends in one `.btn-stack`: Cancel, then Delete Meal (if
+     applicable), then Save -- colored light red / dark red / green
+     (`.btn.cancel` / `.btn.clear` / `.btn.save`) respectively, by
+     explicit request, so the three read as distinct severities rather
+     than all-look-alike buttons. This is a different order from Plan
+     mode's own stack (primary action first, destructive last), so
+     don't assume one panel's button ordering/coloring convention
+     applies to the other.
+   Switching modes carries the currently-selected day across rather than
+   discarding it (`setCalendarMode()`'s `carryIso`) -- View/Edit hand off
+   their single selected day to each other directly, and handing off into
+   Plan builds a fresh 7-day selection starting at that day
+   (`buildWeekSelectionStartingAt()`, the same helper a calendar click
+   uses in Plan mode itself), so switching from View or Edit into Plan
+   opens the panel already showing that week instead of requiring the day
+   to be clicked again. Any in-progress preview/commit state is still
+   cleared on every switch; which mode's body renders is decided purely
+   by which piece of state is currently set (`previewPicks`/
+   `weekSelection` for Plan, `viewSelectedIso` for View, `editPick` for
+   Edit).
 3. **Meals of the week** -- a week picker (populated from
    `/data/available-weeks`, which lists any week with a planned meal plus
    the current week) driving a day-by-day list. Clicking a day with a

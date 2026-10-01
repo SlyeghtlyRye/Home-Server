@@ -25,6 +25,8 @@
       --color-warning-bg: #3a2f1a;
       --color-danger-border: #c0392b;
       --color-danger-bg: #3a2323;
+      --color-success-border: #2ecc71;
+      --color-success-bg: #1f3a2a;
       --color-selected-bg: #2f4a63;
       --radius-md: 8px;
       --radius-sm: 6px;
@@ -53,6 +55,8 @@
     .btn { background: var(--color-surface); color: white; border: 2px solid transparent; padding: 14px; border-radius: 8px; font-size: 15px; cursor: pointer; }
     .btn:hover { border-color: var(--color-accent); }
     .btn.clear { background: var(--color-danger-bg); }
+    .btn.cancel { background: var(--color-danger-border); }
+    .btn.save { background: var(--color-success-bg); border-color: var(--color-success-border); }
     .btn.small { padding: 8px 14px; font-size: 13px; }
     .weekday-chip-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 6px 0 15px; }
     .weekday-chip {
