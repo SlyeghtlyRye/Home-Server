@@ -69,14 +69,31 @@ The Mealie tab renders, top to bottom:
    - *View* is read-only -- click a single day to highlight it and open its
      meal (if any) in the panel, with a link to the recipe detail modal.
    - *Edit* opens the panel for a single day: change its recipe (same
-     search/reroll combo as Plan's preview row), or swap it with another
-     day via a date field in the same panel. A swap only rearranges the
-     meal plan -- it never touches the shopping list, since that list can
-     only grow (see `add_recipe_to_list`) and has no way to subtract a
-     recipe's ingredients, so re-adding both sides on every swap would
-     double-count ingredients for a same-week swap. Swapping onto an empty
-     day acts as a move (the source day clears). Changing a day's recipe
-     to something new *does* update the shopping list, same as Plan.
+     search/reroll combo as Plan's preview row), swap it with another day
+     via a date field in the same panel, or delete it outright. A swap
+     only rearranges the meal plan -- it never touches the shopping list,
+     since that list can only grow (see `add_recipe_to_list`) and has no
+     way to subtract a recipe's ingredients, so re-adding both sides on
+     every swap would double-count ingredients for a same-week swap.
+     Swapping onto an empty day acts as a move (the source day clears).
+     Changing a day's recipe to something new *does* update the shopping
+     list, same as Plan.
+
+     **Delete Meal** (`deleteEditedDay()`) only shows when the day
+     actually has a planned meal (`plannedMap[editPick.date]`), since
+     there's nothing to delete on an empty day. It reuses
+     `/api/clear-dates` -- the same call `clearSelectedDays()` makes for
+     a whole Plan-mode selection -- scoped to a single-element date list,
+     so deleting one day needed no new endpoint, just the same
+     background-job-then-poll shape every other Mealie write already
+     uses. It has its own "cannot be undone" confirm, same as Clear
+     Selected Days in Plan mode.
+
+     The panel is laid out recipe/reroll controls, then Swap, then
+     Delete (if applicable), with Save/Cancel stacked at the very
+     bottom -- the opposite of Plan mode's primary-action-first
+     ordering in its own stack, by explicit request, so don't assume
+     one panel's button ordering convention applies to the other.
    Switching modes clears any in-progress plan selection and closes the
    panel; which mode's body renders is decided purely by which piece of
    state is currently set (`previewPicks`/`weekSelection` for Plan,

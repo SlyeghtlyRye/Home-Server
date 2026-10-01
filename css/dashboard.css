@@ -54,7 +54,7 @@
     .btn:hover { border-color: var(--color-accent); }
     .btn.clear { background: var(--color-danger-bg); }
     .btn.small { padding: 8px 14px; font-size: 13px; }
-    .weekday-chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 15px; }
+    .weekday-chip-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 6px 0 15px; }
     .weekday-chip {
       background: var(--color-bg); color: var(--color-text-dim); border: 1px solid var(--color-border);
       border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer;
@@ -156,7 +156,7 @@
     .combo-item.info:hover { background: transparent; }
     .new-hint { font-size: 11px; color: var(--color-warning); margin-top: 2px; display: none; }
     .new-hint.show { display: block; }
-    label.check-row { display: block; margin: 10px 0; font-size: 14px; color: var(--color-text-dim); }
+    label.check-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0; font-size: 14px; color: var(--color-text-dim); }
     .preview-row input[readonly] { opacity: 0.6; cursor: not-allowed; }
 
 /* ---------- Modals, overlays, and status/notice boxes ---------- */

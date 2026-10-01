@@ -159,7 +159,16 @@ function setCalendarMode(mode) {
 
   renderModeToggle();
   renderCalendar();
-  renderModePanel();
+
+  // Carrying a day into View mode should auto-load its details the same
+  // way clicking the day does in onDayClick() -- otherwise the panel shows
+  // just the "View details" link and the user has to click it anyway.
+  const meal = mode === 'view' && viewSelectedIso ? plannedMap[viewSelectedIso] : null;
+  if (meal && meal.id) {
+    showViewRecipeDetailInline(meal.id);
+  } else {
+    renderModePanel();
+  }
 }
 
 function renderCalendar() {
@@ -416,14 +425,19 @@ function editPanelBodyHtml() {
       </div>
       <button class="btn small" data-action="edit-reroll">Reroll</button>
     </div>
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn" data-action="edit-save">Save</button>
-      <button class="btn clear" data-action="edit-cancel">Cancel</button>
-    </div>
     <div class="edit-swap-row">
       <label for="edit-swap-target">Swap with another day:</label>
       <input type="date" id="edit-swap-target">
       <button class="btn small" data-action="edit-swap">Swap</button>
+    </div>
+    ${plannedMap[editPick.date] ? `
+      <div class="btn-stack" style="margin-top:12px;">
+        <button class="btn clear" data-action="edit-delete">Delete Meal</button>
+      </div>
+    ` : ''}
+    <div class="btn-stack" style="margin-top:12px;">
+      <button class="btn" data-action="edit-save">Save</button>
+      <button class="btn clear" data-action="edit-cancel">Cancel</button>
     </div>
   `;
 }
@@ -456,6 +470,34 @@ async function doEditSwap() {
     await loadMonthMealplan();
     await loadAvailableWeeks();
     showSuccessThenClose('Swapped!');
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+// Reuses /api/clear-dates (the same backend call clearSelectedDays() uses
+// for a whole Plan-mode selection) scoped to just this one day -- it
+// already accepts a plain list of dates, so a single-element list needs
+// no new endpoint. Same background-job-then-poll shape as every other
+// Mealie write that can take a moment (clearSelectedDays(), planSelected()).
+async function deleteEditedDay() {
+  if (!editSelectedIso) return;
+  const meal = plannedMap[editSelectedIso];
+  if (!meal) { showStatusModal('Nothing planned for this day.', 'error'); return; }
+  if (!(await showConfirmModal(`Delete the meal for ${editSelectedIso} (${meal.name})? This cannot be undone.`))) return;
+  showStatusModal('Deleting...', 'loading');
+  try {
+    const res = await fetch('/api/clear-dates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dates: [editSelectedIso] })
+    });
+    if (!res.ok) { showStatusModal('Failed to start delete.', 'error'); return; }
+    await pollUntilDone();
+    closeEditPanel();
+    await loadMonthMealplan();
+    await loadAvailableWeeks();
+    showSuccessThenClose('Deleted!');
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
   }
@@ -1495,6 +1537,7 @@ function wireDelegatedListeners() {
       case 'edit-save': return saveEditPick();
       case 'edit-cancel': return closeEditPanel();
       case 'edit-swap': return doEditSwap();
+      case 'edit-delete': return deleteEditedDay();
       case 'view-recipe-inline': return showViewRecipeDetailInline(btn.dataset.recipeId);
     }
   });
