@@ -238,7 +238,7 @@ def _describe_restart_plan(plan):
         parts.append("the trigger service")
     return (
         f"Restarting {' and '.join(parts)} in the background -- give it "
-        "about 15 seconds, then refresh the dashboard."
+        "a bit of time, the browser will refresh automatically."
     )
 
 

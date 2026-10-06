@@ -841,10 +841,19 @@ async function planSelected() {
 
 function removePreviewDay(dateStr) {
   if (!previewPicks || isCommitting) return;
+  // Mirrors a calendar deselect (onDayClick) so the day immediately shows
+  // red/excluded instead of staying green/included with no row to match it.
+  if (weekSelection && dateStr in weekSelection.days) {
+    weekSelection.days[dateStr] = false;
+  }
   previewPicks = previewPicks.filter(p => p.date !== dateStr);
   if (previewPicks.length === 0) {
-    previewPicks = null;
+    // Nothing left in the preview -- clear the selection entirely rather
+    // than leaving every day highlighted red on the calendar with no
+    // preview to show for it.
+    resetPlanSelection();
   }
+  renderCalendar();
   renderModePanel();
 }
 
