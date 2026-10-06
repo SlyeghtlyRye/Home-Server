@@ -39,6 +39,33 @@ The Mealie tab renders, top to bottom:
      group); "Plan Selected Days" swaps the panel to a preview of random
      picks per day, with reroll/override, then commit.
 
+     **Clicking a calendar day while the preview (step 2) is open**
+     patches the preview (`syncPreviewPicksWithSelection()`) instead of
+     discarding it -- a day toggled off drops its row, a day toggled on
+     (or pulled in by extending the range into a new 7-day block) gets a
+     blank row ready for reroll/manual pick, same as the row "clear this
+     day's recipe" leaves behind. It used to just null out `previewPicks`
+     on any calendar click, forcing a full restart of the preview for
+     what was meant to be a quick tweak.
+
+     **Committing the preview runs in the background.** `commitPreview()`
+     resolves new recipes, posts `/api/commit`, then polls until the
+     shopping-list sync finishes -- a flow that can legitimately take a
+     while. While `isCommitting` is true, the preview panel's own
+     controls are disabled (`previewPanelBodyHtml()`) and a small corner
+     banner (`showProcessingBanner()`/`hideProcessingBanner()` in
+     `core.js`) reports progress instead of `showStatusModal()`'s
+     full-screen blocking overlay, so the user is free to switch tabs or
+     keep browsing while it finishes rather than being stuck watching a
+     spinner. The banner lives in the persistent shell (`dashboard.html`),
+     not a per-tab `bodyHtml`, specifically so it (and the background work
+     it's reporting on) survives switching tabs. Because of that, render
+     functions it can trigger after a tab switch (`renderCalendar()`,
+     `loadShoppingListsForRange()`/`renderShoppingListsPanel()`) all guard
+     against their target element being gone rather than throwing.
+     Errors still use the blocking modal, since those need the user to
+     actually see and acknowledge them.
+
      **Default-excluded weekdays** (`defaultExcludedWeekdays` in
      `js/mealie.js`) replaced an earlier hardcoded "Exclude All Fridays"
      button -- a household that never plans Friday dinners is a real,

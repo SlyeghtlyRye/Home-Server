@@ -46,6 +46,26 @@ export function hideStatusModal() {
   document.getElementById('status-overlay').style.display = 'none';
 }
 
+// Non-blocking counterpart to showStatusModal: a small corner banner for
+// work that runs in the background (a long save, a sync) where the point
+// is specifically that the user can keep navigating the dashboard --
+// status-overlay's full-screen backdrop is wrong for that on purpose.
+// Lives in the persistent shell (dashboard.html), not a per-tab bodyHtml,
+// so it survives switching tabs while the background work it's reporting
+// on keeps running.
+export function showProcessingBanner(message) {
+  const el = document.getElementById('processing-banner');
+  if (!el) return;
+  document.getElementById('processing-banner-message').textContent = message;
+  el.style.display = 'flex';
+}
+
+export function hideProcessingBanner() {
+  const el = document.getElementById('processing-banner');
+  if (!el) return;
+  el.style.display = 'none';
+}
+
 export function showConfirmModal(message) {
   return new Promise((resolve) => {
     const overlay = document.getElementById('status-overlay');

@@ -211,6 +211,24 @@
       animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner.small { width: 16px; height: 16px; border-width: 2px; margin: 0; flex-shrink: 0; }
+    .processing-banner {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 999;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--color-text-dim);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      max-width: calc(100vw - 40px);
+    }
     #status-message { font-size: 16px; }
     #status-dismiss {
       display: none;

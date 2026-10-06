@@ -3,7 +3,8 @@
 // list. Uses event delegation on stable containers since their contents
 // (calendar days, preview rows, dropdowns) re-render frequently.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
-         showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf } from './core.js';
+         showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf,
+         showProcessingBanner, hideProcessingBanner } from './core.js';
 import { HOST_IP } from './config.js';
 
 let calendarMonth = new Date();
@@ -18,6 +19,12 @@ let previewConflicts = [];
 // still hand a day across to View/Edit, the same way switching between
 // any other two modes does (see setCalendarMode()).
 let lastPlanClickedIso = null;
+// True while commitPlan() is saving in the background -- disables the
+// preview panel's controls and calendar day clicks so a second submit or
+// a mid-save selection change can't race the in-flight save, without
+// blocking navigation to other tabs the way showStatusModal's full-screen
+// overlay would.
+let isCommitting = false;
 let avoidRepeats = localStorage.getItem('mealie_avoidRepeats') !== 'false';
 let allRecipes = [];
 
@@ -181,6 +188,8 @@ function setCalendarMode(mode) {
 }
 
 function renderCalendar() {
+  const container = document.getElementById('calendar-container');
+  if (!container) return;
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
   const firstOfMonth = new Date(year, month, 1);
@@ -224,7 +233,7 @@ function renderCalendar() {
     `;
   }
   html += `</div>`;
-  document.getElementById('calendar-container').innerHTML = html;
+  container.innerHTML = html;
 }
 
 // ---------- Shared floating mode panel (Plan / View / Edit) ----------
@@ -650,6 +659,7 @@ function onDayClick(iso) {
   if (calendarMode === 'edit') {
     return onEditDayClick(iso);
   }
+  if (isCommitting) return;
   lastPlanClickedIso = iso;
   if (!weekSelection) {
     weekSelection = buildWeekSelectionStartingAt(iso);
@@ -666,10 +676,34 @@ function onDayClick(iso) {
   } else {
     weekSelection.days[iso] = !weekSelection.days[iso];
   }
-  previewPicks = null;
+  // A click while a preview (step 2) is already open used to wipe it
+  // entirely, forcing a restart -- instead keep the preview in sync with
+  // the calendar selection: a day toggled off drops its row, a day
+  // toggled on gets a blank row (same empty state the "clear this day's
+  // recipe" button leaves) ready for reroll/manual pick.
+  if (previewPicks) {
+    syncPreviewPicksWithSelection();
+  }
   renderCalendar();
   renderModePanel();
   refreshShoppingPanel();
+}
+
+// Patches an in-progress preview (previewPicks) to match weekSelection.days
+// rather than discarding it: drops rows for days no longer included, adds
+// a blank row (no recipe yet) for newly-included ones, keeps existing rows
+// (and whatever recipe they already have) untouched otherwise.
+function syncPreviewPicksWithSelection() {
+  const includedIsos = Object.keys(weekSelection.days).filter(k => weekSelection.days[k]);
+  const includedSet = new Set(includedIsos);
+  previewPicks = previewPicks.filter(p => includedSet.has(p.date));
+  includedIsos.forEach(iso => {
+    if (!previewPicks.some(p => p.date === iso)) {
+      previewPicks.push({ date: iso, recipeId: null, recipeName: '', isNew: false });
+    }
+  });
+  previewPicks.sort((a, b) => a.date.localeCompare(b.date));
+  if (previewPicks.length === 0) previewPicks = null;
 }
 
 // Fully clears Plan mode's selection state, including the carry-over
@@ -806,7 +840,7 @@ async function planSelected() {
 }
 
 function removePreviewDay(dateStr) {
-  if (!previewPicks) return;
+  if (!previewPicks || isCommitting) return;
   previewPicks = previewPicks.filter(p => p.date !== dateStr);
   if (previewPicks.length === 0) {
     previewPicks = null;
@@ -815,7 +849,7 @@ function removePreviewDay(dateStr) {
 }
 
 function clearPreviewDay(dateStr) {
-  if (!previewPicks) return;
+  if (!previewPicks || isCommitting) return;
   const entry = previewPicks.find(p => p.date === dateStr);
   if (!entry) return;
   entry.recipeId = null;
@@ -940,9 +974,12 @@ function onComboBlur(dateStr) {
 
 function previewPanelBodyHtml() {
   const conflicts = previewConflicts || [];
+  const disabled = isCommitting ? 'disabled' : '';
   return `
     <h3 style="margin-top:0;">Preview</h3>
-    <p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>
+    ${isCommitting
+      ? `<p style="color:var(--color-text-dim); font-size:13px;">Saving in the background -- feel free to switch tabs, this will finish on its own.</p>`
+      : `<p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>`}
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
     ${previewPicks.map(p => `
       <div class="preview-row">
@@ -955,29 +992,32 @@ function previewPanelBodyHtml() {
             autocomplete="off"
             value="${escapeHtml(p.recipeName)}"
             data-date="${p.date}"
+            ${disabled}
           >
           <div class="combo-dropdown" id="dropdown-${p.date}" style="display:none;"></div>
           <div class="new-hint ${p.isNew ? 'show' : ''}" id="hint-${p.date}">Will be created as a new recipe on save</div>
         </div>
-        <button class="btn small" data-action="reroll" data-date="${p.date}">Reroll</button>
-        <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe">&#x2716;</button>
-        <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day">&#x1F5D1;</button>
+        <button class="btn small" data-action="reroll" data-date="${p.date}" ${disabled}>Reroll</button>
+        <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe" ${disabled}>&#x2716;</button>
+        <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day" ${disabled}>&#x1F5D1;</button>
       </div>
     `).join('')}
     <div class="btn-grid" style="margin-top:15px;">
-      <button class="btn" data-action="commit">Confirm & Save</button>
-      <button class="btn clear" data-action="cancel-preview">Cancel</button>
+      <button class="btn" data-action="commit" ${disabled}>Confirm & Save</button>
+      <button class="btn clear" data-action="cancel-preview" ${disabled}>Cancel</button>
     </div>
   `;
 }
 
 function cancelPreview() {
+  if (isCommitting) return;
   previewPicks = null;
   previewConflicts = [];
   renderModePanel();
 }
 
 async function rerollDay(dateStr) {
+  if (isCommitting) return;
   const excludeIds = previewPicks.filter(p => p.recipeId).map(p => p.recipeId);
   try {
     const res = await fetch('/api/reroll', {
@@ -1034,37 +1074,43 @@ async function resolveNewRecipes(picks) {
 }
 
 async function commitPreview() {
-  if (!previewPicks || previewPicks.length === 0) return;
+  if (isCommitting || !previewPicks || previewPicks.length === 0) return;
   const emptyDays = previewPicks.filter(p => !p.recipeId && !(p.isNew && p.recipeName && p.recipeName.trim()));
   if (emptyDays.length > 0) {
     showStatusModal(`These days still need a recipe before saving: ${emptyDays.map(p => p.date).join(', ')}`, 'error');
     return;
   }
   if (!(await showConfirmModal(`Save these ${previewPicks.length} meal(s) to your calendar?`))) return;
-  showStatusModal('Preparing recipes...', 'loading');
+
+  // From here on this runs as a background task: a small corner banner
+  // instead of showStatusModal's full-screen overlay, and the preview
+  // panel's own controls disabled (see previewPanelBodyHtml), so the user
+  // is free to switch tabs or keep browsing while this finishes rather
+  // than being stuck staring at a blocking modal for however long recipe
+  // creation + the shopping list sync takes.
+  isCommitting = true;
+  renderModePanel();
+  showProcessingBanner('Preparing recipes...');
   try {
     await resolveNewRecipes(previewPicks);
-  } catch (err) {
-    showStatusModal(err.message, 'error');
-    return;
-  }
-  showStatusModal('Saving meal plan...', 'loading');
-  try {
+    showProcessingBanner('Saving meal plan and updating shopping list...');
     const res = await fetch('/api/commit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ picks: previewPicks })
     });
-    if (!res.ok) { showStatusModal('Failed to start save.', 'error'); return; }
-    showStatusModal('Saving meal plan and updating shopping list...', 'loading');
+    if (!res.ok) throw new Error('Failed to start save.');
     await pollUntilDone();
     resetPlanSelection();
     await loadMonthMealplan();
     await loadAvailableWeeks();
-    renderModePanel();
     showSuccessThenClose('Saved!');
   } catch (err) {
-    showStatusModal('Error: ' + err, 'error');
+    showStatusModal(err.message || String(err), 'error');
+  } finally {
+    isCommitting = false;
+    hideProcessingBanner();
+    renderModePanel();
   }
 }
 
@@ -1227,6 +1273,7 @@ let shoppingListsCache = [];
 
 async function loadShoppingListsForRange(startIso, endIso) {
   const el = document.getElementById('shopping-list-panel');
+  if (!el) return;
   el.innerHTML = '<div class="week-block"><h3>Shopping Lists</h3><p>Loading...</p></div>';
   try {
     const res = await fetch(`/data/shopping-lists-for-range?start=${startIso}&end=${endIso}`);
@@ -1252,6 +1299,7 @@ function renderShoppingFilterToggleHtml() {
 
 function renderShoppingListsPanel() {
   const el = document.getElementById('shopping-list-panel');
+  if (!el) return;
   const lists = shoppingListsCache;
   if (lists.length === 0) {
     el.innerHTML = `
