@@ -2,7 +2,7 @@ import itertools
 import re
 import uuid
 import requests
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from config import HOST_IP, KANBOARD_TOKEN_FILE
 
 KANBOARD_URL = f"http://{HOST_IP}:3000"
@@ -49,18 +49,27 @@ def _to_kb_date(d):
 
 
 def _from_kb_date(value):
-    """getTask/getAllTasks return date_due as a unix timestamp (string or
-    int), 0 meaning unset. Defensive since this hasn't been confirmed
-    against the live instance yet (see rpc() callers)."""
-    if not value:
+    """getTask/getAllTasks have been seen to return date fields as a unix
+    timestamp (string or int, 0/empty meaning unset) in some Kanboard
+    versions and as a plain date/datetime string in others -- try both
+    rather than assuming one. Silently treating a real due date as unset
+    here is exactly the kind of bug that would make a newly-created chore
+    never show up in get_tasks_in_range()'s result without any visible
+    error, so this is deliberately permissive rather than assuming the
+    first format it was written against."""
+    if value in (None, "", 0, "0"):
         return None
     try:
         ts = int(value)
+        return date.fromtimestamp(ts).isoformat() if ts > 0 else None
     except (TypeError, ValueError):
-        return None
-    if ts <= 0:
-        return None
-    return date.fromtimestamp(ts).isoformat()
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(value).strip(), fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 
 def get_or_create_chores_project():
@@ -68,8 +77,28 @@ def get_or_create_chores_project():
     match = next((p for p in projects if p.get("name") == CHORES_PROJECT_NAME), None)
     if match:
         return int(match["id"])
-    new_id = rpc("createProject", {"name": CHORES_PROJECT_NAME})
-    return int(new_id)
+    # createProject's JSON-RPC result isn't reliably the new project's id
+    # across Kanboard versions -- some return a bare boolean success flag
+    # instead. int(True) == 1, which would silently resolve to whatever
+    # project happens to have id 1 (often a default/demo project) instead
+    # of the real new "Chores" project -- every chore created right after
+    # that would land in the wrong project and never show up in
+    # get_tasks_in_range()'s results (which look up the project by name
+    # fresh each time and would find the *correct* id on the next call,
+    # masking the mismatch as "it didn't get added to the calendar" with
+    # no visible error). Re-fetch and look up by name instead of trusting
+    # the return value.
+    rpc("createProject", {"name": CHORES_PROJECT_NAME})
+    projects = rpc("getAllProjects") or []
+    match = next((p for p in projects if p.get("name") == CHORES_PROJECT_NAME), None)
+    if not match:
+        raise RuntimeError(
+            f'Asked Kanboard to create a "{CHORES_PROJECT_NAME}" project, '
+            f"but it isn't in getAllProjects afterward -- check the Kanboard "
+            f"API token's permissions (creating a project usually needs an "
+            f"admin-level token)."
+        )
+    return int(match["id"])
 
 
 def get_all_people():
@@ -154,7 +183,29 @@ def create_task(title, due_date, assignee=None):
     if assignee:
         params["owner_id"] = get_or_create_person(assignee)
     task_id = rpc("createTask", params)
-    return int(task_id)
+    if not task_id or task_id is True:
+        # Same return-value caveat as createProject -- some Kanboard
+        # versions return a bare boolean from createTask instead of the
+        # new task's real id. Fail loudly rather than silently using a
+        # wrong id that a later edit/close/delete would target by mistake.
+        raise RuntimeError(f"Kanboard createTask did not return a usable task id (got {task_id!r})")
+    task_id = int(task_id)
+    # Read the task back and confirm its due date actually round-trips --
+    # if _to_kb_date()'s assumed format isn't what this Kanboard version
+    # wants, the task still gets created (so it'd look like success) but
+    # with no (or the wrong) due date, which is exactly what would make
+    # it silently never appear in get_tasks_in_range()'s calendar query.
+    # Catching that here, loudly, beats a newly-planned chore just not
+    # showing up with no explanation.
+    created = rpc("getTask", {"task_id": task_id}) or {}
+    if _from_kb_date(created.get("date_due")) != due_date.isoformat():
+        raise RuntimeError(
+            f"Created Kanboard task {task_id}, but its due date came back as "
+            f"{created.get('date_due')!r} instead of {due_date.isoformat()} -- "
+            f"the date format this client sends (_to_kb_date) likely doesn't "
+            f"match what this Kanboard version expects."
+        )
+    return task_id
 
 
 def create_recurring_tasks(title, interval_days, start_date, count, assignee=None):
