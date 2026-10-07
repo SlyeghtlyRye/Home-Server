@@ -138,7 +138,17 @@ export function showDetail(appKey) {
   const info = apps[appKey];
   const content = document.getElementById('detail-content');
   if (!info) {
-    content.innerHTML = `Unknown app`;
+    // Most likely cause: this app's own script threw while loading
+    // (e.g. a missing file it imports) before it reached its
+    // registerApp() call, rather than the key itself being wrong --
+    // worth saying explicitly, since "Unknown app" alone reads like a
+    // typo'd nav link and sends someone looking in the wrong place.
+    content.innerHTML = `
+      <p>This section failed to load.</p>
+      <p style="color:var(--color-text-muted); font-size:13px;">
+        Its script likely threw an error before it could register itself --
+        check the browser console (F12) for the actual error.
+      </p>`;
     setHeaderTitle('Unknown app');
     return;
   }

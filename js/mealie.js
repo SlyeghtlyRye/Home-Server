@@ -5,7 +5,15 @@
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf,
          showProcessingBanner, hideProcessingBanner } from './core.js';
-import { HOST_IP } from './config.js';
+// Read as a global, not a static `import` from config.js -- that file
+// is generated per-device and gitignored, so it can legitimately be
+// missing (a fresh clone before first setup, or deploy hiccup); a failed
+// static import would take this entire module down, including the
+// calendar/plan/view/edit logic below that has nothing to do with this
+// one cosmetic "Open Mealie ->" link. Falls back to the page's own host,
+// which is correct for the overwhelming majority of setups anyway (this
+// dashboard is served from the same device Mealie runs on).
+const HOST_IP = window.HOST_IP || location.hostname;
 
 let calendarMonth = new Date();
 let plannedMap = {};

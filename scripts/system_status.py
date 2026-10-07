@@ -23,7 +23,7 @@ CONTAINER_INFO = {
         'link': 'http://home.meals',
     },
     'kanboard': {
-        'description': 'Chores & task management board',
+        'description': 'Task management board',
         'image': 'kanboard/kanboard',
         'link': 'http://home.chores',
     },

@@ -3,5 +3,6 @@
 // reset_manager.py during setup/reset (same reasoning as .env.example vs
 // .env: machine-specific, so it's gitignored instead of tracked with a
 // real value that would go stale the moment it doesn't match this
-// device's actual LAN IP).
-export const HOST_IP = '192.168.0.201';
+// device's actual LAN IP). A plain global, not an ES module export --
+// see dashboard.html's comment on its <script src="js/config.js"> tag.
+window.HOST_IP = '192.168.0.201';

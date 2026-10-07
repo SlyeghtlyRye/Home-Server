@@ -1,10 +1,10 @@
-// kanboard.js -- chores board: calendar (plan/view/edit) over real tasks
-// on the self-hosted Kanboard instance's "Chores" project. Pre-alpha
+// kanboard.js -- task board: calendar (plan/view/edit) over real tasks
+// on the self-hosted Kanboard instance's "Tasks" project. Pre-alpha
 // foundation, deliberately modeled on js/mealie.js's calendar/mode-panel
 // shell -- including the same floating, drag-resizable panel (not a
 // simplified inline one), so the two tabs genuinely look and behave the
 // same -- but simpler where Kanboard's shape allows it:
-//   - A day can have zero, several, or many chores (plannedMap[iso] is a
+//   - A day can have zero, several, or many tasks (plannedMap[iso] is a
 //     LIST), unlike Mealie's one-meal-per-day assumption.
 //   - All three modes center on "the one day you clicked" -- there's no
 //     Mealie-style multi-day week selection in Plan mode here, so a
@@ -20,7 +20,11 @@
 // (css/dashboard.css), not by sharing one element, for the same reason.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showConfirmModal, escapeHtml, isoOf } from './core.js';
-import { HOST_IP } from './config.js';
+// Read as a global, not a static `import` from config.js -- see the
+// matching comment in mealie.js for why (gitignored/per-device file, so
+// a failed import would take this whole module's calendar logic down
+// over one cosmetic external link).
+const HOST_IP = window.HOST_IP || location.hostname;
 
 let calendarMonth = new Date();
 let plannedMap = {}; // iso -> [{id, title, done, assignee}, ...]
@@ -106,7 +110,7 @@ async function loadMonthTasks() {
     const data = await res.json();
     plannedMap = data.days || {};
   } catch (err) {
-    console.error('Failed to load chores', err);
+    console.error('Failed to load tasks', err);
     plannedMap = {};
   }
   renderCalendar();
@@ -301,7 +305,7 @@ function planFormHtml(iso) {
     <input
       type="text"
       id="kb-plan-title"
-      placeholder="Chore name"
+      placeholder="Task name"
       style="width:100%; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px; margin-bottom:10px; box-sizing:border-box;"
     >
     <div style="margin-bottom:10px;">${assigneeComboHtml('plan', '')}</div>
@@ -327,7 +331,7 @@ function viewListHtml(iso) {
   const tasks = plannedMap[iso] || [];
   return `
     <h3 style="margin-top:0;">${iso}</h3>
-    ${tasks.length === 0 ? `<p class="meal-empty">No chores this day.</p>` : tasks.map(t => `
+    ${tasks.length === 0 ? `<p class="meal-empty">No tasks this day.</p>` : tasks.map(t => `
       <div class="preview-row">
         <span class="date" style="${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : ''}">
           ${escapeHtml(t.title)}${t.assignee ? ` <span style="color:var(--color-text-muted); font-size:12px;">(${escapeHtml(t.assignee)})</span>` : ''}
@@ -345,13 +349,13 @@ function editListHtml(iso) {
   const tasks = plannedMap[iso] || [];
   return `
     <h3 style="margin-top:0;">Edit ${iso}</h3>
-    ${tasks.length === 0 ? `<p class="meal-empty">No chores to edit this day.</p>` : tasks.map(t => `
+    ${tasks.length === 0 ? `<p class="meal-empty">No tasks to edit this day.</p>` : tasks.map(t => `
       <div class="preview-row" style="flex-wrap:wrap;">
         <input type="text" id="kb-edit-title-${t.id}" value="${escapeHtml(t.title)}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         <input type="date" id="kb-edit-date-${t.id}" value="${iso}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         ${assigneeComboHtml(`edit-${t.id}`, t.assignee)}
         <button class="btn small save" data-action="kb-edit-save" data-id="${t.id}">Save</button>
-        <button class="icon-btn-delete" data-action="kb-delete-task" data-id="${t.id}" title="Delete this chore">&#x1F5D1;</button>
+        <button class="icon-btn-delete" data-action="kb-delete-task" data-id="${t.id}" title="Delete this task">&#x1F5D1;</button>
       </div>
     `).join('')}
     <div class="btn-stack" style="margin-top:12px;">
@@ -415,7 +419,7 @@ function onAssigneeComboBlur(comboKey) {
 async function submitPlan() {
   const titleInput = document.getElementById('kb-plan-title');
   const title = titleInput ? titleInput.value.trim() : '';
-  if (!title) { showStatusModal('Enter a chore name first.', 'error'); return; }
+  if (!title) { showStatusModal('Enter a task name first.', 'error'); return; }
   const assigneeInput = document.getElementById('kb-assignee-input-plan');
   const assignee = assigneeInput ? assigneeInput.value.trim() : '';
   const typeInput = document.querySelector('input[name="kb-recurrence"]:checked');
@@ -469,7 +473,7 @@ async function saveTaskEdit(taskId) {
   const title = titleInput ? titleInput.value.trim() : '';
   const dateVal = dateInput ? dateInput.value : '';
   const assignee = assigneeInput ? assigneeInput.value.trim() : '';
-  if (!title) { showStatusModal('Chore name cannot be empty.', 'error'); return; }
+  if (!title) { showStatusModal('Task name cannot be empty.', 'error'); return; }
   showStatusModal('Saving...', 'loading');
   try {
     const res = await fetch('/api/kanboard-update-task', {
@@ -488,7 +492,7 @@ async function saveTaskEdit(taskId) {
 }
 
 async function deleteTask(taskId) {
-  if (!(await showConfirmModal('Delete this chore? This cannot be undone.'))) return;
+  if (!(await showConfirmModal('Delete this task? This cannot be undone.'))) return;
   showStatusModal('Deleting...', 'loading');
   try {
     const res = await fetch('/api/kanboard-remove-task', {

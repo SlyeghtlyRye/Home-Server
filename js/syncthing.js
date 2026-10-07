@@ -20,7 +20,9 @@
 // modules rather than introducing a new UI pattern.
 import { registerApp, showStatusModal, hideStatusModal,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
-import { HOST_IP } from './config.js';
+// Read as a global, not a static `import` from config.js -- see the
+// matching comment in mealie.js for why.
+const HOST_IP = window.HOST_IP || location.hostname;
 
 const NEW_INSTANCE_OPTION = '__new_instance__'; // "Add this device to" picker's inline "+ New connection..." option
 const MANUAL_DEVICE_OPTION = '__manual__'; // "Auto-fill from" picker's "Don't auto-fill" option

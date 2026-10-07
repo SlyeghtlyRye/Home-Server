@@ -204,7 +204,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             kanboard_ok = False
             if kanboard_token_exists:
                 try:
-                    kbc.get_or_create_chores_project()
+                    kbc.get_or_create_tasks_project()
                     kanboard_ok = True
                 except Exception:
                     kanboard_ok = False
@@ -612,7 +612,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(KANBOARD_TOKEN_FILE_PATH, "w") as f:
                 f.write(token)
             try:
-                kbc.get_or_create_chores_project()
+                kbc.get_or_create_tasks_project()
                 self._send_json(200, {"status": "ok", "valid": True})
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})

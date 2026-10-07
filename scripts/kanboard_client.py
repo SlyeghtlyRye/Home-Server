@@ -7,7 +7,12 @@ from config import HOST_IP, KANBOARD_TOKEN_FILE
 
 KANBOARD_URL = f"http://{HOST_IP}:3000"
 RPC_URL = f"{KANBOARD_URL}/jsonrpc.php"
-CHORES_PROJECT_NAME = "Chores"
+TASKS_PROJECT_NAME = "Tasks"
+# Earlier builds of this feature called the project "Chores" -- checked
+# as a fallback so a project (and whatever tasks are already in it) from
+# before this rename doesn't get silently orphaned in favor of a brand
+# new "Tasks" project.
+LEGACY_PROJECT_NAMES = ["Chores"]
 
 _request_id = itertools.count(1)
 
@@ -53,7 +58,7 @@ def _from_kb_date(value):
     timestamp (string or int, 0/empty meaning unset) in some Kanboard
     versions and as a plain date/datetime string in others -- try both
     rather than assuming one. Silently treating a real due date as unset
-    here is exactly the kind of bug that would make a newly-created chore
+    here is exactly the kind of bug that would make a newly-created task
     never show up in get_tasks_in_range()'s result without any visible
     error, so this is deliberately permissive rather than assuming the
     first format it was written against."""
@@ -72,28 +77,36 @@ def _from_kb_date(value):
     return None
 
 
-def get_or_create_chores_project():
+def _find_project(projects, name):
+    return next((p for p in projects if p.get("name") == name), None)
+
+
+def get_or_create_tasks_project():
     projects = rpc("getAllProjects") or []
-    match = next((p for p in projects if p.get("name") == CHORES_PROJECT_NAME), None)
+    match = _find_project(projects, TASKS_PROJECT_NAME)
     if match:
         return int(match["id"])
+    for legacy_name in LEGACY_PROJECT_NAMES:
+        match = _find_project(projects, legacy_name)
+        if match:
+            return int(match["id"])
     # createProject's JSON-RPC result isn't reliably the new project's id
     # across Kanboard versions -- some return a bare boolean success flag
     # instead. int(True) == 1, which would silently resolve to whatever
     # project happens to have id 1 (often a default/demo project) instead
-    # of the real new "Chores" project -- every chore created right after
+    # of the real new "Tasks" project -- every task created right after
     # that would land in the wrong project and never show up in
     # get_tasks_in_range()'s results (which look up the project by name
     # fresh each time and would find the *correct* id on the next call,
     # masking the mismatch as "it didn't get added to the calendar" with
     # no visible error). Re-fetch and look up by name instead of trusting
     # the return value.
-    rpc("createProject", {"name": CHORES_PROJECT_NAME})
+    rpc("createProject", {"name": TASKS_PROJECT_NAME})
     projects = rpc("getAllProjects") or []
-    match = next((p for p in projects if p.get("name") == CHORES_PROJECT_NAME), None)
+    match = _find_project(projects, TASKS_PROJECT_NAME)
     if not match:
         raise RuntimeError(
-            f'Asked Kanboard to create a "{CHORES_PROJECT_NAME}" project, '
+            f'Asked Kanboard to create a "{TASKS_PROJECT_NAME}" project, '
             f"but it isn't in getAllProjects afterward -- check the Kanboard "
             f"API token's permissions (creating a project usually needs an "
             f"admin-level token)."
@@ -136,21 +149,39 @@ def get_or_create_person(display_name):
     while candidate in existing_usernames:
         suffix += 1
         candidate = f"{base}{suffix}"
-    new_id = rpc("createUser", {
+    rpc("createUser", {
         "username": candidate,
         "password": uuid.uuid4().hex,
         "name": display_name,
         "disable_login_form": True,
     })
-    return int(new_id)
+    # Same return-value caveat as get_or_create_tasks_project()'s
+    # createProject call -- createUser's result isn't reliably the new
+    # user's id either, so re-fetch and look up by the username we just
+    # chose (guaranteed unique, unlike display_name) rather than trusting
+    # whatever createUser handed back. A wrong owner_id here is exactly
+    # the kind of thing that can make Kanboard's createTask reject the
+    # whole task (an owner_id that doesn't reference a real user usually
+    # fails a foreign-key check), which is a real failure mode this
+    # bug fix is specifically guarding against.
+    people = get_all_people()
+    match = next((p for p in people if p["username"] == candidate), None)
+    if not match:
+        raise RuntimeError(
+            f'Asked Kanboard to create a user "{candidate}" for "{display_name}", '
+            f"but it isn't in getAllUsers afterward -- check the Kanboard API "
+            f"token's permissions (creating a user usually needs an "
+            f"admin-level token)."
+        )
+    return match["id"]
 
 
 def get_tasks_in_range(start, end):
     """Returns {iso_date: [{id, title, done, assignee}, ...]} for every
-    chore (open or closed) due within [start, end] -- plural per day,
+    task (open or closed) due within [start, end] -- plural per day,
     unlike Mealie's one-meal-per-day plannedMap, since a day can have
-    several chores."""
-    project_id = get_or_create_chores_project()
+    several tasks."""
+    project_id = get_or_create_tasks_project()
     people_by_id = {p["id"]: p["name"] for p in get_all_people()}
     tasks = []
     for status_id in (STATUS_OPEN, STATUS_CLOSED):
@@ -174,7 +205,7 @@ def get_tasks_in_range(start, end):
 
 
 def create_task(title, due_date, assignee=None):
-    project_id = get_or_create_chores_project()
+    project_id = get_or_create_tasks_project()
     params = {
         "title": title,
         "project_id": project_id,
@@ -184,18 +215,21 @@ def create_task(title, due_date, assignee=None):
         params["owner_id"] = get_or_create_person(assignee)
     task_id = rpc("createTask", params)
     if not task_id or task_id is True:
-        # Same return-value caveat as createProject -- some Kanboard
-        # versions return a bare boolean from createTask instead of the
-        # new task's real id. Fail loudly rather than silently using a
-        # wrong id that a later edit/close/delete would target by mistake.
-        raise RuntimeError(f"Kanboard createTask did not return a usable task id (got {task_id!r})")
+        # createTask returning a bare `false` (not an error, a clean RPC
+        # response whose result IS false) means Kanboard itself rejected
+        # the create -- commonly an owner_id that doesn't reference a
+        # real user (now hardened against in get_or_create_person above)
+        # or a project_id it doesn't recognize. Echo back what was sent
+        # so a real failure here is diagnosable instead of a bare "got
+        # False" with no way to tell which field caused it.
+        raise RuntimeError(f"Kanboard createTask rejected the task (returned {task_id!r}) for params={params!r}")
     task_id = int(task_id)
     # Read the task back and confirm its due date actually round-trips --
     # if _to_kb_date()'s assumed format isn't what this Kanboard version
     # wants, the task still gets created (so it'd look like success) but
     # with no (or the wrong) due date, which is exactly what would make
     # it silently never appear in get_tasks_in_range()'s calendar query.
-    # Catching that here, loudly, beats a newly-planned chore just not
+    # Catching that here, loudly, beats a newly-planned task just not
     # showing up with no explanation.
     created = rpc("getTask", {"task_id": task_id}) or {}
     if _from_kb_date(created.get("date_due")) != due_date.isoformat():

@@ -74,6 +74,11 @@
     <span id="processing-banner-message"></span>
   </div>
 
+  <!-- Plain (non-module) script, deliberately: a missing/broken
+       js/config.js here only fails this one line, not every tab's module
+       that reads window.HOST_IP -- a static `import` from each tab would
+       instead take that whole tab's module down if this file 404s. -->
+  <script src="js/config.js"></script>
   <script type="module" src="js/core.js"></script>
   <script type="module" src="js/static-apps.js"></script>
   <script type="module" src="js/mealie.js"></script>
