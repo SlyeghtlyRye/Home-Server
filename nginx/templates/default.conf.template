@@ -128,6 +128,30 @@ server {
     location /api/swap-days {
             proxy_pass http://172.17.0.1:9001/api/swap-days?key=${TRIGGER_SECRET};
     }
+    location /data/kanboard-range-tasks {
+            proxy_pass http://172.17.0.1:9001/data/kanboard-range-tasks?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
+    }
+    location /data/kanboard-people {
+            proxy_pass http://172.17.0.1:9001/data/kanboard-people?key=${TRIGGER_SECRET};
+    }
+    location /api/save-kanboard-token {
+            proxy_pass http://172.17.0.1:9001/api/save-kanboard-token?key=${TRIGGER_SECRET};
+    }
+    location /api/kanboard-create-task {
+            proxy_pass http://172.17.0.1:9001/api/kanboard-create-task?key=${TRIGGER_SECRET};
+    }
+    location /api/kanboard-update-task {
+            proxy_pass http://172.17.0.1:9001/api/kanboard-update-task?key=${TRIGGER_SECRET};
+    }
+    location /api/kanboard-close-task {
+            proxy_pass http://172.17.0.1:9001/api/kanboard-close-task?key=${TRIGGER_SECRET};
+    }
+    location /api/kanboard-open-task {
+            proxy_pass http://172.17.0.1:9001/api/kanboard-open-task?key=${TRIGGER_SECRET};
+    }
+    location /api/kanboard-remove-task {
+            proxy_pass http://172.17.0.1:9001/api/kanboard-remove-task?key=${TRIGGER_SECRET};
+    }
     location /data/syncthing-instances {
             proxy_pass http://172.17.0.1:9001/data/syncthing-instances?key=${TRIGGER_SECRET};
     }

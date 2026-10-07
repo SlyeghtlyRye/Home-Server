@@ -262,8 +262,9 @@
     .cal-day.excluded { border-color: #a55; opacity: 0.5; text-decoration: line-through; }
     .cal-daynum { font-weight: bold; }
     .cal-meal { font-size: 10px; color: var(--color-text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cal-meal-extra { font-size: 9px; color: var(--color-text-muted); }
     .cal-loading { text-align: center; padding: 40px 0; color: var(--color-text-muted); }
-    .cal-day.view-selected, .cal-day.edit-selected { border-color: var(--color-accent) !important; background: var(--color-selected-bg); }
+    .cal-day.view-selected, .cal-day.edit-selected, .cal-day.kb-selected { border-color: var(--color-accent) !important; background: var(--color-selected-bg); }
     .mode-toggle { display: inline-flex; gap: 4px; background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 3px; }
     .mode-toggle button { background: transparent; border: none; color: var(--color-text-dim); padding: 6px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; }
     .mode-toggle button.active { background: var(--color-selected-bg); color: white; }
@@ -274,7 +275,7 @@
     .meal-empty { color: var(--color-text-muted); font-size: 14px; font-style: italic; }
     .meal-link { color: var(--color-accent); font-size: 14px; cursor: pointer; }
     .meal-link:hover { text-decoration: underline; }
-    #mode-panel {
+    #mode-panel, #kb-mode-panel {
       display: none;
       position: fixed;
       left: 50%;
@@ -283,7 +284,7 @@
       width: min(760px, calc(100% - 32px));
       z-index: 200;
     }
-    #mode-panel.show { display: block; }
+    #mode-panel.show, #kb-mode-panel.show { display: block; }
     .mode-panel-inner {
       position: relative;
       background: var(--color-surface);

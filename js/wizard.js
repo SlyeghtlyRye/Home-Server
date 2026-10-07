@@ -1,8 +1,8 @@
 // wizard.js -- first-time setup wizard. Self-contained: checks
 // /data/setup-status on page load and, if incomplete, injects a banner
-// above the grid with a 2-step flow (Mealie token, Streams profile).
-// Deliberately does not modify core.js -- adding this feature only
-// required this one new file plus its own <script> tag.
+// above the grid with a 3-step flow (Mealie token, Streams profile,
+// Kanboard token). Deliberately does not modify core.js -- adding this
+// feature only required this one new file plus its own <script> tag.
 
 async function checkSetupStatus() {
   try {
@@ -26,7 +26,7 @@ function showWizardBanner(status) {
   banner.innerHTML = `
     <h3>&#x1F527; Finish setup</h3>
     <p style="color:var(--color-text-dim); font-size:14px;">
-      A couple of things need to be set up before Mealie and Streams are fully ready.
+      A couple of things need to be set up before Mealie, Streams, and Kanboard are fully ready.
     </p>
     <div id="wizard-steps"></div>
   `;
@@ -38,6 +38,7 @@ function renderWizardSteps(status) {
   const el = document.getElementById('wizard-steps');
   const mealieDone = status.mealie_token_valid;
   const profileDone = status.has_streams_profile;
+  const kanboardDone = status.kanboard_token_valid;
 
   el.innerHTML = `
     <div class="preview-row">
@@ -54,7 +55,14 @@ function renderWizardSteps(status) {
         <button class="btn small" data-action="create-profile">Create</button>
       ` : `<span style="color:var(--color-text-muted); font-size:13px;">Created</span>`}
     </div>
-    ${mealieDone && profileDone ? `
+    <div class="preview-row">
+      <span class="date">${kanboardDone ? '&#x2705;' : '&#x2B1C;'} Kanboard API token</span>
+      ${!kanboardDone ? `
+        <input type="text" id="wizard-kanboard-token" placeholder="Paste your Kanboard API token" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <button class="btn small" data-action="save-kanboard-token">Save</button>
+      ` : `<span style="color:var(--color-text-muted); font-size:13px;">Connected</span>`}
+    </div>
+    ${mealieDone && profileDone && kanboardDone ? `
       <p style="color:var(--color-text-dim); font-size:13px; margin-top:10px;">
         All set! This banner will disappear on your next visit.
       </p>
@@ -80,6 +88,32 @@ async function saveMealieToken() {
       renderWizardSteps(status);
     } else {
       alert('That token did not work -- double check it in Mealie under Settings -> API Tokens and try again.');
+      input.disabled = false;
+    }
+  } catch (err) {
+    alert('Error: ' + err);
+    input.disabled = false;
+  }
+}
+
+async function saveKanboardToken() {
+  const input = document.getElementById('wizard-kanboard-token');
+  const token = input.value.trim();
+  if (!token) return;
+  input.disabled = true;
+  try {
+    const res = await fetch('/api/save-kanboard-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+    const data = await res.json();
+    if (data.valid) {
+      const statusRes = await fetch('/data/setup-status');
+      const status = await statusRes.json();
+      renderWizardSteps(status);
+    } else {
+      alert('That token did not work -- double check it in Kanboard under Settings -> API and try again.');
       input.disabled = false;
     }
   } catch (err) {
@@ -118,6 +152,7 @@ function wireDelegatedListeners() {
   document.getElementById('grid-view').addEventListener('click', (e) => {
     if (e.target.closest('[data-action="save-token"]')) { saveMealieToken(); return; }
     if (e.target.closest('[data-action="create-profile"]')) { createFirstProfile(); return; }
+    if (e.target.closest('[data-action="save-kanboard-token"]')) { saveKanboardToken(); return; }
   });
 }
 

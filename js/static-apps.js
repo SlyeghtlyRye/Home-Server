@@ -11,10 +11,3 @@ registerApp('pihole', {
   `,
 });
 
-registerApp('kanboard', {
-  title: '&#x2713; Kanboard',
-  bodyHtml: `
-    <p style="color:#888;">Chores & tasks board.</p>
-    <a class="goto-btn" href="http://${HOST_IP}:3000" target="_blank">Open Kanboard &rarr;</a>
-  `,
-});

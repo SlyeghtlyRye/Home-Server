@@ -13,11 +13,12 @@ from datetime import date, timedelta
 sys.path.insert(0, "/root/scripts")
 import mealie_weekly_plan as mwp
 import syncthing_client as stc
+import kanboard_client as kbc
 
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
 
-from config import TRIGGER_SECRET as SECRET, MEALIE_TOKEN_FILE as MEALIE_TOKEN_FILE_PATH
+from config import TRIGGER_SECRET as SECRET, MEALIE_TOKEN_FILE as MEALIE_TOKEN_FILE_PATH, KANBOARD_TOKEN_FILE as KANBOARD_TOKEN_FILE_PATH
 DOCS_DIR = "/root/docs"
 import system_status
 import reset_manager
@@ -199,11 +200,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 has_profile = len(alib.load_profiles()) > 0
             except Exception:
                 has_profile = False
+            kanboard_token_exists = os.path.exists(KANBOARD_TOKEN_FILE_PATH)
+            kanboard_ok = False
+            if kanboard_token_exists:
+                try:
+                    kbc.get_or_create_chores_project()
+                    kanboard_ok = True
+                except Exception:
+                    kanboard_ok = False
             self._send_json(200, {
                 "mealie_token_exists": token_exists,
                 "mealie_token_valid": mealie_ok,
                 "has_streams_profile": has_profile,
-                "setup_complete": mealie_ok and has_profile,
+                "kanboard_token_exists": kanboard_token_exists,
+                "kanboard_token_valid": kanboard_ok,
+                "setup_complete": mealie_ok and has_profile and kanboard_ok,
             })
             return
         if parsed.path == "/api/check-update":
@@ -313,6 +324,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     last_exc = e
                     time.sleep(0.5)
             self._send_json(500, {"error": str(last_exc)})
+            return
+
+        if parsed.path == "/data/kanboard-range-tasks":
+            start_s = params.get("start", [None])[0]
+            end_s = params.get("end", [None])[0]
+            if not start_s or not end_s:
+                self._send_json(400, {"error": "missing start/end"})
+                return
+            try:
+                start = date.fromisoformat(start_s)
+                end = date.fromisoformat(end_s)
+                self._send_json(200, {"days": kbc.get_tasks_in_range(start, end)})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/kanboard-people":
+            try:
+                self._send_json(200, {"people": kbc.get_all_people()})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/data/available-weeks":
@@ -569,6 +601,96 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok", "valid": True})
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/save-kanboard-token":
+            body = self._read_json_body()
+            token = (body.get("token") or "").strip()
+            if not token:
+                self._send_json(400, {"error": "missing token"})
+                return
+            with open(KANBOARD_TOKEN_FILE_PATH, "w") as f:
+                f.write(token)
+            try:
+                kbc.get_or_create_chores_project()
+                self._send_json(200, {"status": "ok", "valid": True})
+            except Exception as e:
+                self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/kanboard-create-task":
+            body = self._read_json_body()
+            title = (body.get("title") or "").strip()
+            date_s = body.get("date")
+            assignee = (body.get("assignee") or "").strip() or None
+            recurrence = body.get("recurrence") or {"type": "single"}
+            if not title or not date_s:
+                self._send_json(400, {"error": "missing title/date"})
+                return
+            try:
+                start = date.fromisoformat(date_s)
+                if recurrence.get("type") == "single":
+                    created = [kbc.create_task(title, start, assignee=assignee)]
+                else:
+                    interval_days = {"interval": recurrence.get("days", 1), "weekly": 7, "biweekly": 14}[recurrence["type"]]
+                    count = int(recurrence.get("count", 8))
+                    created = kbc.create_recurring_tasks(title, interval_days, start, count, assignee=assignee)
+                self._send_json(200, {"created": created})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/kanboard-update-task":
+            body = self._read_json_body()
+            task_id = body.get("id")
+            if not task_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                due_date = date.fromisoformat(body["date"]) if body.get("date") else None
+                kbc.update_task(task_id, title=body.get("title"), due_date=due_date, assignee=body.get("assignee"))
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/kanboard-close-task":
+            body = self._read_json_body()
+            task_id = body.get("id")
+            if not task_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                kbc.close_task(task_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/kanboard-open-task":
+            body = self._read_json_body()
+            task_id = body.get("id")
+            if not task_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                kbc.open_task(task_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/kanboard-remove-task":
+            body = self._read_json_body()
+            task_id = body.get("id")
+            if not task_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                kbc.remove_task(task_id)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
 
         if parsed.path == "/api/save-syncthing-instance":
