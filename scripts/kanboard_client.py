@@ -1,5 +1,6 @@
 import itertools
 import re
+import time
 import uuid
 import requests
 from datetime import date, datetime, timedelta
@@ -46,11 +47,14 @@ def rpc(method, params=None):
 
 
 def _to_kb_date(d):
-    # NOTE: assumed ISO date string. Kanboard's documented date format for
-    # task date fields varies by endpoint/version -- if real creates/updates
-    # silently land on the wrong day (or error), this is the first thing to
-    # check against the live instance.
-    return d.isoformat()
+    # Confirmed against the live instance: sending an ISO date string
+    # ("2026-10-06") made date_due come back as the literal moment of the
+    # create call instead of the requested date -- Kanboard silently
+    # defaulting to "now" rather than erroring is the signature of a
+    # string it couldn't parse. A raw unix timestamp at local midnight
+    # works instead, and matches _from_kb_date()'s read path
+    # (date.fromtimestamp, also local time) so writes and reads agree.
+    return int(time.mktime(d.timetuple()))
 
 
 def _from_kb_date(value):

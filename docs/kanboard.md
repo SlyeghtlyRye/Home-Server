@@ -159,13 +159,28 @@ this Kanboard version, or already a member) -- this is a plausible fix
 for a failure mode that's hard to fully confirm without the live
 instance's exact version, not a verified-correct one yet.
 
+**`date_due`'s format is now confirmed, not assumed.** Sending the ISO
+date string `_to_kb_date()` used to send (`"2026-10-06"`) created the
+task, but its `date_due` came back as the literal unix timestamp of the
+moment the API call ran -- the task-creation-time verification check
+(see above) caught this immediately. That's the signature of Kanboard
+silently defaulting to "now" when it can't parse a date string, rather
+than erroring. `_to_kb_date()` now sends a raw unix timestamp at local
+midnight instead (`int(time.mktime(d.timetuple()))`), matching
+`_from_kb_date()`'s read path (`date.fromtimestamp`, also local time) so
+writes and reads agree. One real task got created with the wrong date
+before this fix landed -- worth deleting via Edit mode if it's still
+sitting on the board with today's date instead of whatever day was
+actually picked.
+
 ## Known gaps (intentional, for a later pass)
 
 - No "edit the whole series," no skip-one-occurrence-without-deleting.
-- No validation that the live instance's actual JSON-RPC auth convention
-  (username `jsonrpc`), `date_due` format (assumed ISO `YYYY-MM-DD`), or
-  `createUser`'s `disable_login_form` param match what's implemented --
-  the first real create/update call against the live instance is the
-  place to confirm all three.
+- `date_due`'s format is now confirmed (unix timestamp -- see above); the
+  `jsonrpc` auth username and `createUser`'s `disable_login_form` param
+  are still unverified against the live instance's exact version.
+- `_ensure_project_member()`'s `addProjectUser` call is a plausible fix,
+  not yet confirmed -- if assigning someone still rejects the task, that
+  rules this theory out rather than confirming it.
 - No visual distinction yet for "all tasks done" vs "something still
   open" on a calendar day beyond the task list itself.
