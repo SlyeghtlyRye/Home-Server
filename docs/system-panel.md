@@ -102,6 +102,20 @@ that "no visible effect" and "no error" are not the same claim, and it's
 worth checking the console specifically before assuming a click handler
 never fired at all.
 
+**A second, related bug: every "it's back up" success modal was stuck
+open forever, with no way to dismiss it.** All four restart-and-poll
+success paths (container restart, nginx, mealie-trigger,
+host service) called `showStatusModal(message, 'success')` directly.
+`'success'` kind explicitly hides the dismiss button in `core.js`
+(`dismiss.style.display = 'none'`) -- it's meant for callers that close
+the modal themselves, via `showSuccessThenClose()`'s auto-hide timer,
+which none of these four call sites did. All four now call
+`showSuccessThenClose(message, 2500)` instead (a slightly longer delay
+than the default 1500ms, since these follow a 15-30s wait the person
+likely wants a moment to actually read). `error` kind was never affected
+-- it already shows a dismiss button, since errors are meant to require
+acknowledgment rather than auto-close.
+
 ## Container actions: Restart and Details, same pattern as Host Services
 
 Each Containers row also has a **Restart** button and a **Details**

@@ -3,7 +3,7 @@
 // typed confirmation, does not restart services itself -- see the log
 // message it returns for the manual follow-up step).
 import { registerApp, showStatusModal, hideStatusModal, showErrorBanner,
-         clearErrorBanner, showConfirmModal, escapeHtml } from './core.js';
+         clearErrorBanner, showConfirmModal, showSuccessThenClose, escapeHtml } from './core.js';
 
 // Three independent cards (Device, Containers, Host Services) instead of
 // one combined /data/system-status fetch the whole panel used to wait on
@@ -192,7 +192,7 @@ async function restartContainer(containerName) {
         }
       }, { intervalMs: 500, timeoutMs: 25000 });
       if (backUp) {
-        showStatusModal('nginx is back up.', 'success');
+        showSuccessThenClose('nginx is back up.', 2500);
         loadBasicsCard();
         loadContainersCard();
         loadServicesCard();
@@ -214,10 +214,11 @@ async function restartContainer(containerName) {
         return false;
       }
     }, { intervalMs: 1000, timeoutMs: 30000 });
-    showStatusModal(
-      backUp ? `"${containerName}" is back up.` : `"${containerName}" hasn't come back up after 30s -- check Details for why.`,
-      backUp ? 'success' : 'error'
-    );
+    if (backUp) {
+      showSuccessThenClose(`"${containerName}" is back up.`, 2500);
+    } else {
+      showStatusModal(`"${containerName}" hasn't come back up after 30s -- check Details for why.`, 'error');
+    }
     loadContainersCard();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
@@ -329,7 +330,7 @@ async function restartService(serviceName) {
         }
       }, { intervalMs: 500, timeoutMs: 25000 });
       if (backUp) {
-        showStatusModal('Backend is back up.', 'success');
+        showSuccessThenClose('Backend is back up.', 2500);
         loadBasicsCard();
         loadContainersCard();
         loadServicesCard();
@@ -351,10 +352,11 @@ async function restartService(serviceName) {
         return false;
       }
     }, { intervalMs: 1000, timeoutMs: 15000 });
-    showStatusModal(
-      backUp ? `"${serviceName}" is back up.` : `"${serviceName}" hasn't come back up after 15s -- check Details for why.`,
-      backUp ? 'success' : 'error'
-    );
+    if (backUp) {
+      showSuccessThenClose(`"${serviceName}" is back up.`, 2500);
+    } else {
+      showStatusModal(`"${serviceName}" hasn't come back up after 15s -- check Details for why.`, 'error');
+    }
     loadServicesCard();
   } catch (err) {
     showStatusModal('Error: ' + err, 'error');
