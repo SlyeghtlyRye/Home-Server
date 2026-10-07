@@ -169,13 +169,28 @@ diff -- they just act on that recommendation differently (see below).
 - **Check for Update** (`/api/check-update`, GET) -- fetches from the git
   remote, reports whether the local commit differs and what changed.
   Always safe, changes nothing.
-- **Install Update** (`/api/apply-update`, POST) -- refuses if there are
-  uncommitted local changes (to avoid a merge conflict on a live device),
-  otherwise does a fast-forward-only `git pull`, backfills any new `.env`
-  keys with sensible defaults from `.env.example` (non-interactively,
-  since a web request can't wait on terminal input), regenerates the docs
-  index and architecture map, then **restarts only what the pulled diff
-  actually touched, automatically, in the background** -- no SSH needed.
+- **Install Update** (`/api/apply-update`, POST `{force?}`) -- refuses if
+  there are uncommitted local changes (to avoid a merge conflict on a live
+  device), otherwise does a fast-forward-only `git pull`, backfills any
+  new `.env` keys with sensible defaults from `.env.example`
+  (non-interactively, since a web request can't wait on terminal input),
+  regenerates the docs index and architecture map, then **restarts only
+  what the pulled diff actually touched, automatically, in the
+  background** -- no SSH needed.
+
+  **The uncommitted-changes refusal can be bypassed from the dashboard,
+  not just the CLI.** `update.sh` has always had a "Continue anyway?"
+  prompt for this; the dashboard didn't, which meant a real but harmless
+  local modification (e.g. a generated file that happened to be tracked --
+  see `js/config.js`'s history) turned into "SSH in or you're stuck."
+  `apply_update()` now takes `force=False` and, when refusing, also
+  returns `can_force: true` so the frontend knows this specific refusal
+  (not some other failure) is safe to offer a retry for.
+  `installUpdate(force)` in `js/system.js` shows that choice via
+  `showConfirmModal()` and retries with `force: true` on confirm. Forcing
+  does not skip `git pull --ff-only` itself -- if the local change
+  actually conflicts with what's incoming, the pull still fails, now with
+  the real git error surfaced in the message instead of a generic one.
 
   **The frontend polls for the restart actually finishing, rather than
   guessing a fixed wait time.** An earlier version said "refresh in about

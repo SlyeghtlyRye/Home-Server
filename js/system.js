@@ -556,12 +556,28 @@ async function pollForBackendRecovery({ timeoutMs = 60000 } = {}) {
   return false;
 }
 
-async function installUpdate() {
-  showStatusModal('Installing update...', 'loading');
+async function installUpdate(force) {
+  showStatusModal(force ? 'Installing update (forced)...' : 'Installing update...', 'loading');
   try {
-    const res = await fetch('/api/apply-update', { method: 'POST' });
+    const res = await fetch('/api/apply-update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: !!force })
+    });
     const data = await res.json();
     if (data.status !== 'ok') {
+      // can_force means this was specifically the uncommitted-changes
+      // refusal, not some other failure -- the CLI (update.sh) has
+      // always had a "Continue anyway?" escape hatch for exactly this,
+      // offering the same choice here brings the dashboard up to the
+      // same capability rather than leaving it as a dead end.
+      if (data.can_force && !force) {
+        hideStatusModal();
+        showConfirmModal(
+          `${data.message}\n\nForce the update anyway? Local changes could conflict with it.`
+        ).then(confirmed => { if (confirmed) installUpdate(true); });
+        return;
+      }
       showStatusModal(data.message || 'Update failed.', 'error');
       return;
     }

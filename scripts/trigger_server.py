@@ -559,8 +559,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
         if parsed.path == "/api/apply-update":
+            body = self._read_json_body()
             try:
-                self._send_json(200, updater.apply_update())
+                self._send_json(200, updater.apply_update(force=bool(body.get("force"))))
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

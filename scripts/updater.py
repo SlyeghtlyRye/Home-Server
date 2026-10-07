@@ -242,14 +242,22 @@ def _describe_restart_plan(plan):
     )
 
 
-def apply_update():
+def apply_update(force=False):
     log_lines = []
 
-    if has_local_changes():
+    if has_local_changes() and not force:
         return {
             "status": "error",
             "message": "There are uncommitted local changes -- resolve those "
                        "first (commit or discard them) before updating.",
+            # Tells the dashboard it's safe to offer a "force anyway"
+            # option -- the CLI (update.sh) has always had this same
+            # escape hatch via its "Continue anyway?" prompt, this just
+            # brings the dashboard up to the same capability. Forcing
+            # doesn't skip `git pull --ff-only` itself -- if the local
+            # changes actually conflict with what's incoming, the pull
+            # below still fails, just with a clearer message than before.
+            "can_force": True,
         }
 
     local_before = get_local_commit()
@@ -261,7 +269,15 @@ def apply_update():
     changed_files = get_changed_files(local_before, remote)
 
     log_lines.append(f"Pulling changes ({local_before[:8]} -> {remote[:8]})...")
-    _run(["git", "pull", "--ff-only", "origin", "main"])
+    try:
+        _run(["git", "pull", "--ff-only", "origin", "main"])
+    except subprocess.CalledProcessError as e:
+        return {
+            "status": "error",
+            "message": "git pull failed, likely a real conflict between your "
+                       "local changes and the incoming update (not just an "
+                       "uncommitted-changes warning this time):\n" + (e.stderr or str(e)),
+        }
     log_lines.append("Pulled successfully.")
 
     env_keys_added = _auto_fill_new_env_values(log_lines)
