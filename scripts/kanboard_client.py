@@ -176,6 +176,24 @@ def get_or_create_person(display_name):
     return match["id"]
 
 
+def _ensure_project_member(project_id, user_id):
+    """Kanboard's web UI only ever lets you assign a task to a member of
+    that task's project -- the API's createTask/updateTask may enforce
+    the same rule even though owner_id is just a plain user id with no
+    project scoping in the request itself. A real, reproduced symptom of
+    this: createTask returning bare `false` for an otherwise well-formed
+    request with a brand new person's (valid, real) owner_id -- every
+    person this client creates only ever exists as a bare user, never
+    added to the one project this app ever creates tasks in. Best-effort:
+    if addProjectUser isn't the right method name/params for this
+    Kanboard version, or the user is already a member, this silently
+    no-ops rather than blocking the task create over a side effect."""
+    try:
+        rpc("addProjectUser", {"project_id": project_id, "user_id": user_id})
+    except RuntimeError:
+        pass
+
+
 def get_tasks_in_range(start, end):
     """Returns {iso_date: [{id, title, done, assignee}, ...]} for every
     task (open or closed) due within [start, end] -- plural per day,
@@ -212,7 +230,9 @@ def create_task(title, due_date, assignee=None):
         "date_due": _to_kb_date(due_date),
     }
     if assignee:
-        params["owner_id"] = get_or_create_person(assignee)
+        owner_id = get_or_create_person(assignee)
+        _ensure_project_member(project_id, owner_id)
+        params["owner_id"] = owner_id
     task_id = rpc("createTask", params)
     if not task_id or task_id is True:
         # createTask returning a bare `false` (not an error, a clean RPC
@@ -262,7 +282,12 @@ def update_task(task_id, title=None, due_date=None, assignee=None):
     if due_date is not None:
         params["date_due"] = _to_kb_date(due_date)
     if assignee is not None:
-        params["owner_id"] = get_or_create_person(assignee) if assignee.strip() else 0
+        if assignee.strip():
+            owner_id = get_or_create_person(assignee)
+            _ensure_project_member(int(task["project_id"]), owner_id)
+            params["owner_id"] = owner_id
+        else:
+            params["owner_id"] = 0
     rpc("updateTask", params)
 
 

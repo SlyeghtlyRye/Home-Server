@@ -145,6 +145,20 @@ still rejects something, now echoes back the exact params sent rather
 than a bare "got False", so the next failure (whatever it turns out to
 be) is diagnosable from the error popup alone.
 
+That diagnostic immediately caught the next one: `createTask` still
+rejected a well-formed request (`owner_id` now a confirmed-real user id)
+with the same bare `False`. Kanboard's web UI only ever lets you assign a
+task to a *member of that task's project* -- a brand new person created
+by `get_or_create_person()` is a real user row, but was never added to
+the one project this app creates tasks in, so assigning them likely fails
+the same membership rule even though `owner_id` itself is valid.
+`_ensure_project_member()` now calls `addProjectUser` before attaching a
+new or existing person as `owner_id`, in both `create_task()` and
+`update_task()`. Best-effort/silent on failure (wrong method name for
+this Kanboard version, or already a member) -- this is a plausible fix
+for a failure mode that's hard to fully confirm without the live
+instance's exact version, not a verified-correct one yet.
+
 ## Known gaps (intentional, for a later pass)
 
 - No "edit the whole series," no skip-one-occurrence-without-deleting.
