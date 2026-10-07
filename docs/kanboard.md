@@ -159,26 +159,48 @@ this Kanboard version, or already a member) -- this is a plausible fix
 for a failure mode that's hard to fully confirm without the live
 instance's exact version, not a verified-correct one yet.
 
-**`date_due`'s format is now confirmed, not assumed.** Sending the ISO
-date string `_to_kb_date()` used to send (`"2026-10-06"`) created the
-task, but its `date_due` came back as the literal unix timestamp of the
-moment the API call ran -- the task-creation-time verification check
-(see above) caught this immediately. That's the signature of Kanboard
-silently defaulting to "now" when it can't parse a date string, rather
-than erroring. `_to_kb_date()` now sends a raw unix timestamp at local
-midnight instead (`int(time.mktime(d.timetuple()))`), matching
-`_from_kb_date()`'s read path (`date.fromtimestamp`, also local time) so
-writes and reads agree. One real task got created with the wrong date
-before this fix landed -- worth deleting via Edit mode if it's still
-sitting on the board with today's date instead of whatever day was
-actually picked.
+**`date_due`'s format: confirmed against Kanboard v1.2.52's own source,
+not assumed, after a first attempt that was actually wrong.** The real
+story turned out to be more subtle than "pick the right format":
+
+- `DateParser::getTimestamp()` (`app/Core/DateParser.php`) tries a list
+  of format strings via PHP's `DateTime::createFromFormat()`, and plain
+  ISO date (`'Y-m-d'`) is one of them -- so `_to_kb_date()`'s original
+  `d.isoformat()` was correct all along. The apparent symptom (a newly
+  created task's `date_due` coming back as "right now" instead of the
+  requested day) wasn't Kanboard failing to parse the string -- it was
+  `DateTime::createFromFormat('Y-m-d', ...)` only filling in the date
+  fields the format mentions; since `'Y-m-d'` says nothing about time,
+  hour/minute/second come out as whatever Kanboard's clock reads as
+  "now". The actual calendar *day* was right the entire time -- this was
+  misdiagnosed as broken because only the full timestamp was checked,
+  not the date portion alone.
+- A raw unix timestamp (int or numeric string) is **not** accepted --
+  `createTask`/`updateTask` both reject it outright (bare `false`)
+  before it reaches the date parser at all. `_to_kb_date()` briefly sent
+  this (a regression introduced while chasing the misdiagnosis above)
+  and has been reverted back to the plain ISO date string.
+- The one thing that *was* a real bug: **Kanboard's container had no
+  `TZ` set** (unlike Mealie's, which gets `TZ=${TIMEZONE}`), so it was
+  almost certainly running in UTC while reading "now" to fill in that
+  leftover time-of-day -- a real day-boundary mismatch risk right around
+  local midnight. `docker-compose.yml`'s `kanboard` service now gets
+  `TZ=${TIMEZONE}` too, matching Mealie.
+
+All of this was confirmed empirically against the live instance (version
+via `getVersion`, exact behavior via one-off `kanboard_client.rpc()`
+calls over SSH) before landing the fix, rather than guessing another
+format blind. A couple of real tasks got created with the wrong
+date/time-of-day while diagnosing this -- worth deleting via Edit mode
+if any are still sitting on the board (titles starting `diag-` are the
+throwaway test ones from the SSH session, safe to delete outright).
 
 ## Known gaps (intentional, for a later pass)
 
 - No "edit the whole series," no skip-one-occurrence-without-deleting.
-- `date_due`'s format is now confirmed (unix timestamp -- see above); the
-  `jsonrpc` auth username and `createUser`'s `disable_login_form` param
-  are still unverified against the live instance's exact version.
+- `date_due`'s format is now confirmed (ISO date string -- see above);
+  the `jsonrpc` auth username and `createUser`'s `disable_login_form`
+  param are still unverified against the live instance's exact version.
 - `_ensure_project_member()`'s `addProjectUser` call is a plausible fix,
   not yet confirmed -- if assigning someone still rejects the task, that
   rules this theory out rather than confirming it.

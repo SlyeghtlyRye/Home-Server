@@ -1,6 +1,5 @@
 import itertools
 import re
-import time
 import uuid
 import requests
 from datetime import date, datetime, timedelta
@@ -47,14 +46,26 @@ def rpc(method, params=None):
 
 
 def _to_kb_date(d):
-    # Confirmed against the live instance: sending an ISO date string
-    # ("2026-10-06") made date_due come back as the literal moment of the
-    # create call instead of the requested date -- Kanboard silently
-    # defaulting to "now" rather than erroring is the signature of a
-    # string it couldn't parse. A raw unix timestamp at local midnight
-    # works instead, and matches _from_kb_date()'s read path
-    # (date.fromtimestamp, also local time) so writes and reads agree.
-    return int(time.mktime(d.timetuple()))
+    # Confirmed against Kanboard v1.2.52's own source
+    # (app/Core/DateParser.php): createTask/updateTask's date_due is
+    # parsed by DateParser::getTimestamp(), which tries a list of format
+    # strings via PHP's DateTime::createFromFormat() -- 'Y-m-d' (plain
+    # ISO date) is one of them, so a bare date string is genuinely
+    # correct here. A raw unix timestamp (what this used to send) is
+    # NOT accepted -- Kanboard's validator rejects it outright
+    # (createTask/updateTask both return bare `false`) before it ever
+    # reaches the parser, confirmed empirically against the live
+    # instance. The one real wrinkle: DateTime::createFromFormat only
+    # fills in the fields the format mentions -- since 'Y-m-d' says
+    # nothing about time, the hour/minute/second end up as whatever
+    # Kanboard's own clock reads as "now" at the moment of the call, not
+    # midnight. That's harmless for a due-*date* (we only read the date
+    # portion back, see _from_kb_date), as long as Kanboard's container
+    # clock agrees with everyone else's on what day it is -- see the
+    # `TZ` env var added to the kanboard service in docker-compose.yml,
+    # since it previously had none and likely defaulted to UTC while the
+    # rest of this stack runs on the configured local TIMEZONE.
+    return d.isoformat()
 
 
 def _from_kb_date(value):
@@ -188,14 +199,18 @@ def _ensure_project_member(project_id, user_id):
     this: createTask returning bare `false` for an otherwise well-formed
     request with a brand new person's (valid, real) owner_id -- every
     person this client creates only ever exists as a bare user, never
-    added to the one project this app ever creates tasks in. Best-effort:
-    if addProjectUser isn't the right method name/params for this
-    Kanboard version, or the user is already a member, this silently
-    no-ops rather than blocking the task create over a side effect."""
+    added to the one project this app ever creates tasks in.
+
+    Does NOT swallow the error silently anymore -- the first version of
+    this did, and that turned out to hide whether addProjectUser was even
+    the right call for this Kanboard version, making the next failure
+    just as unexplained as this one. Returns the error message (if any)
+    so create_task() can surface it instead of guessing again."""
     try:
         rpc("addProjectUser", {"project_id": project_id, "user_id": user_id})
-    except RuntimeError:
-        pass
+        return None
+    except RuntimeError as e:
+        return str(e)
 
 
 def get_tasks_in_range(start, end):
@@ -233,9 +248,10 @@ def create_task(title, due_date, assignee=None):
         "project_id": project_id,
         "date_due": _to_kb_date(due_date),
     }
+    membership_error = None
     if assignee:
         owner_id = get_or_create_person(assignee)
-        _ensure_project_member(project_id, owner_id)
+        membership_error = _ensure_project_member(project_id, owner_id)
         params["owner_id"] = owner_id
     task_id = rpc("createTask", params)
     if not task_id or task_id is True:
@@ -243,10 +259,13 @@ def create_task(title, due_date, assignee=None):
         # response whose result IS false) means Kanboard itself rejected
         # the create -- commonly an owner_id that doesn't reference a
         # real user (now hardened against in get_or_create_person above)
-        # or a project_id it doesn't recognize. Echo back what was sent
-        # so a real failure here is diagnosable instead of a bare "got
-        # False" with no way to tell which field caused it.
-        raise RuntimeError(f"Kanboard createTask rejected the task (returned {task_id!r}) for params={params!r}")
+        # or a project_id it doesn't recognize. Echo back what was sent,
+        # plus whether the addProjectUser attempt above itself failed, so
+        # a real failure here is diagnosable instead of a bare "got False"
+        # with no way to tell which field (or which of this function's own
+        # assumptions) caused it.
+        extra = f" -- addProjectUser also failed: {membership_error}" if membership_error else ""
+        raise RuntimeError(f"Kanboard createTask rejected the task (returned {task_id!r}) for params={params!r}{extra}")
     task_id = int(task_id)
     # Read the task back and confirm its due date actually round-trips --
     # if _to_kb_date()'s assumed format isn't what this Kanboard version

@@ -9,6 +9,31 @@ set -e
 REPO_ROOT="/root"
 cd "$REPO_ROOT"
 
+# One "docker compose up -d --force-recreate" with no service name pulls
+# and extracts every container at once -- fine on a beefy machine, but on
+# a memory-constrained device (seen firsthand: 914Mi total RAM) that peak
+# contention has been enough to corrupt a container's image during
+# extraction, surfacing as a "bad marshal data" crash loop after a
+# routine update. Recreating one service at a time, with a pause between
+# each, spreads the same work out instead of hitting it all
+# simultaneously -- same end state, far lower peak memory/IO pressure.
+# Order respects docker-compose.yml's depends_on (nginx depends on
+# pihole/mealie/kanboard, so those go first), with mealie -- the one
+# full Python app server, and the one that's actually crashed under load
+# -- recreated last, after everything else has had a chance to settle.
+# Mirrors scripts/updater.py's _schedule_background_restart() exactly,
+# so the CLI and the dashboard's Install Update button can't drift onto
+# different restart behavior for the same situation.
+restart_all_containers_staggered() {
+    echo ""
+    echo "== Restarting all containers (one at a time, not all at once) =="
+    for service in syncthing pihole kanboard mealie nginx; do
+        echo "-- recreating $service --"
+        docker compose up -d --force-recreate "$service"
+        sleep 20
+    done
+}
+
 echo "== Checking for updates =="
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -93,7 +118,7 @@ case "$restart_choice" in
     c|C)
         echo ""
         echo "Which containers should be recreated? Space-separated, from:"
-        echo "  pihole kanboard nginx mealie"
+        echo "  pihole kanboard nginx mealie syncthing"
         echo "(type 'all' for every container, or leave blank for none)"
         read -rp "> " chosen_containers
         read -rp "Restart mealie-trigger.service? [y/N] " restart_trigger_choice
@@ -102,7 +127,7 @@ case "$restart_choice" in
             echo ""
             echo "== Restarting containers =="
             if [ "$chosen_containers" = "all" ]; then
-                docker compose up -d --force-recreate
+                restart_all_containers_staggered
             else
                 docker compose up -d --force-recreate $chosen_containers
             fi
@@ -118,9 +143,7 @@ case "$restart_choice" in
         ;;
     *)
         if [ "$NEEDS_COMPOSE_FULL" = "1" ]; then
-            echo ""
-            echo "== Restarting all containers =="
-            docker compose up -d --force-recreate
+            restart_all_containers_staggered
         elif [ "$NEEDS_NGINX_ONLY" = "1" ]; then
             echo ""
             echo "== Restarting nginx container =="

@@ -238,6 +238,26 @@ scoped version can only ever be as safe as the blanket restart it
 replaces, never less -- see `updater.py`'s module docstring for the exact
 classification rules.
 
+**"Everything" recreates one container at a time now, not all at once --
+a real incident, not a hypothetical.** A `docker-compose.yml`/new-`.env`-key
+update on a memory-constrained device (914Mi total RAM, observed
+firsthand) triggered a single `docker compose up -d --force-recreate`
+with no service name, which pulls and extracts every container
+simultaneously -- enough peak memory/IO contention to corrupt a
+container's image mid-extraction, surfacing as Mealie crash-looping on a
+`ValueError: bad marshal data` error that took an overnight retry loop to
+clear. `_schedule_background_restart()` (`scripts/updater.py`) and
+`restart_all_containers_staggered()` (`update.sh`) now recreate each
+service individually with a 20-second pause between them instead --
+`syncthing`, `pihole`, `kanboard`, `mealie`, `nginx` in that order
+(respecting `docker-compose.yml`'s `depends_on`: nginx depends on
+pihole/mealie/kanboard, so those go first), with `mealie` -- the one
+full Python app server, and the one that actually crashed -- last, after
+everything else has had a chance to settle. Both the CLI's "accept
+default" path and the dashboard's Install Update button go through this
+same staggered sequence now, so neither is quietly left on the riskier
+all-at-once behavior while the other gets fixed.
+
 **`dashboard.html` is grouped with nginx.conf, not with js/docs, and this
 was learned the hard way.** It's mounted as a *single-file* bind mount
 (`./dashboard.html:/usr/share/nginx/html/index.html:ro`) rather than a

@@ -20,6 +20,8 @@ services:
   kanboard:
     image: kanboard/kanboard:latest
     container_name: kanboard
+    environment:
+      - TZ=${TIMEZONE}
     volumes:
       - kanboard_data:/var/www/html/data
     ports:

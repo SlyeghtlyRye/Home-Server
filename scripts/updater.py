@@ -305,7 +305,23 @@ def _schedule_background_restart(plan):
 
     steps = []
     if plan["compose_full"]:
-        steps.append("docker compose up -d --force-recreate")
+        # One "docker compose up -d --force-recreate" (no service name)
+        # pulls/extracts every container at once -- fine on a beefy
+        # machine, but on a memory-constrained device (seen firsthand:
+        # 914Mi total RAM) that peak contention has been enough to
+        # corrupt a container's image during extraction, surfacing as a
+        # "bad marshal data" crash loop after a routine update.
+        # Recreating one service at a time, with a pause between each,
+        # spreads the same work out instead of hitting it all at once --
+        # same end state, far lower peak memory/IO pressure. Order
+        # respects docker-compose.yml's depends_on (nginx depends on
+        # pihole/mealie/kanboard, so those go first), with mealie -- the
+        # one full Python app server, and the one that's actually
+        # crashed under load -- recreated last, after everything else
+        # has had a chance to settle.
+        for service in ("syncthing", "pihole", "kanboard", "mealie", "nginx"):
+            steps.append(f"docker compose up -d --force-recreate {service}")
+            steps.append("sleep 20")
     elif plan["nginx_only"]:
         steps.append("docker compose up -d --force-recreate nginx")
     if plan["trigger"]:
