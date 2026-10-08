@@ -8,12 +8,14 @@ import os
 import uuid
 import mimetypes
 import time
-from datetime import date, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 
 sys.path.insert(0, "/root/scripts")
 import mealie_weekly_plan as mwp
 import syncthing_client as stc
 import kanboard_client as kbc
+import holidays_client as hc
+import ical_builder
 
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
@@ -38,11 +40,59 @@ def _parse_hhmm(value):
     return dtime.fromisoformat(value)
 
 
+def _holiday_events(start, end):
+    """Shared by both .ics feeds -- holiday UIDs are deterministic
+    (country+date), so the same holiday appearing in both feeds doesn't
+    collide across the two separate calendars a subscriber would add."""
+    country = hc.get_configured_country()
+    if not country:
+        return []
+    return [
+        {
+            "uid": f"holiday-{country}-{h['date']}",
+            "title": h["name"],
+            "date": date.fromisoformat(h["date"]),
+        }
+        for h in hc.get_holidays_in_range(country, start, end)
+    ]
+
+
+def _kanboard_task_event(d, task):
+    """Converts one kanboard_client.get_tasks_in_range() task dict into
+    an ical_builder event. A task with neither startTime nor dueTime is
+    all-day; one with only one of the two gets a 1-hour block anchored
+    to whichever time it has (a deadline needs *some* duration to render
+    as a timed calendar event, 1 hour is just a reasonable default, not
+    a meaningful commitment)."""
+    uid = f"kanboard-task-{task['id']}"
+    title = task["title"]
+    start_time = _parse_hhmm(task.get("startTime"))
+    due_time = _parse_hhmm(task.get("dueTime"))
+    if start_time and due_time:
+        return {"uid": uid, "title": title, "start": datetime.combine(d, start_time), "end": datetime.combine(d, due_time)}
+    if start_time:
+        start_dt = datetime.combine(d, start_time)
+        return {"uid": uid, "title": title, "start": start_dt, "end": start_dt + timedelta(hours=1)}
+    if due_time:
+        end_dt = datetime.combine(d, due_time)
+        return {"uid": uid, "title": title, "start": end_dt - timedelta(hours=1), "end": end_dt}
+    return {"uid": uid, "title": title, "date": d}
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def _send_json(self, status, payload):
         body = json.dumps(payload).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_text(self, status, content_type, text):
+        body = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -358,6 +408,73 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/data/holiday-countries":
+            self._send_json(200, {"countries": hc.get_supported_countries()})
+            return
+
+        if parsed.path == "/data/holiday-settings":
+            self._send_json(200, {"country": hc.get_configured_country()})
+            return
+
+        if parsed.path == "/data/holidays":
+            start_s = params.get("start", [None])[0]
+            end_s = params.get("end", [None])[0]
+            if not start_s or not end_s:
+                self._send_json(400, {"error": "missing start/end"})
+                return
+            country = hc.get_configured_country()
+            if not country:
+                self._send_json(200, {"holidays": []})
+                return
+            try:
+                start = date.fromisoformat(start_s)
+                end = date.fromisoformat(end_s)
+                self._send_json(200, {"holidays": hc.get_holidays_in_range(country, start, end)})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/mealie-ical":
+            include_holidays = params.get("holidays", ["0"])[0] == "1"
+            start = date.today() - timedelta(days=60)
+            end = date.today() + timedelta(days=180)
+            try:
+                events = []
+                for e in mwp.get_mealplan_entries(start, end):
+                    recipe = e.get("recipe") or {}
+                    if not recipe.get("name"):
+                        continue
+                    events.append({
+                        "uid": f"mealie-mealplan-{e['id']}",
+                        "title": recipe["name"],
+                        "date": date.fromisoformat(e["date"]),
+                    })
+                if include_holidays:
+                    events.extend(_holiday_events(start, end))
+                ics = ical_builder.build_ics("Mealie Meal Plan", events)
+                self._send_text(200, "text/calendar; charset=utf-8", ics)
+            except Exception as e:
+                self._send_text(500, "text/plain", f"Error: {e}")
+            return
+
+        if parsed.path == "/data/kanboard-ical":
+            include_holidays = params.get("holidays", ["0"])[0] == "1"
+            start = date.today() - timedelta(days=60)
+            end = date.today() + timedelta(days=180)
+            try:
+                events = []
+                for iso, tasks in kbc.get_tasks_in_range(start, end).items():
+                    d = date.fromisoformat(iso)
+                    for t in tasks:
+                        events.append(_kanboard_task_event(d, t))
+                if include_holidays:
+                    events.extend(_holiday_events(start, end))
+                ics = ical_builder.build_ics("Kanboard Tasks", events)
+                self._send_text(200, "text/calendar; charset=utf-8", ics)
+            except Exception as e:
+                self._send_text(500, "text/plain", f"Error: {e}")
+            return
+
         if parsed.path == "/data/available-weeks":
             try:
                 weeks = mwp.get_available_weeks()
@@ -628,6 +745,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"status": "ok", "valid": True})
             except Exception as e:
                 self._send_json(200, {"status": "ok", "valid": False, "error": str(e)})
+            return
+
+        if parsed.path == "/api/save-holiday-country":
+            body = self._read_json_body()
+            country = (body.get("country") or "").strip().upper()
+            if country and country not in hc.SUPPORTED_COUNTRIES:
+                self._send_json(400, {"error": f"unsupported country code: {country}"})
+                return
+            hc.save_configured_country(country)
+            self._send_json(200, {"status": "ok"})
             return
 
         if parsed.path == "/api/kanboard-create-task":

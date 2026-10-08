@@ -18,6 +18,9 @@ scripts/meal_history.json
 # Personal data - Kanboard
 scripts/kanboard_token.txt
 
+# Personal data - Calendar settings
+scripts/holiday_country.txt
+
 # Personal data - Syncthing
 scripts/syncthing_config.json
 

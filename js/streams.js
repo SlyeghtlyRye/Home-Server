@@ -334,10 +334,10 @@ function renderBookCard(b) {
               <div class="last-saved-note" id="last-saved-${b.id}">Last saved: not yet this session</div>
               <div class="resume-position-note" id="resume-position-${b.id}">${b.resume_seconds > 0 ? `Resuming from ${formatSeconds(b.resume_seconds)}` : ''}</div>
               <div class="manual-save-row">
-                <button class="btn small" data-action="manual-save-now" data-book-id="${b.id}">Save current position</button>
+                <button class="btn small save" data-action="manual-save-now" data-book-id="${b.id}">Save current position</button>
                 <span class="lbl">or type a time:</span>
                 <input type="text" id="manual-save-input-${b.id}" placeholder="h:mm:ss">
-                <button class="btn small" data-action="manual-save-typed" data-book-id="${b.id}">Save this</button>
+                <button class="btn small save" data-action="manual-save-typed" data-book-id="${b.id}">Save this</button>
               </div>
             </div>
             ${history.length > 0 ? `

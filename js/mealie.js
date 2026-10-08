@@ -5,6 +5,8 @@
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf,
          showProcessingBanner, hideProcessingBanner } from './core.js';
+import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
+         handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- that file
 // is generated per-device and gitignored, so it can legitimately be
 // missing (a fresh clone before first setup, or deploy hiccup); a failed
@@ -17,6 +19,7 @@ const HOST_IP = window.HOST_IP || location.hostname;
 
 let calendarMonth = new Date();
 let plannedMap = {};
+let holidaysByDate = {}; // iso -> holiday name, only populated when shouldShowHolidays('mealie')
 let weekSelection = null;
 let previewPicks = null;
 let previewConflicts = [];
@@ -134,6 +137,18 @@ async function loadMonthMealplan() {
     plannedMap = {};
     showErrorBanner("Couldn't reach the server to load the calendar. Check that it's running and try again.");
   }
+
+  holidaysByDate = {};
+  if (shouldShowHolidays('mealie')) {
+    try {
+      const res = await fetch(`/data/holidays?start=${isoOf(gridStart)}&end=${isoOf(gridEnd)}`);
+      const data = await res.json();
+      (data.holidays || []).forEach(h => { holidaysByDate[h.date] = h.name; });
+    } catch (err) {
+      console.error('Failed to load holidays', err);
+    }
+  }
+
   renderCalendar();
   renderMealOfDay();
   renderModePanel();
@@ -213,6 +228,7 @@ function renderCalendar() {
         <button class="btn small" data-action="next-month">&rarr;</button>
       </div>
       ${weekSelection ? `<button class="btn small clear" data-action="clear-selection">Clear Selection (${Object.keys(weekSelection.days).length} days)</button>` : ''}
+      ${renderSettingsGearHtml('mealie')}
     </div>
     <div class="cal-grid">
       ${['S','M','T','W','T','F','S'].map(d => `<div class="cal-weekday">${d}</div>`).join('')}
@@ -224,6 +240,7 @@ function renderCalendar() {
     const iso = isoOf(d);
     const inMonth = d.getMonth() === month;
     const meal = plannedMap[iso];
+    const holiday = holidaysByDate[iso];
     let cls = 'cal-day';
     if (!inMonth) cls += ' other-month';
     if (iso === todayIso) cls += ' today';
@@ -236,6 +253,7 @@ function renderCalendar() {
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
+        ${holiday ? `<div class="cal-holiday" title="${escapeHtml(holiday)}">${escapeHtml(holiday)}</div>` : ''}
         ${meal ? `<div class="cal-meal">${escapeHtml(meal.name)}</div>` : ''}
       </div>
     `;
@@ -795,8 +813,8 @@ function actionPanelBodyHtml() {
     </p>
     ${weekdayChipsHtml()}
     <div class="btn-stack">
-      <button class="btn" data-action="plan-selected">Plan Selected Days</button>
-      <button class="btn" data-action="cancel-selection">Cancel Selection</button>
+      <button class="btn save" data-action="plan-selected">Plan Selected Days</button>
+      <button class="btn cancel" data-action="cancel-selection">Cancel Selection</button>
       <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
     </div>
   `;
@@ -1020,8 +1038,8 @@ function previewPanelBodyHtml() {
       </div>
     `).join('')}
     <div class="btn-grid" style="margin-top:15px;">
-      <button class="btn" data-action="commit" ${disabled}>Confirm & Save</button>
-      <button class="btn clear" data-action="cancel-preview" ${disabled}>Cancel</button>
+      <button class="btn save" data-action="commit" ${disabled}>Confirm & Save</button>
+      <button class="btn cancel" data-action="cancel-preview" ${disabled}>Cancel</button>
     </div>
   `;
 }
@@ -1563,11 +1581,15 @@ function wireDelegatedListeners() {
 
   const calendarContainer = document.getElementById('calendar-container');
   calendarContainer.addEventListener('click', (e) => {
+    if (handleCalSettingsClick(e, 'mealie', renderCalendar)) return;
     if (e.target.closest('[data-action="prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="next-month"]')) return changeMonth(1);
     if (e.target.closest('[data-action="clear-selection"]')) return clearSelection();
     const dayEl = e.target.closest('.cal-day');
     if (dayEl && dayEl.dataset.iso) return onDayClick(dayEl.dataset.iso);
+  });
+  calendarContainer.addEventListener('change', (e) => {
+    if (handleCalSettingsChange(e, 'mealie', renderCalendar)) return;
   });
 
   // Plan's selection summary / preview, View's day detail, and Edit's form
@@ -1738,5 +1760,6 @@ registerApp('mealie', {
     loadMonthMealplan();
     renderModePanel();
     loadAvailableWeeks();
+    loadCalendarSettingsData();
   },
 });

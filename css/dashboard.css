@@ -263,7 +263,30 @@
     .cal-daynum { font-weight: bold; }
     .cal-meal { font-size: 10px; color: var(--color-text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cal-meal-extra { font-size: 9px; color: var(--color-text-muted); }
+    .cal-holiday { font-size: 9px; color: var(--color-warning); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cal-loading { text-align: center; padding: 40px 0; color: var(--color-text-muted); }
+    .cal-settings-wrap { position: relative; }
+    .cal-settings-gear { background: transparent; border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 6px 10px; font-size: 14px; cursor: pointer; line-height: 1; }
+    .cal-settings-gear:hover { border-color: var(--color-accent); }
+    .cal-settings-popover {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: 6px;
+      width: 260px;
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      padding: 12px;
+      z-index: 50;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.4);
+      text-align: left;
+      font-size: 13px;
+    }
+    .cal-settings-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .cal-settings-row select, .cal-settings-row input[type="text"] { background: var(--color-surface); color: white; border: 1px solid var(--color-border); padding: 6px; border-radius: 4px; font-size: 12px; flex: 1; min-width: 0; }
+    .cal-settings-hint { font-size: 11px; color: var(--color-text-muted); margin: 8px 0 6px; }
+    .cal-settings-feed-url { width: 100%; }
     .cal-day.view-selected, .cal-day.edit-selected, .cal-day.kb-selected { border-color: var(--color-accent) !important; background: var(--color-selected-bg); }
     .mode-toggle { display: inline-flex; gap: 4px; background: var(--color-bg); border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 3px; }
     .mode-toggle button { background: transparent; border: none; color: var(--color-text-dim); padding: 6px 16px; border-radius: 4px; font-size: 13px; cursor: pointer; }

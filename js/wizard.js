@@ -45,21 +45,21 @@ function renderWizardSteps(status) {
       <span class="date">${mealieDone ? '&#x2705;' : '&#x2B1C;'} Mealie API token</span>
       ${!mealieDone ? `
         <input type="text" id="wizard-mealie-token" placeholder="Paste your Mealie API token" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-        <button class="btn small" data-action="save-token">Save</button>
+        <button class="btn small save" data-action="save-token">Save</button>
       ` : `<span style="color:var(--color-text-muted); font-size:13px;">Connected</span>`}
     </div>
     <div class="preview-row">
       <span class="date">${profileDone ? '&#x2705;' : '&#x2B1C;'} First Streams profile</span>
       ${!profileDone ? `
         <input type="text" id="wizard-profile-name" placeholder="e.g. your name" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-        <button class="btn small" data-action="create-profile">Create</button>
+        <button class="btn small save" data-action="create-profile">Create</button>
       ` : `<span style="color:var(--color-text-muted); font-size:13px;">Created</span>`}
     </div>
     <div class="preview-row">
       <span class="date">${kanboardDone ? '&#x2705;' : '&#x2B1C;'} Kanboard API token</span>
       ${!kanboardDone ? `
         <input type="text" id="wizard-kanboard-token" placeholder="Paste your Kanboard API token" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-        <button class="btn small" data-action="save-kanboard-token">Save</button>
+        <button class="btn small save" data-action="save-kanboard-token">Save</button>
       ` : `<span style="color:var(--color-text-muted); font-size:13px;">Connected</span>`}
     </div>
     ${mealieDone && profileDone && kanboardDone ? `

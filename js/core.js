@@ -88,8 +88,8 @@ export function showConfirmModal(message) {
       modal.appendChild(row);
     }
     row.innerHTML = `
-      <button class="btn small clear" id="status-confirm-cancel">Cancel</button>
-      <button class="btn small" id="status-confirm-ok">Confirm</button>
+      <button class="btn small cancel" id="status-confirm-cancel">Cancel</button>
+      <button class="btn small save" id="status-confirm-ok">Confirm</button>
     `;
     row.style.display = 'flex';
     overlay.style.display = 'flex';

@@ -379,8 +379,8 @@ function renderConnectFormInlineHtml(inst) {
         <input type="password" id="st-config-key" placeholder="${editing ? 'Leave blank to keep current key' : 'Paste your API key'}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="btn-grid">
-        <button class="btn small" data-action="save-instance-config">${editing ? 'Save' : 'Connect'}</button>
-        <button class="btn small clear" data-action="cancel-edit-config">Cancel</button>
+        <button class="btn small save" data-action="save-instance-config">${editing ? 'Save' : 'Connect'}</button>
+        <button class="btn small cancel" data-action="cancel-edit-config">Cancel</button>
       </div>
     </div>
   `;
@@ -458,8 +458,8 @@ function renderAddInstanceFormHtml() {
         <input type="password" id="st-new-instance-key" placeholder="Paste its API key" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
       </div>
       <div class="btn-grid">
-        <button class="btn" data-action="add-instance">Connect</button>
-        <button class="btn clear" data-action="cancel-add-instance">Cancel</button>
+        <button class="btn save" data-action="add-instance">Connect</button>
+        <button class="btn cancel" data-action="cancel-add-instance">Cancel</button>
       </div>
     </div>
   `;
@@ -587,8 +587,8 @@ function renderAddDeviceSectionHtml(defaultInstanceId) {
       <input type="text" id="st-add-device-name" placeholder="e.g. Laptop" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
     </div>
     <div class="btn-grid">
-      <button class="btn" data-action="add-device">Add</button>
-      <button class="btn clear" data-action="cancel-add-device">Cancel</button>
+      <button class="btn save" data-action="add-device">Add</button>
+      <button class="btn cancel" data-action="cancel-add-device">Cancel</button>
     </div>
   `;
 }
@@ -952,9 +952,9 @@ function renderSelectiveSyncBody() {
       ${renderSelSyncTreeHtml()}
     </div>
     <div class="btn-grid" style="margin-top:15px;">
-      <button class="btn" data-action="save-selective-sync">Save</button>
+      <button class="btn save" data-action="save-selective-sync">Save</button>
       ${deleteButtonHtml}
-      <button class="btn clear" data-action="close-selective-sync">Cancel</button>
+      <button class="btn cancel" data-action="close-selective-sync">Cancel</button>
     </div>
   `;
 }
@@ -1070,7 +1070,7 @@ function renderRateLimitHtml() {
         <label>Receive (KiB/s)
           <input type="number" id="st-rate-recv" min="0" step="100" value="${rateLimits.maxRecvKbps || 0}">
         </label>
-        <button class="btn small" data-action="save-rate-limits" ${savingRateLimits ? 'disabled' : ''}>${savingRateLimits ? 'Saving...' : 'Save'}</button>
+        <button class="btn small save" data-action="save-rate-limits" ${savingRateLimits ? 'disabled' : ''}>${savingRateLimits ? 'Saving...' : 'Save'}</button>
       </div>
       <p style="color:var(--color-text-muted); font-size:13px;">0 means unlimited. This is Syncthing's own global rate limit, applied here so you don't need to open its native GUI.</p>
     </div>

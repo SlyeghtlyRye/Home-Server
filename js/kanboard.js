@@ -20,6 +20,8 @@
 // (css/dashboard.css), not by sharing one element, for the same reason.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showConfirmModal, escapeHtml, isoOf } from './core.js';
+import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
+         handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- see the
 // matching comment in mealie.js for why (gitignored/per-device file, so
 // a failed import would take this whole module's calendar logic down
@@ -28,6 +30,7 @@ const HOST_IP = window.HOST_IP || location.hostname;
 
 let calendarMonth = new Date();
 let plannedMap = {}; // iso -> [{id, title, done, assignee}, ...]
+let holidaysByDate = {}; // iso -> holiday name, only populated when shouldShowHolidays('kanboard')
 let allPeople = []; // [{id, name}, ...] -- the "assigned to" combo's suggestions
 
 const CALENDAR_MODES = ['plan', 'view', 'edit'];
@@ -114,6 +117,18 @@ async function loadMonthTasks() {
     console.error('Failed to load tasks', err);
     plannedMap = {};
   }
+
+  holidaysByDate = {};
+  if (shouldShowHolidays('kanboard')) {
+    try {
+      const res = await fetch(`/data/holidays?start=${isoOf(gridStart)}&end=${isoOf(gridEnd)}`);
+      const data = await res.json();
+      (data.holidays || []).forEach(h => { holidaysByDate[h.date] = h.name; });
+    } catch (err) {
+      console.error('Failed to load holidays', err);
+    }
+  }
+
   renderCalendar();
   renderDailyTasks();
   renderModePanel();
@@ -165,6 +180,7 @@ function renderCalendar() {
         <h3>${firstOfMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
         <button class="btn small" data-action="kb-next-month">&rarr;</button>
       </div>
+      ${renderSettingsGearHtml('kanboard')}
     </div>
     <div class="cal-grid">
       ${['S','M','T','W','T','F','S'].map(d => `<div class="cal-weekday">${d}</div>`).join('')}
@@ -176,6 +192,7 @@ function renderCalendar() {
     const iso = isoOf(d);
     const inMonth = d.getMonth() === month;
     const tasks = plannedMap[iso] || [];
+    const holiday = holidaysByDate[iso];
     let cls = 'cal-day';
     if (!inMonth) cls += ' other-month';
     if (iso === todayIso) cls += ' today';
@@ -184,6 +201,7 @@ function renderCalendar() {
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
+        ${holiday ? `<div class="cal-holiday" title="${escapeHtml(holiday)}">${escapeHtml(holiday)}</div>` : ''}
         ${tasks.length > 0 ? `<div class="cal-meal">${escapeHtml(tasks[0].title)}</div>` : ''}
         ${tasks.length > 1 ? `<div class="cal-meal-extra">+${tasks.length - 1} more</div>` : ''}
       </div>
@@ -556,10 +574,14 @@ function wireDelegatedListeners() {
 
   const calendarContainer = document.getElementById('kb-calendar-container');
   calendarContainer.addEventListener('click', (e) => {
+    if (handleCalSettingsClick(e, 'kanboard', renderCalendar)) return;
     if (e.target.closest('[data-action="kb-prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="kb-next-month"]')) return changeMonth(1);
     const dayEl = e.target.closest('.cal-day');
     if (dayEl) return onDayClick(dayEl.dataset.iso);
+  });
+  calendarContainer.addEventListener('change', (e) => {
+    if (handleCalSettingsChange(e, 'kanboard', renderCalendar)) return;
   });
 
   const panel = document.getElementById('kb-mode-panel');
@@ -641,5 +663,6 @@ registerApp('kanboard', {
     renderModeToggle();
     loadPeople();
     loadMonthTasks();
+    loadCalendarSettingsData();
   },
 });

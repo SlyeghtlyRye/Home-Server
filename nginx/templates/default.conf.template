@@ -152,6 +152,24 @@ server {
     location /api/kanboard-remove-task {
             proxy_pass http://172.17.0.1:9001/api/kanboard-remove-task?key=${TRIGGER_SECRET};
     }
+    location /data/holiday-countries {
+            proxy_pass http://172.17.0.1:9001/data/holiday-countries?key=${TRIGGER_SECRET};
+    }
+    location /data/holiday-settings {
+            proxy_pass http://172.17.0.1:9001/data/holiday-settings?key=${TRIGGER_SECRET};
+    }
+    location /api/save-holiday-country {
+            proxy_pass http://172.17.0.1:9001/api/save-holiday-country?key=${TRIGGER_SECRET};
+    }
+    location /data/holidays {
+            proxy_pass http://172.17.0.1:9001/data/holidays?key=${TRIGGER_SECRET}&start=$arg_start&end=$arg_end;
+    }
+    location /data/mealie-ical {
+            proxy_pass http://172.17.0.1:9001/data/mealie-ical?key=${TRIGGER_SECRET}&holidays=$arg_holidays;
+    }
+    location /data/kanboard-ical {
+            proxy_pass http://172.17.0.1:9001/data/kanboard-ical?key=${TRIGGER_SECRET}&holidays=$arg_holidays;
+    }
     location /data/syncthing-instances {
             proxy_pass http://172.17.0.1:9001/data/syncthing-instances?key=${TRIGGER_SECRET};
     }
