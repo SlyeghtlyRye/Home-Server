@@ -88,6 +88,7 @@ function renderDailyTasks() {
       ${tasks.map(t => `
         <div class="meal-name" style="font-size:16px; ${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : ''}">
           ${escapeHtml(t.title)}${t.assignee ? ` <span style="font-size:12px; color:var(--color-text-muted); font-weight:normal;">(${escapeHtml(t.assignee)})</span>` : ''}
+          ${timeRangeLabel(t) ? ` <span style="font-size:12px; color:var(--color-text-muted); font-weight:normal;">&middot; ${timeRangeLabel(t)}</span>` : ''}
         </div>
       `).join('')}
     </div>`;
@@ -310,12 +311,17 @@ function planFormHtml(iso) {
     >
     <div style="margin-bottom:10px;">${assigneeComboHtml('plan', '')}</div>
     <div class="preview-row" style="flex-wrap:wrap;">
+      <label>From <input type="time" id="kb-plan-start-time" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+      <label>Until <input type="time" id="kb-plan-due-time" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+      <span style="color:var(--color-text-muted); font-size:12px;">(optional -- leave blank for no specific time)</span>
+    </div>
+    <div class="preview-row" style="flex-wrap:wrap;">
       <label><input type="radio" name="kb-recurrence" value="single" checked> Single day</label>
       <label><input type="radio" name="kb-recurrence" value="interval"> Every <input type="number" id="kb-interval-days" min="1" value="3" style="width:50px;" disabled> days</label>
     </div>
     <div class="preview-row" style="flex-wrap:wrap;">
       <label><input type="radio" name="kb-recurrence" value="weekly"> Weekly, same day</label>
-      <label><input type="radio" name="kb-recurrence" value="biweekly"> Every other week</label>
+      <label><input type="radio" name="kb-recurrence" value="weeks"> Every <input type="number" id="kb-weeks-count" min="1" max="52" value="2" style="width:50px;" disabled> weeks</label>
     </div>
     <div class="preview-row" id="kb-count-row" style="display:none;">
       <label>Create <input type="number" id="kb-occurrence-count" min="1" max="52" value="8" style="width:50px;"> occurrences</label>
@@ -327,6 +333,22 @@ function planFormHtml(iso) {
   `;
 }
 
+// Renders "2:00 PM - 4:00 PM" / "From 2:00 PM" / "Until 4:00 PM" / '' from
+// a task's optional startTime/dueTime ("HH:MM" 24h strings, or null/''
+// when no specific time was chosen -- see docs/kanboard.md).
+function timeRangeLabel(t) {
+  const fmt = (hhmm) => {
+    const [h, m] = hhmm.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+  };
+  if (t.startTime && t.dueTime) return `${fmt(t.startTime)} - ${fmt(t.dueTime)}`;
+  if (t.startTime) return `From ${fmt(t.startTime)}`;
+  if (t.dueTime) return `Until ${fmt(t.dueTime)}`;
+  return '';
+}
+
 function viewListHtml(iso) {
   const tasks = plannedMap[iso] || [];
   return `
@@ -335,6 +357,7 @@ function viewListHtml(iso) {
       <div class="preview-row">
         <span class="date" style="${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : ''}">
           ${escapeHtml(t.title)}${t.assignee ? ` <span style="color:var(--color-text-muted); font-size:12px;">(${escapeHtml(t.assignee)})</span>` : ''}
+          ${timeRangeLabel(t) ? `<span style="color:var(--color-text-muted); font-size:12px;"> &middot; ${timeRangeLabel(t)}</span>` : ''}
         </span>
         <button class="btn small ${t.done ? '' : 'save'}" data-action="kb-toggle-done" data-id="${t.id}" data-done="${t.done ? '1' : '0'}">${t.done ? 'Reopen' : 'Mark Done'}</button>
       </div>
@@ -353,6 +376,8 @@ function editListHtml(iso) {
       <div class="preview-row" style="flex-wrap:wrap;">
         <input type="text" id="kb-edit-title-${t.id}" value="${escapeHtml(t.title)}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         <input type="date" id="kb-edit-date-${t.id}" value="${iso}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <label style="font-size:12px; color:var(--color-text-muted);">From <input type="time" id="kb-edit-start-time-${t.id}" value="${t.startTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+        <label style="font-size:12px; color:var(--color-text-muted);">Until <input type="time" id="kb-edit-due-time-${t.id}" value="${t.dueTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
         ${assigneeComboHtml(`edit-${t.id}`, t.assignee)}
         <button class="btn small save" data-action="kb-edit-save" data-id="${t.id}">Save</button>
         <button class="icon-btn-delete" data-action="kb-delete-task" data-id="${t.id}" title="Delete this task">&#x1F5D1;</button>
@@ -422,13 +447,20 @@ async function submitPlan() {
   if (!title) { showStatusModal('Enter a task name first.', 'error'); return; }
   const assigneeInput = document.getElementById('kb-assignee-input-plan');
   const assignee = assigneeInput ? assigneeInput.value.trim() : '';
+  const startTimeInput = document.getElementById('kb-plan-start-time');
+  const dueTimeInput = document.getElementById('kb-plan-due-time');
+  const startTime = startTimeInput ? startTimeInput.value : '';
+  const dueTime = dueTimeInput ? dueTimeInput.value : '';
   const typeInput = document.querySelector('input[name="kb-recurrence"]:checked');
   const type = typeInput ? typeInput.value : 'single';
   const recurrence = { type };
   if (type === 'interval') {
     recurrence.days = parseInt(document.getElementById('kb-interval-days').value, 10) || 1;
     recurrence.count = parseInt(document.getElementById('kb-occurrence-count').value, 10) || 8;
-  } else if (type === 'weekly' || type === 'biweekly') {
+  } else if (type === 'weekly') {
+    recurrence.count = parseInt(document.getElementById('kb-occurrence-count').value, 10) || 8;
+  } else if (type === 'weeks') {
+    recurrence.weeks = parseInt(document.getElementById('kb-weeks-count').value, 10) || 2;
     recurrence.count = parseInt(document.getElementById('kb-occurrence-count').value, 10) || 8;
   }
   showStatusModal('Creating...', 'loading');
@@ -436,7 +468,7 @@ async function submitPlan() {
     const res = await fetch('/api/kanboard-create-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, date: selectedIso, assignee, recurrence })
+      body: JSON.stringify({ title, date: selectedIso, startTime, dueTime, assignee, recurrence })
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal(data.error || 'Failed to create.', 'error'); return; }
@@ -469,9 +501,13 @@ async function toggleTaskDone(taskId, currentlyDone) {
 async function saveTaskEdit(taskId) {
   const titleInput = document.getElementById(`kb-edit-title-${taskId}`);
   const dateInput = document.getElementById(`kb-edit-date-${taskId}`);
+  const startTimeInput = document.getElementById(`kb-edit-start-time-${taskId}`);
+  const dueTimeInput = document.getElementById(`kb-edit-due-time-${taskId}`);
   const assigneeInput = document.getElementById(`kb-assignee-input-edit-${taskId}`);
   const title = titleInput ? titleInput.value.trim() : '';
   const dateVal = dateInput ? dateInput.value : '';
+  const startTime = startTimeInput ? startTimeInput.value : '';
+  const dueTime = dueTimeInput ? dueTimeInput.value : '';
   const assignee = assigneeInput ? assigneeInput.value.trim() : '';
   if (!title) { showStatusModal('Task name cannot be empty.', 'error'); return; }
   showStatusModal('Saving...', 'loading');
@@ -479,7 +515,7 @@ async function saveTaskEdit(taskId) {
     const res = await fetch('/api/kanboard-update-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: taskId, title, date: dateVal, assignee })
+      body: JSON.stringify({ id: taskId, title, date: dateVal, startTime, dueTime, assignee })
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal(data.error || 'Failed to save.', 'error'); return; }
@@ -558,14 +594,17 @@ function wireDelegatedListeners() {
       case 'kb-delete-task': return deleteTask(id);
     }
   });
-  // Recurrence radios: enable the "every N days" input only for that
-  // option, and only show the occurrence-count field for a recurring pick.
+  // Recurrence radios: enable each option's own number input only while
+  // it's selected, and only show the occurrence-count field for a
+  // recurring pick.
   panel.addEventListener('change', (e) => {
     if (e.target.name !== 'kb-recurrence') return;
     const type = e.target.value;
     const intervalInput = document.getElementById('kb-interval-days');
+    const weeksInput = document.getElementById('kb-weeks-count');
     const countRow = document.getElementById('kb-count-row');
     if (intervalInput) intervalInput.disabled = type !== 'interval';
+    if (weeksInput) weeksInput.disabled = type !== 'weeks';
     if (countRow) countRow.style.display = type === 'single' ? 'none' : 'flex';
   });
   panel.addEventListener('focusin', (e) => {

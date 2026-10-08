@@ -2,7 +2,7 @@ import itertools
 import re
 import uuid
 import requests
-from datetime import date, datetime, timedelta
+from datetime import datetime, time, timedelta
 from config import HOST_IP, KANBOARD_TOKEN_FILE
 
 KANBOARD_URL = f"http://{HOST_IP}:3000"
@@ -45,48 +45,53 @@ def rpc(method, params=None):
     return data.get("result")
 
 
-def _to_kb_date(d):
-    # Confirmed against Kanboard v1.2.52's own source
-    # (app/Core/DateParser.php): createTask/updateTask's date_due is
-    # parsed by DateParser::getTimestamp(), which tries a list of format
-    # strings via PHP's DateTime::createFromFormat() -- 'Y-m-d' (plain
-    # ISO date) is one of them, so a bare date string is genuinely
-    # correct here. A raw unix timestamp (what this used to send) is
-    # NOT accepted -- Kanboard's validator rejects it outright
-    # (createTask/updateTask both return bare `false`) before it ever
-    # reaches the parser, confirmed empirically against the live
-    # instance. The one real wrinkle: DateTime::createFromFormat only
-    # fills in the fields the format mentions -- since 'Y-m-d' says
-    # nothing about time, the hour/minute/second end up as whatever
-    # Kanboard's own clock reads as "now" at the moment of the call, not
-    # midnight. That's harmless for a due-*date* (we only read the date
-    # portion back, see _from_kb_date), as long as Kanboard's container
-    # clock agrees with everyone else's on what day it is -- see the
-    # `TZ` env var added to the kanboard service in docker-compose.yml,
-    # since it previously had none and likely defaulted to UTC while the
-    # rest of this stack runs on the configured local TIMEZONE.
-    return d.isoformat()
+# Sentinel time-of-day meaning "no specific time was chosen" -- every
+# date_due/date_started write always includes an explicit time (see
+# _to_kb_datetime) rather than a bare date, specifically to avoid relying
+# on Kanboard's own "merges an unspecified time with its current clock"
+# behavior (see git history/docs/kanboard.md for why that was a real,
+# reproduced source of wrong due dates). Midnight is the default when
+# nobody picked a real time; on the read side (get_tasks_in_range), a
+# due/start time that's exactly this sentinel is treated as "none" rather
+# than displayed as a real midnight deadline.
+NO_TIME = time(0, 0)
 
 
-def _from_kb_date(value):
+def _to_kb_datetime(dt):
+    # Confirmed against Kanboard v1.2.52's own source: the format list
+    # DateParser::getParserFormats() tries for datetime fields is
+    # 'Y-m-d H:i' (hour:minute, deliberately NO seconds) -- sending
+    # seconds (e.g. "2026-10-07 00:00:00") was tried and rejected
+    # outright during live testing, consistent with
+    # DateTime::createFromFormat() requiring an exact match against
+    # whichever format string it's tried with. Always sending a full,
+    # explicit datetime (never a bare date) sidesteps Kanboard's
+    # "unspecified time merges with its own current clock" behavior
+    # entirely -- both the point of letting someone pick a real due/start
+    # time, and a more reliable way to pin down the calendar day even
+    # when nobody picks one.
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _from_kb_datetime(value):
     """getTask/getAllTasks have been seen to return date fields as a unix
     timestamp (string or int, 0/empty meaning unset) in some Kanboard
     versions and as a plain date/datetime string in others -- try both
     rather than assuming one. Silently treating a real due date as unset
     here is exactly the kind of bug that would make a newly-created task
     never show up in get_tasks_in_range()'s result without any visible
-    error, so this is deliberately permissive rather than assuming the
-    first format it was written against."""
+    error, so this is deliberately permissive. Returns a naive datetime,
+    or None if unset."""
     if value in (None, "", 0, "0"):
         return None
     try:
         ts = int(value)
-        return date.fromtimestamp(ts).isoformat() if ts > 0 else None
+        return datetime.fromtimestamp(ts) if ts > 0 else None
     except (TypeError, ValueError):
         pass
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return datetime.strptime(str(value).strip(), fmt).date().isoformat()
+            return datetime.strptime(str(value).strip(), fmt)
         except ValueError:
             continue
     return None
@@ -213,11 +218,21 @@ def _ensure_project_member(project_id, user_id):
         return str(e)
 
 
+def _hhmm(dt):
+    return dt.strftime("%H:%M") if dt else None
+
+
 def get_tasks_in_range(start, end):
-    """Returns {iso_date: [{id, title, done, assignee}, ...]} for every
-    task (open or closed) due within [start, end] -- plural per day,
-    unlike Mealie's one-meal-per-day plannedMap, since a day can have
-    several tasks."""
+    """Returns {iso_date: [{id, title, done, assignee, startTime,
+    dueTime}, ...]} for every task (open or closed) due within
+    [start, end] -- plural per day, unlike Mealie's one-meal-per-day
+    plannedMap, since a day can have several tasks. startTime/dueTime are
+    "HH:MM" strings, or None when no specific time was chosen for that
+    task -- date_started unset means no start time was ever given;
+    date_due exactly at NO_TIME (midnight) means no due time was chosen
+    either, since every write always includes a full datetime now (see
+    _to_kb_datetime), defaulting to that sentinel rather than leaving the
+    field ambiguous."""
     project_id = get_or_create_tasks_project()
     people_by_id = {p["id"]: p["name"] for p in get_all_people()}
     tasks = []
@@ -226,9 +241,13 @@ def get_tasks_in_range(start, end):
 
     by_date = {}
     for t in tasks:
-        iso = _from_kb_date(t.get("date_due"))
-        if not iso or iso < start.isoformat() or iso > end.isoformat():
+        due_dt = _from_kb_datetime(t.get("date_due"))
+        if not due_dt:
             continue
+        iso = due_dt.date().isoformat()
+        if iso < start.isoformat() or iso > end.isoformat():
+            continue
+        start_dt = _from_kb_datetime(t.get("date_started"))
         owner_id = int(t.get("owner_id") or 0)
         by_date.setdefault(iso, []).append({
             "id": int(t["id"]),
@@ -237,17 +256,26 @@ def get_tasks_in_range(start, end):
             # strings -- compare as string, not int, to avoid "0" != 0.
             "done": str(t.get("is_active")) == "0",
             "assignee": people_by_id.get(owner_id) if owner_id else None,
+            "startTime": _hhmm(start_dt),
+            "dueTime": _hhmm(due_dt) if due_dt.time() != NO_TIME else None,
         })
     return by_date
 
 
-def create_task(title, due_date, assignee=None):
+def create_task(title, due_date, due_time=None, start_time=None, assignee=None):
+    """due_time/start_time are datetime.time objects, or None for "no
+    specific time" -- due_time defaults to NO_TIME (midnight) when
+    omitted, since every write always includes a full datetime (see
+    _to_kb_datetime)."""
     project_id = get_or_create_tasks_project()
+    due_dt = datetime.combine(due_date, due_time or NO_TIME)
     params = {
         "title": title,
         "project_id": project_id,
-        "date_due": _to_kb_date(due_date),
+        "date_due": _to_kb_datetime(due_dt),
     }
+    if start_time:
+        params["date_started"] = _to_kb_datetime(datetime.combine(due_date, start_time))
     membership_error = None
     if assignee:
         owner_id = get_or_create_person(assignee)
@@ -267,43 +295,51 @@ def create_task(title, due_date, assignee=None):
         extra = f" -- addProjectUser also failed: {membership_error}" if membership_error else ""
         raise RuntimeError(f"Kanboard createTask rejected the task (returned {task_id!r}) for params={params!r}{extra}")
     task_id = int(task_id)
-    # Read the task back and confirm its due date actually round-trips --
-    # if _to_kb_date()'s assumed format isn't what this Kanboard version
+    # Read the task back and confirm its due date/time actually round-trips
+    # -- if _to_kb_datetime()'s format isn't what this Kanboard version
     # wants, the task still gets created (so it'd look like success) but
-    # with no (or the wrong) due date, which is exactly what would make
-    # it silently never appear in get_tasks_in_range()'s calendar query.
-    # Catching that here, loudly, beats a newly-planned task just not
-    # showing up with no explanation.
+    # with no/the wrong due date, which is exactly what would make it
+    # silently never appear in get_tasks_in_range()'s calendar query, or
+    # land on the wrong day. Catching that here, loudly, beats a
+    # newly-planned task just quietly showing up wrong with no explanation.
     created = rpc("getTask", {"task_id": task_id}) or {}
-    if _from_kb_date(created.get("date_due")) != due_date.isoformat():
+    actual_due = _from_kb_datetime(created.get("date_due"))
+    if not actual_due or actual_due.replace(second=0, microsecond=0) != due_dt:
         raise RuntimeError(
-            f"Created Kanboard task {task_id}, but its due date came back as "
-            f"{created.get('date_due')!r} instead of {due_date.isoformat()} -- "
-            f"the date format this client sends (_to_kb_date) likely doesn't "
-            f"match what this Kanboard version expects."
+            f"Created Kanboard task {task_id}, but its due date/time came back "
+            f"as {created.get('date_due')!r} ({actual_due}) instead of {due_dt} -- "
+            f"the datetime format this client sends (_to_kb_datetime) likely "
+            f"doesn't match what this Kanboard version expects."
         )
     return task_id
 
 
-def create_recurring_tasks(title, interval_days, start_date, count, assignee=None):
+def create_recurring_tasks(title, interval_days, start_date, count, due_time=None, start_time=None, assignee=None):
     """No series linkage (no tags/parent-child) -- each occurrence is a
     fully independent task once created, matching Mealie's Edit mode
-    semantics (an edit/delete only ever touches one day)."""
+    semantics (an edit/delete only ever touches one day). due_time/
+    start_time (if given) are the same clock time on every occurrence."""
     created = []
     for i in range(count):
         due = start_date + timedelta(days=interval_days * i)
-        created.append(create_task(title, due, assignee=assignee))
+        created.append(create_task(title, due, due_time=due_time, start_time=start_time, assignee=assignee))
     return created
 
 
-def update_task(task_id, title=None, due_date=None, assignee=None):
+def update_task(task_id, title, due_date, due_time=None, start_time=None, assignee=None):
+    """title/due_date are always required -- the Edit form always submits
+    full current values (same convention as title/assignee already used),
+    not a sparse "only what changed" patch, so there's no separate
+    "don't touch this field" case to handle for due_time/start_time
+    either: omitting one just means "no specific time", same as
+    create_task."""
     task = rpc("getTask", {"task_id": task_id})
     params = {
         "id": task_id,
-        "title": title if title is not None else task.get("title"),
+        "title": title,
+        "date_due": _to_kb_datetime(datetime.combine(due_date, due_time or NO_TIME)),
+        "date_started": _to_kb_datetime(datetime.combine(due_date, start_time)) if start_time else 0,
     }
-    if due_date is not None:
-        params["date_due"] = _to_kb_date(due_date)
     if assignee is not None:
         if assignee.strip():
             owner_id = get_or_create_person(assignee)

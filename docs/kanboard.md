@@ -39,12 +39,12 @@ how Mealie needs no household/mealplan picker either.
 Mealie's calendar assumes one meal per day. A day of tasks can have
 zero, one, or several, so:
 
-- `plannedMap[iso]` is a **list** of `{id, title, done, assignee}`, not a
-  single object.
+- `plannedMap[iso]` is a **list** of `{id, title, done, assignee,
+  startTime, dueTime}`, not a single object.
 - Plan mode is NOT Mealie's multi-day "select a week, then preview" flow
   (that shape exists in Mealie because one meal gets chosen per day
   across a week). Here it's a single-step form on the one day you
-  clicked: task name + recurrence, submit, done.
+  clicked: task name, optional from/until time, recurrence, submit, done.
 - View and Edit both show a **list** of that day's tasks (each with its
   own done-toggle in View, its own edit/delete in Edit), not a single
   item.
@@ -90,11 +90,13 @@ deleting "the whole series" isn't a thing yet; re-running Plan later
 creates more occurrences manually.
 
 Default occurrence count for a recurring task is **8**, shown as an
-editable field in the Plan form. "Every N days," "weekly," and "every
-other week" are exposed as distinct radio options (matching how this was
-asked for) but share one generator under the hood -- weekly is an
-interval of 7 days, every-other-week an interval of 14, both anchored to
-the day you clicked.
+editable field in the Plan form. "Every N days," "weekly," and "every N
+weeks" are exposed as distinct radio options (matching how this was
+asked for) but share one generator under the hood -- weekly is a fixed
+interval of 7 days, "every N weeks" is `weeks * 7` with the count typed
+in (this replaced an earlier fixed "every other week" option -- same
+generator, just no longer hardcoded to N=2), both anchored to the day
+you clicked.
 
 Because creating up to ~8 tasks synchronously is fast, `/api/kanboard-
 create-task` responds in the same request/response cycle -- no
@@ -195,12 +197,58 @@ date/time-of-day while diagnosing this -- worth deleting via Edit mode
 if any are still sitting on the board (titles starting `diag-` are the
 throwaway test ones from the SSH session, safe to delete outright).
 
+**Final design: every write always sends an explicit date *and* time,
+never a bare date.** The `TZ` fix above only helps once Kanboard's
+container actually picks it up (unconfirmed -- PHP reads timezone from
+`date.timezone` in `php.ini`, which doesn't automatically follow the OS
+`TZ` env var the way Python does, see "Known gaps" below) -- and even
+with it fixed, a date-only write's "merges with Kanboard's own current
+time" behavior is still a real day-boundary risk right around local
+midnight. Rather than depend on two separate clocks (this app's and
+Kanboard's container) agreeing, `_to_kb_datetime()` is now the *only*
+way any date field gets written -- `_to_kb_date()`/date-only writes are
+gone entirely. A task with no explicitly chosen time gets midnight
+(`NO_TIME = time(0, 0)`) as an explicit, unambiguous value instead of
+an implicit "whatever time it happens to be" -- removing the ambiguity
+is strictly better than hoping the two clocks match. On the read side,
+`get_tasks_in_range()` treats a due time of exactly `NO_TIME` as "no
+time was chosen" (shows nothing) rather than as a real midnight
+deadline, so this convention stays invisible to someone who never picks
+a time at all.
+
+## Start/due times ("from" / "until")
+
+The Plan form (and each row in Edit) has optional **From**/**Until**
+`<input type="time">` fields, mapping onto Kanboard's real
+`date_started`/`date_due` fields -- not a custom field, since Kanboard
+already has two datetime fields per task that fit this naturally. Both
+are optional and independent: a task can have neither (just a day, no
+specific time), only a due time, only a start time, or both. For a
+recurring task, the same from/until clock time applies to every
+occurrence (`create_recurring_tasks()`'s `due_time`/`start_time`
+params), only the date advances per occurrence.
+
+`get_tasks_in_range()` returns `startTime`/`dueTime` as `"HH:MM"`
+strings (or `null`) per task; `js/kanboard.js`'s `timeRangeLabel()`
+renders that as "2:00 PM - 4:00 PM" / "From 2:00 PM" / "Until 4:00 PM" in
+View, the daily "Today's tasks" panel, and next to each title in Plan's
+"already on this day" preview list.
+
 ## Known gaps (intentional, for a later pass)
 
 - No "edit the whole series," no skip-one-occurrence-without-deleting.
-- `date_due`'s format is now confirmed (ISO date string -- see above);
-  the `jsonrpc` auth username and `createUser`'s `disable_login_form`
-  param are still unverified against the live instance's exact version.
+- `date_due`/`date_started`'s format is now confirmed (`'Y-m-d H:i'` --
+  see "Final design" above); the `jsonrpc` auth username and
+  `createUser`'s `disable_login_form` param are still unverified against
+  the live instance's exact version.
+- Whether Kanboard's container actually honors the `TZ` env var added to
+  `docker-compose.yml` is unconfirmed -- PHP reads its timezone from
+  `date.timezone` in `php.ini`, not automatically from the OS `TZ`
+  variable the way Python does, so this may turn out to need a different
+  fix (or none, if the image's entrypoint already bridges the two). Low
+  priority now that every write is an explicit datetime rather than a
+  bare date -- the day-boundary risk this was guarding against is gone
+  either way.
 - `_ensure_project_member()`'s `addProjectUser` call is a plausible fix,
   not yet confirmed -- if assigning someone still rejects the task, that
   rules this theory out rather than confirming it.

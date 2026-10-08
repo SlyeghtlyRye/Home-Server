@@ -8,7 +8,7 @@ import os
 import uuid
 import mimetypes
 import time
-from datetime import date, timedelta
+from datetime import date, time as dtime, timedelta
 
 sys.path.insert(0, "/root/scripts")
 import mealie_weekly_plan as mwp
@@ -25,6 +25,17 @@ import reset_manager
 import updater
 
 current_process = None
+
+
+def _parse_hhmm(value):
+    """Parses a "HH:MM" string (from an <input type="time">) into a
+    datetime.time, or None for empty/missing -- the "no specific time
+    chosen" case kanboard_client.py's create_task/update_task already
+    handle. Named dtime to avoid shadowing the stdlib `time` module
+    already imported above (time.sleep() is used elsewhere in this file)."""
+    if not value:
+        return None
+    return dtime.fromisoformat(value)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -624,6 +635,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             title = (body.get("title") or "").strip()
             date_s = body.get("date")
             assignee = (body.get("assignee") or "").strip() or None
+            start_time = _parse_hhmm(body.get("startTime"))
+            due_time = _parse_hhmm(body.get("dueTime"))
             recurrence = body.get("recurrence") or {"type": "single"}
             if not title or not date_s:
                 self._send_json(400, {"error": "missing title/date"})
@@ -631,11 +644,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 start = date.fromisoformat(date_s)
                 if recurrence.get("type") == "single":
-                    created = [kbc.create_task(title, start, assignee=assignee)]
+                    created = [kbc.create_task(title, start, due_time=due_time, start_time=start_time, assignee=assignee)]
                 else:
-                    interval_days = {"interval": recurrence.get("days", 1), "weekly": 7, "biweekly": 14}[recurrence["type"]]
+                    interval_days = {
+                        "interval": int(recurrence.get("days", 1)),
+                        "weekly": 7,
+                        "weeks": int(recurrence.get("weeks", 2)) * 7,
+                    }[recurrence["type"]]
                     count = int(recurrence.get("count", 8))
-                    created = kbc.create_recurring_tasks(title, interval_days, start, count, assignee=assignee)
+                    created = kbc.create_recurring_tasks(
+                        title, interval_days, start, count,
+                        due_time=due_time, start_time=start_time, assignee=assignee,
+                    )
                 self._send_json(200, {"created": created})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
@@ -644,12 +664,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/kanboard-update-task":
             body = self._read_json_body()
             task_id = body.get("id")
-            if not task_id:
-                self._send_json(400, {"error": "missing id"})
+            title = body.get("title")
+            date_s = body.get("date")
+            if not task_id or not title or not date_s:
+                self._send_json(400, {"error": "missing id/title/date"})
                 return
             try:
-                due_date = date.fromisoformat(body["date"]) if body.get("date") else None
-                kbc.update_task(task_id, title=body.get("title"), due_date=due_date, assignee=body.get("assignee"))
+                due_date = date.fromisoformat(date_s)
+                start_time = _parse_hhmm(body.get("startTime"))
+                due_time = _parse_hhmm(body.get("dueTime"))
+                kbc.update_task(
+                    task_id, title=title, due_date=due_date,
+                    due_time=due_time, start_time=start_time, assignee=body.get("assignee"),
+                )
                 self._send_json(200, {"status": "ok"})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
