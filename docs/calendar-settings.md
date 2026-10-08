@@ -26,9 +26,19 @@ to show (one setting, shared by both calendars), and a subscribable
 
 ## New Python dependency
 
-`pip3 install holidays`, run manually over SSH -- this repo has no
-`requirements.txt`; every dependency (including `requests`) is installed
-the same informal way.
+`holidays` (plus the pre-existing `requests`) is installed automatically
+by `reset_manager.py`'s `ensure_python_deps()`, run as part of both
+first-time setup and factory reset -- this repo has no
+`requirements.txt`; every dependency is installed directly into the
+host's system Python the same informal way, just no longer by hand.
+
+A device set up *before* this existed (or before `holidays` was added
+to `PYTHON_DEPENDENCIES`) needs a one-time manual catch-up:
+`apt-get install -y python3-pip` if `pip3`/`python3 -m pip` isn't
+present yet, then `python3 -m pip install --break-system-packages
+holidays`, then `systemctl restart mealie-trigger.service` -- the
+package import happens once at that service's startup, so installing it
+alone doesn't take effect until the service restarts.
 
 **The import is defensive, not a bare top-level `import`.**
 `scripts/holidays_client.py` wraps it in `try/except ImportError`,
@@ -61,7 +71,16 @@ on every call -- a saved change is live on the very next request.
   common countries; the library's own `list_supported_countries()` gives
   codes but not display names, and a second dependency like `pycountry`
   isn't worth it for a short, rarely-changing list), `get_holidays_in_range()`,
-  `get_configured_country()`/`save_configured_country()`.
+  `get_configured_country()`/`save_configured_country()`. `DEFAULT_SUBDIVISION`
+  maps a country code to a specific province/state passed to the
+  `holidays` library -- with none given, the library returns only
+  holidays common to *every* subdivision, which for Canada silently
+  drops Thanksgiving (not statutory in NB/NS). Caught on a real device
+  with `country=CA` configured: `/data/holidays` returned an empty list
+  for October despite everything else working. Since this is a household
+  overlay, not a payroll tool, a single representative subdivision (`ON`
+  for Canada) beats technical completeness. Add more entries if another
+  supported country turns out to have the same gap.
 - `scripts/ical_builder.py` -- hand-rolled RFC 5545 `.ics` generation, no
   library. What this needs (day-level and simple timed events, no
   recurrence rules, no attendees/timezones) is simple enough not to

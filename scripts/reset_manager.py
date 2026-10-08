@@ -127,6 +127,39 @@ def generate_docs(dry_run, log_lines):
     _log(log_lines, "Generated docs/index.md and docs/architecture-map.svg")
 
 
+# Every third-party Python package the host-side scripts import --
+# requests was always a silent manual prerequisite nobody automated, and
+# holidays (added for the Calendar Settings feature) just exposed that
+# same gap on a real device: pip3 missing -> needed apt's python3-pip ->
+# Debian's "externally-managed-environment" guard blocked a plain
+# install. Captured here now that the full working sequence is proven,
+# so no future fresh setup has to rediscover it by hand over SSH.
+PYTHON_DEPENDENCIES = ["requests", "holidays"]
+
+
+def ensure_python_deps(dry_run, log_lines):
+    """--break-system-packages is safe here specifically because this
+    host never runs anything else out of its system Python -- same
+    reasoning as every other dependency's existing informal
+    install-directly-on-the-host pattern (see holidays_client.py's own
+    comment on why there's no venv/requirements.txt in this repo)."""
+    if dry_run:
+        _log(log_lines, f"[dry-run] would ensure pip is available and install: {', '.join(PYTHON_DEPENDENCIES)}")
+        return
+    try:
+        subprocess.run(["python3", "-m", "pip", "--version"], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        _log(log_lines, "pip not found -- installing python3-pip via apt")
+        env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+        subprocess.run(["apt-get", "update"], check=True, env=env)
+        subprocess.run(["apt-get", "install", "-y", "python3-pip"], check=True, env=env)
+    subprocess.run(
+        ["python3", "-m", "pip", "install", "--break-system-packages"] + PYTHON_DEPENDENCIES,
+        check=True,
+    )
+    _log(log_lines, f"Installed Python dependencies: {', '.join(PYTHON_DEPENDENCIES)}")
+
+
 def install_systemd_service(dry_run, log_lines):
     if dry_run:
         _log(log_lines, f"[dry-run] would write {SYSTEMD_UNIT_PATH}, run "
@@ -183,6 +216,7 @@ def run_setup(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
     generate_docs(dry_run, log_lines)
+    ensure_python_deps(dry_run, log_lines)
     if skip_service_restart:
         _log(log_lines, "Skipping automatic service setup -- SSH in and finish manually.")
     else:
@@ -200,6 +234,7 @@ def run_reset(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
     generate_docs(dry_run, log_lines)
+    ensure_python_deps(dry_run, log_lines)
     if skip_service_restart:
         _log(log_lines, "Skipping automatic service restart -- SSH in and run "
                          "'docker compose up -d --force-recreate' (or reboot) to finish.")

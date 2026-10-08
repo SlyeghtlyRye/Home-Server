@@ -62,6 +62,20 @@ SUPPORTED_COUNTRIES = {
 }
 
 
+# For countries where public holidays vary by province/state, the
+# `holidays` library's default (no subdivision given) returns only the
+# holidays common to EVERY subdivision -- for Canada that silently drops
+# Thanksgiving, since it isn't statutory in New Brunswick/Nova Scotia.
+# This is a household calendar overlay, not a payroll/legal tool, so a
+# single reasonable default subdivision (most populous, or otherwise a
+# sensible representative pick) beats a technically-correct-but-mostly-
+# empty set. Add more entries here if another supported country turns
+# out to have the same gap.
+DEFAULT_SUBDIVISION = {
+    "CA": "ON",  # Ontario -- most populous, observes Thanksgiving
+}
+
+
 def get_supported_countries():
     return [{"code": code, "name": name} for code, name in sorted(SUPPORTED_COUNTRIES.items(), key=lambda kv: kv[1])]
 
@@ -98,7 +112,8 @@ def get_holidays_in_range(country_code, start, end):
             "this is read fresh on the next request."
         )
     years = range(start.year, end.year + 1)
-    country_holidays = holidays_lib.country_holidays(country_code, years=years)
+    subdiv = DEFAULT_SUBDIVISION.get(country_code)
+    country_holidays = holidays_lib.country_holidays(country_code, subdiv=subdiv, years=years)
     return [
         {"date": d.isoformat(), "name": name}
         for d, name in sorted(country_holidays.items())
