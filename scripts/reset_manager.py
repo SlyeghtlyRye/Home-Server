@@ -111,6 +111,22 @@ def write_js_config(host_ip, dry_run, log_lines):
     _log(log_lines, f"Wrote {JS_CONFIG_FILE}")
 
 
+def generate_docs(dry_run, log_lines):
+    """docs/index.md and docs/architecture-map.svg are gitignored now (see
+    .gitignore's comment) -- generated, not hand-written, so a fresh clone
+    or a factory reset needs to actually generate them at least once
+    rather than relying on git history to have provided them. Shells out
+    to the same two scripts apply_update() runs on every update, so
+    there's exactly one code path that produces these files, not two
+    that could drift apart."""
+    if dry_run:
+        _log(log_lines, "[dry-run] would run generate_docs_index.py and generate_architecture_map.py")
+        return
+    subprocess.run(["python3", os.path.join(ROOT, "scripts", "generate_docs_index.py")], check=True)
+    subprocess.run(["python3", os.path.join(ROOT, "scripts", "generate_architecture_map.py")], check=True)
+    _log(log_lines, "Generated docs/index.md and docs/architecture-map.svg")
+
+
 def install_systemd_service(dry_run, log_lines):
     if dry_run:
         _log(log_lines, f"[dry-run] would write {SYSTEMD_UNIT_PATH}, run "
@@ -166,6 +182,7 @@ def run_setup(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Setting up...")
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
+    generate_docs(dry_run, log_lines)
     if skip_service_restart:
         _log(log_lines, "Skipping automatic service setup -- SSH in and finish manually.")
     else:
@@ -182,6 +199,7 @@ def run_reset(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     remove_personal_data(dry_run, log_lines)
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
+    generate_docs(dry_run, log_lines)
     if skip_service_restart:
         _log(log_lines, "Skipping automatic service restart -- SSH in and run "
                          "'docker compose up -d --force-recreate' (or reboot) to finish.")
