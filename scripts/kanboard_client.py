@@ -3,11 +3,14 @@ import re
 import uuid
 import requests
 from datetime import datetime, time, timedelta
-from config import HOST_IP, KANBOARD_TOKEN_FILE
+from zoneinfo import ZoneInfo
+from config import HOST_IP, KANBOARD_TOKEN_FILE, TIMEZONE
 
 KANBOARD_URL = f"http://{HOST_IP}:3000"
 RPC_URL = f"{KANBOARD_URL}/jsonrpc.php"
 TASKS_PROJECT_NAME = "Tasks"
+LOCAL_TZ = ZoneInfo(TIMEZONE)
+UTC = ZoneInfo("UTC")
 # Earlier builds of this feature called the project "Chores" -- checked
 # as a fallback so a project (and whatever tasks are already in it) from
 # before this rename doesn't get silently orphaned in favor of a brand
@@ -70,7 +73,21 @@ def _to_kb_datetime(dt):
     # entirely -- both the point of letting someone pick a real due/start
     # time, and a more reliable way to pin down the calendar day even
     # when nobody picks one.
-    return dt.strftime("%Y-%m-%d %H:%M")
+    #
+    # Also confirmed against the live instance: Kanboard's container
+    # parses this naive string as UTC, not local time, regardless of the
+    # `TZ` env var on the kanboard service in docker-compose.yml -- PHP
+    # doesn't follow the OS `TZ` variable the way Python does, it needs
+    # `date.timezone` set in php.ini, which this image apparently doesn't
+    # do. A naive local time sent as-is landed 6 hours off (this
+    # device's actual UTC offset), not randomly -- confirming a real,
+    # consistent UTC interpretation on Kanboard's side, not noise.
+    # Converting our intended LOCAL time to its UTC equivalent *before*
+    # formatting makes every write correct regardless of what Kanboard's
+    # container timezone actually is (now, or if it's ever fixed later) --
+    # fixing this on our side instead of depending on Kanboard's config.
+    utc_dt = dt.replace(tzinfo=LOCAL_TZ).astimezone(UTC)
+    return utc_dt.strftime("%Y-%m-%d %H:%M")
 
 
 def _from_kb_datetime(value):

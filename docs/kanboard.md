@@ -198,23 +198,38 @@ if any are still sitting on the board (titles starting `diag-` are the
 throwaway test ones from the SSH session, safe to delete outright).
 
 **Final design: every write always sends an explicit date *and* time,
-never a bare date.** The `TZ` fix above only helps once Kanboard's
-container actually picks it up (unconfirmed -- PHP reads timezone from
-`date.timezone` in `php.ini`, which doesn't automatically follow the OS
-`TZ` env var the way Python does, see "Known gaps" below) -- and even
-with it fixed, a date-only write's "merges with Kanboard's own current
-time" behavior is still a real day-boundary risk right around local
-midnight. Rather than depend on two separate clocks (this app's and
-Kanboard's container) agreeing, `_to_kb_datetime()` is now the *only*
-way any date field gets written -- `_to_kb_date()`/date-only writes are
-gone entirely. A task with no explicitly chosen time gets midnight
-(`NO_TIME = time(0, 0)`) as an explicit, unambiguous value instead of
-an implicit "whatever time it happens to be" -- removing the ambiguity
-is strictly better than hoping the two clocks match. On the read side,
-`get_tasks_in_range()` treats a due time of exactly `NO_TIME` as "no
-time was chosen" (shows nothing) rather than as a real midnight
-deadline, so this convention stays invisible to someone who never picks
-a time at all.
+never a bare date.** A date-only write's "merges with Kanboard's own
+current time" behavior is a real day-boundary risk right around local
+midnight, so `_to_kb_datetime()` is now the *only* way any date field
+gets written -- `_to_kb_date()`/date-only writes are gone entirely. A
+task with no explicitly chosen time gets midnight (`NO_TIME = time(0,
+0)`) as an explicit, unambiguous value instead of an implicit "whatever
+time it happens to be." On the read side, `get_tasks_in_range()` treats
+a due time of exactly `NO_TIME` as "no time was chosen" (shows nothing)
+rather than as a real midnight deadline, so this convention stays
+invisible to someone who never picks a time at all.
+
+**The `TZ` env var confirmed NOT sufficient on its own -- Kanboard's
+container parses naive datetime strings as UTC.** Empirically confirmed,
+not theorized: a task planned for local midnight came back stored 6
+hours off -- this device's exact UTC offset in October, not a random
+drift, which rules out noise and confirms a real, consistent UTC
+interpretation. Root cause: PHP reads its timezone from `date.timezone`
+in `php.ini`, not automatically from the OS `TZ` variable the way Python
+does, so the `docker-compose.yml` `TZ=${TIMEZONE}` addition alone doesn't
+reach PHP's date functions. Fixed on this side instead of depending on
+Kanboard's container config: `_to_kb_datetime()` now explicitly converts
+the intended local time to its UTC equivalent (via `zoneinfo`, using the
+same `TIMEZONE` from `scripts/config.py` everything else in this stack
+already uses) *before* formatting the string Kanboard parses as UTC --
+correct regardless of whether Kanboard's own timezone handling ever gets
+fixed, since the conversion happens entirely on this side. The read path
+(`_from_kb_datetime`'s `datetime.fromtimestamp()`) needed no change --
+a Unix timestamp is an absolute moment in time, so it was already
+converting back to local correctly; the bug was purely that the wrong
+absolute moment got stored in the first place. Verified with an offline
+simulation of the full write -> Kanboard-interprets-as-UTC -> read
+round-trip before shipping this, not just reasoned about.
 
 ## Start/due times ("from" / "until")
 
@@ -241,14 +256,13 @@ View, the daily "Today's tasks" panel, and next to each title in Plan's
   see "Final design" above); the `jsonrpc` auth username and
   `createUser`'s `disable_login_form` param are still unverified against
   the live instance's exact version.
-- Whether Kanboard's container actually honors the `TZ` env var added to
-  `docker-compose.yml` is unconfirmed -- PHP reads its timezone from
-  `date.timezone` in `php.ini`, not automatically from the OS `TZ`
-  variable the way Python does, so this may turn out to need a different
-  fix (or none, if the image's entrypoint already bridges the two). Low
-  priority now that every write is an explicit datetime rather than a
-  bare date -- the day-boundary risk this was guarding against is gone
-  either way.
+- Resolved: Kanboard's container does NOT honor the `docker-compose.yml`
+  `TZ` env var for its own date parsing -- confirmed by the 6-hour-exact
+  offset, not guessed. Worked around entirely on this side (explicit
+  UTC conversion in `_to_kb_datetime()`), so the `TZ` env var stays in
+  `docker-compose.yml` as a reasonable general-purpose fix for whatever
+  else in the container might read it, but nothing in this client
+  depends on it anymore.
 - `_ensure_project_member()`'s `addProjectUser` call is a plausible fix,
   not yet confirmed -- if assigning someone still rejects the task, that
   rules this theory out rather than confirming it.
