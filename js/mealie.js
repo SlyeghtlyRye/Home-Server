@@ -92,10 +92,13 @@ function renderMealOfDay() {
   const todayIso = isoOf(new Date());
   const meal = plannedMap[todayIso];
   const todayLabel = new Date().toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' });
+  const holiday = holidaysByDate[todayIso];
+  const holidayHtml = holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : '';
   if (!meal) {
     el.innerHTML = `
       <div class="meal-of-day">
         <h3>Today &mdash; ${todayLabel}</h3>
+        ${holidayHtml}
         <div class="meal-empty">Nothing planned for today.</div>
       </div>`;
     return;
@@ -103,6 +106,7 @@ function renderMealOfDay() {
   el.innerHTML = `
     <div class="meal-of-day">
       <h3>Today &mdash; ${todayLabel}</h3>
+      ${holidayHtml}
       <div class="meal-name">${escapeHtml(meal.name)}</div>
       ${meal.id ? `<span class="meal-link" data-action="view-recipe" data-recipe-id="${meal.id}">See recipe &amp; details &rarr;</span>` : ''}
     </div>`;
@@ -391,8 +395,10 @@ function startModePanelResize(e) {
 
 function viewDayDetailBodyHtml() {
   const meal = plannedMap[viewSelectedIso];
+  const holiday = holidaysByDate[viewSelectedIso];
+  const holidayHtml = holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : '';
   if (!meal) {
-    return `<div class="vd-date">${viewSelectedIso}</div><div class="meal-empty">No meal planned this day.</div>`;
+    return `<div class="vd-date">${viewSelectedIso}</div>${holidayHtml}<div class="meal-empty">No meal planned this day.</div>`;
   }
   let detailHtml = '';
   if (viewInlineRecipeState === 'loading') {
@@ -404,6 +410,7 @@ function viewDayDetailBodyHtml() {
   }
   return `
     <div class="vd-date">${viewSelectedIso}</div>
+    ${holidayHtml}
     <div class="vd-meal">${escapeHtml(meal.name)}</div>
     ${meal.id && !viewInlineRecipeState ? `<span class="meal-link" data-action="view-recipe-inline" data-recipe-id="${meal.id}">View details &rarr;</span>` : ''}
     ${detailHtml}
@@ -452,8 +459,10 @@ function closeEditPanel() {
 }
 
 function editPanelBodyHtml() {
+  const holiday = holidaysByDate[editPick.date];
   return `
     <h3 style="margin-top:0;">Edit ${editPick.date}</h3>
+    ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     <div class="preview-row">
       <div class="combo-wrap">
         <input
@@ -1018,7 +1027,7 @@ function previewPanelBodyHtml() {
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
     ${previewPicks.map(p => `
       <div class="preview-row">
-        <span class="date">${p.date}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}</span>
+        <span class="date">${p.date}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
         <div class="combo-wrap">
           <input
             id="input-${p.date}"
@@ -1589,7 +1598,12 @@ function wireDelegatedListeners() {
     if (dayEl && dayEl.dataset.iso) return onDayClick(dayEl.dataset.iso);
   });
   calendarContainer.addEventListener('change', (e) => {
-    if (handleCalSettingsChange(e, 'mealie', renderCalendar)) return;
+    // loadMonthMealplan(), not renderCalendar() -- see the matching
+    // comment in kanboard.js: both the holidays checkbox and the
+    // country select change what /data/holidays should return, and
+    // renderCalendar() alone only redraws from the now-stale
+    // holidaysByDate from the last month load.
+    if (handleCalSettingsChange(e, 'mealie', loadMonthMealplan)) return;
   });
 
   // Plan's selection summary / preview, View's day detail, and Edit's form

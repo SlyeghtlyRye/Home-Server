@@ -313,8 +313,10 @@ function assigneeComboHtml(comboKey, value) {
 
 function planFormHtml(iso) {
   const existing = plannedMap[iso] || [];
+  const holiday = holidaysByDate[iso];
   return `
     <h3 style="margin-top:0;">Plan ${iso}</h3>
+    ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     ${existing.length > 0 ? `
       <p style="color:var(--color-text-muted); font-size:13px;">Already on this day:</p>
       <ul style="margin:0 0 12px; padding-left:18px; font-size:13px; color:var(--color-text-dim);">
@@ -369,8 +371,10 @@ function timeRangeLabel(t) {
 
 function viewListHtml(iso) {
   const tasks = plannedMap[iso] || [];
+  const holiday = holidaysByDate[iso];
   return `
     <h3 style="margin-top:0;">${iso}</h3>
+    ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     ${tasks.length === 0 ? `<p class="meal-empty">No tasks this day.</p>` : tasks.map(t => `
       <div class="preview-row">
         <span class="date" style="${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : ''}">
@@ -388,8 +392,10 @@ function viewListHtml(iso) {
 
 function editListHtml(iso) {
   const tasks = plannedMap[iso] || [];
+  const holiday = holidaysByDate[iso];
   return `
     <h3 style="margin-top:0;">Edit ${iso}</h3>
+    ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     ${tasks.length === 0 ? `<p class="meal-empty">No tasks to edit this day.</p>` : tasks.map(t => `
       <div class="preview-row" style="flex-wrap:wrap;">
         <input type="text" id="kb-edit-title-${t.id}" value="${escapeHtml(t.title)}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
@@ -581,7 +587,12 @@ function wireDelegatedListeners() {
     if (dayEl) return onDayClick(dayEl.dataset.iso);
   });
   calendarContainer.addEventListener('change', (e) => {
-    if (handleCalSettingsChange(e, 'kanboard', renderCalendar)) return;
+    // loadMonthTasks(), not renderCalendar() -- both the holidays
+    // checkbox and the country select change what /data/holidays should
+    // return. renderCalendar() only redraws from the existing (now
+    // stale) holidaysByDate, which is why toggling "Show holidays" on
+    // used to show nothing until the next month change forced a refetch.
+    if (handleCalSettingsChange(e, 'kanboard', loadMonthTasks)) return;
   });
 
   const panel = document.getElementById('kb-mode-panel');

@@ -264,6 +264,7 @@
     .cal-meal { font-size: 10px; color: var(--color-text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cal-meal-extra { font-size: 9px; color: var(--color-text-muted); }
     .cal-holiday { font-size: 9px; color: var(--color-warning); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .day-holiday-badge { font-size: 12px; font-weight: 600; color: var(--color-warning); margin: 2px 0 8px; }
     .cal-loading { text-align: center; padding: 40px 0; color: var(--color-text-muted); }
     .cal-settings-wrap { position: relative; }
     .cal-settings-gear { background: transparent; border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 6px 10px; font-size: 14px; cursor: pointer; line-height: 1; }
