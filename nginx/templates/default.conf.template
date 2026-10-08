@@ -65,6 +65,12 @@ server {
     location /api/restart-container {
             proxy_pass http://172.17.0.1:9001/api/restart-container?key=${TRIGGER_SECRET};
     }
+    location /api/stop-container {
+            proxy_pass http://172.17.0.1:9001/api/stop-container?key=${TRIGGER_SECRET};
+    }
+    location /api/start-container {
+            proxy_pass http://172.17.0.1:9001/api/start-container?key=${TRIGGER_SECRET};
+    }
     location /data/container-logs {
             proxy_pass http://172.17.0.1:9001/data/container-logs?key=${TRIGGER_SECRET}&name=$arg_name;
     }

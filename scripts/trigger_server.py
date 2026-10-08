@@ -717,6 +717,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
+        if parsed.path == "/api/stop-container":
+            body = self._read_json_body()
+            name = body.get("name")
+            if not name:
+                self._send_json(400, {"error": "missing name"})
+                return
+            try:
+                system_status.stop_container(name)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/api/start-container":
+            body = self._read_json_body()
+            name = body.get("name")
+            if not name:
+                self._send_json(400, {"error": "missing name"})
+                return
+            try:
+                system_status.start_container(name)
+                self._send_json(200, {"status": "ok"})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
         if parsed.path == "/api/save-mealie-token":
             body = self._read_json_body()
             token = (body.get("token") or "").strip()

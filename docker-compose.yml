@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   pihole:
     image: pihole/pihole:latest
@@ -16,6 +22,8 @@ services:
       - "53:53/udp"
       - "8080:80"
     restart: unless-stopped
+    mem_limit: 150m
+    logging: *default-logging
 
   kanboard:
     image: kanboard/kanboard:latest
@@ -27,6 +35,8 @@ services:
     ports:
       - "3000:80"
     restart: unless-stopped
+    mem_limit: 150m
+    logging: *default-logging
 
   nginx:
     image: nginx:alpine
@@ -49,6 +59,8 @@ services:
       - mealie
       - kanboard
     restart: unless-stopped
+    mem_limit: 50m
+    logging: *default-logging
 
   mealie:
     image: ghcr.io/mealie-recipes/mealie:v3.19.2
@@ -57,11 +69,26 @@ services:
       - TZ=${TIMEZONE}
       - DB_ENGINE=sqlite
       - BASE_URL=http://${HOST_IP}:9000
+      # This device only has ~914Mi RAM total. Mealie's default (Gunicorn
+      # + Uvicorn workers, min 2 even on a small SBC) forks a second full
+      # copy of the app right at startup -- exactly when memory is most
+      # strained. Pinned to 1 worker to halve that peak. PYTHONDONTWRITEBYTECODE
+      # rules out a corrupted .pyc cache (what "bad marshal data" actually is)
+      # as a contributor if disk/CPU contention ever causes a partial write.
+      - WEB_CONCURRENCY=1
+      - PYTHONDONTWRITEBYTECODE=1
     volumes:
       - mealie_data:/app/data
     ports:
       - "9000:9000"
     restart: unless-stopped
+    # Soft reservation, not a hard mem_limit -- Mealie is the one that
+    # already crashes under memory pressure, so capping it further would
+    # risk more OOM-kills, not fewer. This just tells the kernel to
+    # reclaim from everything else first when the device gets tight,
+    # giving Mealie first claim on what's actually free.
+    mem_reservation: 400m
+    logging: *default-logging
 
   syncthing:
     image: syncthing/syncthing:latest
@@ -79,11 +106,18 @@ services:
       - "22000:22000/udp"
       - "21027:21027/udp"
     restart: unless-stopped
+    # 1G was a no-op on a device with only ~914Mi total RAM -- it could
+    # never actually be hit, so it wasn't protecting anything. Syncthing
+    # is the known hog here (large folder indexing/scanning spikes), and
+    # it's the one we've manually `docker compose stop`'d before to free
+    # memory for Mealie -- 350m makes that headroom permanent instead of
+    # something that has to be done by hand during a crash.
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 350M
+    logging: *default-logging
 
 volumes:
   pihole_etc:

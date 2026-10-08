@@ -37,9 +37,15 @@ def run(cmd):
 
 
 def get_container_info():
+    """`-a` (not just running containers) so a container stopped via the
+    Stop button doesn't vanish from this list entirely -- without that,
+    stop_container()'s own allow-list check (reusing this same function)
+    would make a just-stopped container impossible to validate a Start
+    call against, permanently locking it out of the UI until someone SSHs
+    in regardless of why the stop/start buttons were added."""
     containers = {}
     try:
-        output = run("docker ps --format json")
+        output = run("docker ps -a --format json")
         for line in output.split('\n'):
             if line:
                 data = json.loads(line)
@@ -143,6 +149,35 @@ def restart_container(name):
         subprocess.run(["docker", "restart", name], check=True, timeout=30)
 
 
+def stop_container(name):
+    """Same dynamic allow-list as restart_container(), but with one extra
+    rule restart_container() doesn't need: nginx can't be stopped here.
+    A restart recovers on its own either way (synchronous for everything
+    but nginx, detached-but-still-automatic for nginx), so there's always
+    a path back. A stop has no such recovery -- if nginx is the one
+    stopped, the dashboard it's proxying (including this very endpoint)
+    goes down with it, and nothing short of SSH can start it back up
+    again. Every other container is fully recoverable via start_container()
+    below, so only nginx is special-cased."""
+    running = get_container_info()
+    if name not in running:
+        raise ValueError(f"not a recognized container: {name!r}")
+    if name == "nginx":
+        raise ValueError("nginx can't be stopped from the dashboard -- it would take the dashboard itself down with no way back except SSH")
+    subprocess.run(["docker", "stop", name], check=True, timeout=30)
+
+
+def start_container(name):
+    """Mirrors stop_container()'s allow-list (get_container_info() now
+    includes stopped containers via `docker ps -a`, so a container this
+    just stopped is still a valid target here). No nginx special case
+    needed -- starting is never the risky direction."""
+    known = get_container_info()
+    if name not in known:
+        raise ValueError(f"not a recognized container: {name!r}")
+    subprocess.run(["docker", "start", name], check=True, timeout=30)
+
+
 def get_container_logs(name, lines=50):
     """Same dynamic allow-list as restart_container() -- `name` never
     reaches a shell here (list-form subprocess.run, no shell=True)."""
@@ -186,10 +221,12 @@ def collect_containers():
         status = info['Status']
         stat = stats.get(name, {})
         meta = CONTAINER_INFO.get(name, {})
-        healthy = 'unhealthy' not in status.lower()
+        running = info.get('State') == 'running'
+        healthy = running and 'unhealthy' not in status.lower()
         containers.append({
             'name': name,
             'status': status,
+            'running': running,
             'healthy': healthy,
             'description': meta.get('description'),
             'image': meta.get('image'),

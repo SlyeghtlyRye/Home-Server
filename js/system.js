@@ -126,13 +126,21 @@ async function loadContainersCard() {
 // hardcoded name list.
 function renderContainerRowHtml(c) {
   const detailId = `container-log-${c.name}`;
+  const icon = !c.running ? '&#x23F9;&#xFE0F;' : (c.healthy ? '&#x2705;' : '&#x26A0;');
+  // nginx has no Stop button -- see stop_container()'s docstring in
+  // system_status.py: stopping it would take the dashboard itself down
+  // with no way back except SSH, unlike every other container here.
+  const actions = !c.running
+    ? `<button class="btn small" data-action="start-container" data-container="${escapeHtml(c.name)}">Start</button>`
+    : `${c.name !== 'nginx' ? `<button class="btn small" data-action="stop-container" data-container="${escapeHtml(c.name)}">Stop</button>` : ''}
+       <button class="btn small" data-action="restart-container" data-container="${escapeHtml(c.name)}">Restart</button>`;
   return `
     <div class="preview-row">
-      <span class="date">${c.healthy ? '&#x2705;' : '&#x26A0;'} ${escapeHtml(c.name)}</span>
+      <span class="date">${icon} ${escapeHtml(c.name)}</span>
       <span style="color:var(--color-text-muted); font-size:13px; flex:1;">${escapeHtml(c.status)}</span>
       ${c.cpu_percent ? `<span style="color:var(--color-text-muted); font-size:12px;">${escapeHtml(c.cpu_percent)}% CPU</span>` : ''}
       <span class="st-link-action" data-action="toggle-container-logs" data-container="${escapeHtml(c.name)}" data-target="${detailId}">Details</span>
-      <button class="btn small" data-action="restart-container" data-container="${escapeHtml(c.name)}">Restart</button>
+      ${actions}
     </div>
     <div class="expandable-detail" id="${detailId}" hidden></div>
   `;
@@ -218,6 +226,55 @@ async function restartContainer(containerName) {
       showSuccessThenClose(`"${containerName}" is back up.`, 2500);
     } else {
       showStatusModal(`"${containerName}" hasn't come back up after 30s -- check Details for why.`, 'error');
+    }
+    loadContainersCard();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function stopContainer(containerName) {
+  if (!(await showConfirmModal(`Stop the "${containerName}" container? It'll stay stopped until you start it again (from here, or over SSH).`))) return;
+  showStatusModal('Stopping...', 'loading');
+  try {
+    const res = await fetch('/api/stop-container', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: containerName })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+    showSuccessThenClose(`"${containerName}" stopped.`, 2000);
+    loadContainersCard();
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
+async function startContainer(containerName) {
+  showStatusModal('Starting...', 'loading');
+  try {
+    const res = await fetch('/api/start-container', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: containerName })
+    });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
+    showStatusModal(`Waiting for "${containerName}" to come up...`, 'loading');
+    const backUp = await pollUntil(async () => {
+      try {
+        const r = await fetch('/data/system-status-containers');
+        if (!r.ok) return false;
+        const d = await r.json();
+        const cont = (d.containers || []).find(c => c.name === containerName);
+        return !!(cont && cont.running);
+      } catch (e) {
+        return false;
+      }
+    }, { intervalMs: 1000, timeoutMs: 30000 });
+    if (backUp) {
+      showSuccessThenClose(`"${containerName}" is back up.`, 2500);
+    } else {
+      showStatusModal(`"${containerName}" hasn't come up after 30s -- check Details for why.`, 'error');
     }
     loadContainersCard();
   } catch (err) {
@@ -621,6 +678,10 @@ function wireDelegatedListeners() {
     if (containerLogBtn) { toggleContainerLogs(containerLogBtn.dataset.container, containerLogBtn.dataset.target); return; }
     const containerRestartBtn = e.target.closest('[data-action="restart-container"]');
     if (containerRestartBtn) { restartContainer(containerRestartBtn.dataset.container); return; }
+    const containerStopBtn = e.target.closest('[data-action="stop-container"]');
+    if (containerStopBtn) { stopContainer(containerStopBtn.dataset.container); return; }
+    const containerStartBtn = e.target.closest('[data-action="start-container"]');
+    if (containerStartBtn) { startContainer(containerStartBtn.dataset.container); return; }
   });
 }
 
