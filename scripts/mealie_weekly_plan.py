@@ -70,7 +70,11 @@ def create_recipe_from_url(url):
         f"{MEALIE_URL}/api/recipes/create/url",
         headers=get_headers(),
         json={"url": url, "includeTags": False},
-        timeout=20,
+        # A real recipe page has far more to fetch and parse than a bare
+        # homepage -- confirmed on a real device, where 20s was enough for
+        # every junk homepage URL to "succeed" instantly but timed out on
+        # 4 of 5 genuine recipe pages every single time.
+        timeout=60,
     )
     resp.raise_for_status()
     slug = resp.json()
