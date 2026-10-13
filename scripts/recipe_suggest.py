@@ -80,11 +80,20 @@ def _record_result(url, success):
 
 def suggest_recipe():
     """Returns (recipe_id, recipe_name) from whichever source succeeds
-    first. Raises RuntimeError only if every attempted source failed."""
+    first. Raises RuntimeError only if every attempted source failed.
+
+    Prefers sources that have never succeeded before -- a source that
+    already succeeded once means that recipe already exists in the
+    library, so picking it again is just re-suggesting something already
+    had, not discovering anything new (the whole point of this button).
+    Only falls back to the full pool, repeats included, once every
+    source has succeeded at least once."""
     sources = _load()
     if not sources:
         raise RuntimeError("No recipe suggestion sources configured yet -- add one in Calendar Settings.")
-    candidates = sources[:]
+    never_succeeded = [s for s in sources if s["successes"] == 0]
+    pool = never_succeeded if never_succeeded else sources
+    candidates = pool[:]
     random.shuffle(candidates)
     candidates = candidates[:MAX_ATTEMPTS_PER_SUGGEST]
     errors = []

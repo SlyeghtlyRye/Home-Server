@@ -28,6 +28,7 @@ See _classify_restart() for the actual rules.
 import os
 import re
 import subprocess
+import reset_manager
 
 ROOT = "/root"
 
@@ -286,6 +287,17 @@ def apply_update(force=False):
     _run(["python3", "scripts/generate_docs_index.py"])
     _run(["python3", "scripts/generate_architecture_map.py"])
     log_lines.append("Regenerated.")
+
+    # js/config.js is generated, same as the docs above -- but unlike
+    # them, nothing here was ever re-running its generator on a regular
+    # update, only on first-time setup/factory reset. That left a real
+    # device stuck running whatever format write_js_config() produced at
+    # whenever it was last set up, through every update since -- confirmed
+    # live: a device still serving a pre-refactor `export const HOST_IP`
+    # config.js long after the generator's own code moved to a plain
+    # `window.HOST_IP` global, throwing a SyntaxError on every page load
+    # no matter how many unrelated updates it pulled.
+    reset_manager.write_js_config(reset_manager.read_current_host_ip(), dry_run=False, log_lines=log_lines)
 
     restart_plan = _classify_restart(changed_files, env_keys_added)
     log_lines.append(_describe_restart_plan(restart_plan))

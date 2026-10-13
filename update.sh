@@ -95,6 +95,20 @@ echo "== Regenerating docs index and architecture map =="
 python3 scripts/generate_docs_index.py
 python3 scripts/generate_architecture_map.py
 
+# js/config.js is generated too, same as the docs above -- but was never
+# wired into the regular update path, only first-time setup/factory
+# reset. That left a real device stuck serving whatever format
+# write_js_config() produced at whenever it was last set up, through
+# every update since (confirmed live: a device still on a pre-refactor
+# `export const HOST_IP` config.js, throwing a SyntaxError on every page
+# load, long after the generator's own code moved on).
+python3 -c "
+import sys
+sys.path.insert(0, 'scripts')
+import reset_manager
+reset_manager.write_js_config(reset_manager.read_current_host_ip(), dry_run=False, log_lines=[])
+"
+
 echo ""
 echo "== Restart plan =="
 eval "$(python3 scripts/updater.py plan "$LOCAL" "$REMOTE" $env_added_flag)"
