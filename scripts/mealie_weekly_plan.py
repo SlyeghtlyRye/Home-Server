@@ -56,7 +56,16 @@ def create_recipe_from_url(url):
     button uses) scrapes the page with recipe-scrapers under the hood, so
     not every site parses cleanly; a raised requests.HTTPError here is
     the normal, expected way a bad source URL reports failure, not a bug
-    -- callers (recipe_suggest.py) catch it and try another source."""
+    -- callers (recipe_suggest.py) catch it and try another source.
+
+    A raised HTTPError isn't the only failure mode, though: given a
+    non-recipe page (e.g. a site's homepage instead of one specific
+    recipe), Mealie's scraper can return 200 OK anyway, falling back to
+    the page's own title/tagline as the "recipe" name with no ingredients
+    or instructions at all -- confirmed on a real device importing a
+    bare domain URL, which produced a junk recipe named after the site
+    itself. Treated as a failure here (and the junk entry deleted again)
+    rather than ever being handed back as a real suggestion."""
     resp = requests.post(
         f"{MEALIE_URL}/api/recipes/create/url",
         headers=get_headers(),
@@ -68,6 +77,9 @@ def create_recipe_from_url(url):
     detail = requests.get(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
     detail.raise_for_status()
     data = detail.json()
+    if not data.get("recipeIngredient") or not data.get("recipeInstructions"):
+        requests.delete(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
+        raise ValueError(f"scraped page has no real recipe content (no ingredients/instructions): {url}")
     return data["id"], data["name"]
 
 

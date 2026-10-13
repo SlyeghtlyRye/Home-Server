@@ -35,6 +35,14 @@ let holidaysByDate = {}; // iso -> holiday name, only populated when shouldShowH
 let weekSelection = null;
 let previewPicks = null;
 let previewConflicts = [];
+// Which Preview row's Suggest is currently in flight (a date string), or
+// null -- drives a localized "Suggesting..." state on just that one row
+// instead of a global blocking modal, so the rest of the week stays
+// editable while a slow external-site scrape is in progress.
+let suggestingDate = null;
+// Same idea for Edit mode, which only ever has one day/one Suggest
+// button rather than a list, so a single boolean is enough.
+let editSuggesting = false;
 // The day most recently clicked in Plan mode. Plan's own selection
 // (weekSelection) is a multi-day range, not a single day, so unlike
 // View/Edit (viewSelectedIso/editSelectedIso) it has no single "selected
@@ -475,16 +483,18 @@ function editPanelBodyHtml() {
   return `
     <h3 style="margin-top:0;">Edit ${dayLabel(editPick.date)}</h3>
     ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
-    <div class="preview-row">
+    <div class="preview-row" ${editSuggesting ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
       <div class="combo-wrap">
-        <input
-          id="edit-input"
-          class="recipe-combo ${editPick.isNew ? 'is-new' : ''}"
-          type="text"
-          autocomplete="off"
-          value="${escapeHtml(editPick.recipeName)}"
-          placeholder="Search recipes..."
-        >
+        ${editSuggesting
+          ? `<div class="recipe-combo" style="color:var(--color-text-muted); font-style:italic;">Suggesting...</div>`
+          : `<input
+              id="edit-input"
+              class="recipe-combo ${editPick.isNew ? 'is-new' : ''}"
+              type="text"
+              autocomplete="off"
+              value="${escapeHtml(editPick.recipeName)}"
+              placeholder="Search recipes..."
+            >`}
         <div class="combo-dropdown" id="edit-dropdown" style="display:none;"></div>
         <div class="new-hint ${editPick.isNew ? 'show' : ''}" id="edit-hint">Will be created as a new recipe on save</div>
       </div>
@@ -639,18 +649,22 @@ async function editReroll() {
 }
 
 async function editSuggest() {
-  showStatusModal('Finding a recipe to suggest -- this can take a few seconds...', 'loading');
+  if (editSuggesting) return;
+  editSuggesting = true;
+  renderModePanel();
   try {
     const res = await fetch('/api/suggest-recipe', { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); return; }
+    editSuggesting = false;
+    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); renderModePanel(); return; }
     editPick.recipeId = data.recipeId;
     editPick.recipeName = data.recipeName;
     editPick.isNew = false;
-    hideStatusModal();
     renderModePanel();
   } catch (err) {
+    editSuggesting = false;
     showStatusModal('Suggest error: ' + err, 'error');
+    renderModePanel();
   }
 }
 
@@ -1054,19 +1068,23 @@ function previewPanelBodyHtml() {
       ? `<p style="color:var(--color-text-dim); font-size:13px;">Saving in the background -- feel free to switch tabs, this will finish on its own.</p>`
       : `<p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>`}
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
-    ${previewPicks.map(p => `
-      <div class="preview-row">
+    ${previewPicks.map(p => {
+      const isSuggesting = suggestingDate === p.date;
+      return `
+      <div class="preview-row" ${isSuggesting ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
         <span class="date">${dayLabel(p.date)}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
         <div class="combo-wrap">
-          <input
-            id="input-${p.date}"
-            class="recipe-combo ${p.isNew ? 'is-new' : ''}"
-            type="text"
-            autocomplete="off"
-            value="${escapeHtml(p.recipeName)}"
-            data-date="${p.date}"
-            ${disabled}
-          >
+          ${isSuggesting
+            ? `<div class="recipe-combo" style="color:var(--color-text-muted); font-style:italic;">Suggesting...</div>`
+            : `<input
+                id="input-${p.date}"
+                class="recipe-combo ${p.isNew ? 'is-new' : ''}"
+                type="text"
+                autocomplete="off"
+                value="${escapeHtml(p.recipeName)}"
+                data-date="${p.date}"
+                ${disabled}
+              >`}
           <div class="combo-dropdown" id="dropdown-${p.date}" style="display:none;"></div>
           <div class="new-hint ${p.isNew ? 'show' : ''}" id="hint-${p.date}">Will be created as a new recipe on save</div>
         </div>
@@ -1075,7 +1093,8 @@ function previewPanelBodyHtml() {
         <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe" ${disabled}>&#x2716;</button>
         <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day" ${disabled}>&#x1F5D1;</button>
       </div>
-    `).join('')}
+    `;
+    }).join('')}
     <div class="btn-grid" style="margin-top:15px;">
       <button class="btn save" data-action="commit" ${disabled}>Confirm & Save</button>
       <button class="btn cancel" data-action="cancel-preview" ${disabled}>Cancel</button>
@@ -1116,25 +1135,29 @@ async function rerollDay(dateStr) {
 // Unlike rerollDay() (an instant pick from the existing library),
 // suggest-recipe hits an external website and runs it through Mealie's
 // scraper -- genuinely slower, and the backend may retry a few sources
-// internally before succeeding or giving up, so this shows its own
-// loading state rather than relying on the button's disabled look alone.
+// internally before succeeding or giving up. Dims and disables just this
+// one row (suggestingDate) rather than blocking the whole panel, so
+// other days stay editable while this one's scrape is in flight.
 async function suggestRecipe(dateStr) {
-  if (isCommitting) return;
-  showStatusModal('Finding a recipe to suggest -- this can take a few seconds...', 'loading');
+  if (isCommitting || suggestingDate) return;
+  suggestingDate = dateStr;
+  renderModePanel();
   try {
     const res = await fetch('/api/suggest-recipe', { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); return; }
+    suggestingDate = null;
+    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); renderModePanel(); return; }
     const entry = previewPicks.find(p => p.date === dateStr);
     if (entry) {
       entry.recipeId = data.recipeId;
       entry.recipeName = data.recipeName;
       entry.isNew = false;
     }
-    hideStatusModal();
     renderModePanel();
   } catch (err) {
+    suggestingDate = null;
     showStatusModal('Suggest error: ' + err, 'error');
+    renderModePanel();
   }
 }
 

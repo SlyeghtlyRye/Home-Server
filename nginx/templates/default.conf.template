@@ -14,6 +14,23 @@ server {
         root /usr/share/nginx/html;
         try_files $uri $uri/ /index.html;
     }
+    # Without this, nginx's default static-file serving sets no explicit
+    # cache headers, so browsers fall back to heuristic caching based on
+    # the file's mtime -- which can let an old JS file sit in a browser's
+    # cache indefinitely even after a real deploy changes it (confirmed on
+    # a real device: a browser served a stale js/config.js from before an
+    # earlier format change, long after the server-side file had been
+    # rewritten). no-cache still lets the browser keep the bytes, it just
+    # forces a cheap revalidation check on every load instead of trusting
+    # a guess about how long the content is still good for.
+    location /js/ {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-cache";
+    }
+    location /css/ {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-cache";
+    }
     location /trigger/mealplan {
             proxy_pass http://172.17.0.1:9001/?key=${TRIGGER_SECRET}&action=$arg_action;
     }
