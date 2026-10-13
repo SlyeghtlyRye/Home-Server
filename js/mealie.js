@@ -17,6 +17,18 @@ import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
 // dashboard is served from the same device Mealie runs on).
 const HOST_IP = window.HOST_IP || location.hostname;
 
+// "2026-10-16" is precise but not how anyone thinks about a week of
+// meals -- "Friday, Oct 16" reads instantly and still disambiguates
+// across multiple selected weeks (weekSelection can span more than one
+// 7-day block). Built with the Date(y, m-1, d) local-time constructor,
+// not new Date(iso) -- that parses as UTC midnight, which can roll back
+// to the previous calendar day in any timezone behind UTC (the exact
+// class of bug this project chased down for Kanboard's date handling).
+function dayLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
 let calendarMonth = new Date();
 let plannedMap = {};
 let holidaysByDate = {}; // iso -> holiday name, only populated when shouldShowHolidays('mealie')
@@ -461,7 +473,7 @@ function closeEditPanel() {
 function editPanelBodyHtml() {
   const holiday = holidaysByDate[editPick.date];
   return `
-    <h3 style="margin-top:0;">Edit ${editPick.date}</h3>
+    <h3 style="margin-top:0;">Edit ${dayLabel(editPick.date)}</h3>
     ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     <div class="preview-row">
       <div class="combo-wrap">
@@ -477,6 +489,7 @@ function editPanelBodyHtml() {
         <div class="new-hint ${editPick.isNew ? 'show' : ''}" id="edit-hint">Will be created as a new recipe on save</div>
       </div>
       <button class="btn small" data-action="edit-reroll">Reroll</button>
+      <button class="btn small" data-action="edit-suggest">Suggest</button>
     </div>
     <div class="edit-swap-row">
       <label for="edit-swap-target">Swap with another day:</label>
@@ -622,6 +635,22 @@ async function editReroll() {
     renderModePanel();
   } catch (err) {
     showStatusModal('Reroll error: ' + err, 'error');
+  }
+}
+
+async function editSuggest() {
+  showStatusModal('Finding a recipe to suggest -- this can take a few seconds...', 'loading');
+  try {
+    const res = await fetch('/api/suggest-recipe', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); return; }
+    editPick.recipeId = data.recipeId;
+    editPick.recipeName = data.recipeName;
+    editPick.isNew = false;
+    hideStatusModal();
+    renderModePanel();
+  } catch (err) {
+    showStatusModal('Suggest error: ' + err, 'error');
   }
 }
 
@@ -1027,7 +1056,7 @@ function previewPanelBodyHtml() {
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
     ${previewPicks.map(p => `
       <div class="preview-row">
-        <span class="date">${p.date}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
+        <span class="date">${dayLabel(p.date)}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
         <div class="combo-wrap">
           <input
             id="input-${p.date}"
@@ -1042,6 +1071,7 @@ function previewPanelBodyHtml() {
           <div class="new-hint ${p.isNew ? 'show' : ''}" id="hint-${p.date}">Will be created as a new recipe on save</div>
         </div>
         <button class="btn small" data-action="reroll" data-date="${p.date}" ${disabled}>Reroll</button>
+        <button class="btn small" data-action="suggest-recipe" data-date="${p.date}" ${disabled}>Suggest</button>
         <button class="icon-btn-erase" data-action="clear-day" data-date="${p.date}" title="Clear this day's recipe" ${disabled}>&#x2716;</button>
         <button class="icon-btn-delete" data-action="remove-day" data-date="${p.date}" title="Remove this day" ${disabled}>&#x1F5D1;</button>
       </div>
@@ -1080,6 +1110,31 @@ async function rerollDay(dateStr) {
     renderModePanel();
   } catch (err) {
     showStatusModal('Reroll error: ' + err, 'error');
+  }
+}
+
+// Unlike rerollDay() (an instant pick from the existing library),
+// suggest-recipe hits an external website and runs it through Mealie's
+// scraper -- genuinely slower, and the backend may retry a few sources
+// internally before succeeding or giving up, so this shows its own
+// loading state rather than relying on the button's disabled look alone.
+async function suggestRecipe(dateStr) {
+  if (isCommitting) return;
+  showStatusModal('Finding a recipe to suggest -- this can take a few seconds...', 'loading');
+  try {
+    const res = await fetch('/api/suggest-recipe', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); return; }
+    const entry = previewPicks.find(p => p.date === dateStr);
+    if (entry) {
+      entry.recipeId = data.recipeId;
+      entry.recipeName = data.recipeName;
+      entry.isNew = false;
+    }
+    hideStatusModal();
+    renderModePanel();
+  } catch (err) {
+    showStatusModal('Suggest error: ' + err, 'error');
   }
 }
 
@@ -1648,11 +1703,13 @@ function wireDelegatedListeners() {
       case 'clear-selected-days': return clearSelectedDays();
       case 'cancel-selection': return clearSelection();
       case 'reroll': return rerollDay(date);
+      case 'suggest-recipe': return suggestRecipe(date);
       case 'clear-day': return clearPreviewDay(date);
       case 'remove-day': return removePreviewDay(date);
       case 'commit': return commitPreview();
       case 'cancel-preview': return cancelPreview();
       case 'edit-reroll': return editReroll();
+      case 'edit-suggest': return editSuggest();
       case 'edit-save': return saveEditPick();
       case 'edit-cancel': return closeEditPanel();
       case 'edit-swap': return doEditSwap();

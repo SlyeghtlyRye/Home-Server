@@ -22,6 +22,7 @@ import { escapeHtml } from './core.js';
 let openPopoverKey = null; // which calendar's popover is open ('mealie'/'kanboard'), or null
 let countriesCache = null; // [{code, name}], loaded once, shared by both calendars
 let currentCountryCache = null; // the one global country code, or "" if unset
+let recipeSourcesCache = null; // [{url, successes, failures}], Mealie's "Suggest" source list -- mealie-only, but loaded for both calendars same as everything else above
 
 function showHolidaysStorageKey(calendarKey) {
   return `${calendarKey}_showHolidays`;
@@ -37,18 +38,22 @@ export function shouldShowHolidays(calendarKey) {
 // up front, same pattern as mealie.js's allRecipes/kanboard.js's allPeople).
 export async function loadCalendarSettingsData() {
   try {
-    const [countriesRes, settingsRes] = await Promise.all([
+    const [countriesRes, settingsRes, recipeSourcesRes] = await Promise.all([
       fetch('/data/holiday-countries'),
       fetch('/data/holiday-settings'),
+      fetch('/data/recipe-suggestion-sources'),
     ]);
     const countriesData = await countriesRes.json();
     const settingsData = await settingsRes.json();
+    const recipeSourcesData = await recipeSourcesRes.json();
     countriesCache = countriesData.countries || [];
     currentCountryCache = settingsData.country || '';
+    recipeSourcesCache = recipeSourcesData.sources || [];
   } catch (err) {
     console.error('Failed to load calendar settings', err);
     countriesCache = countriesCache || [];
     currentCountryCache = currentCountryCache || '';
+    recipeSourcesCache = recipeSourcesCache || [];
   }
 }
 
@@ -90,7 +95,39 @@ function popoverBodyHtml(calendarKey) {
       <input type="text" class="cal-settings-feed-url" data-calendar="${calendarKey}" readonly value="${escapeHtml(icalUrl(calendarKey))}">
       <button class="btn small" data-action="copy-feed-url" data-calendar="${calendarKey}">Copy</button>
     </div>
+    ${calendarKey === 'mealie' ? recipeSourcesSectionHtml() : ''}
   `;
+}
+
+// Mealie-only -- the Suggest button's source list. Kanboard has no
+// recipe concept, so this section only renders in Mealie's popover, the
+// same calendarKey-branch icalUrl() above already uses for its own
+// Mealie-vs-Kanboard feed path.
+function recipeSourcesSectionHtml() {
+  return `
+    <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border-soft);">
+      <div style="color:var(--color-text-muted); font-size:11px; margin-bottom:4px;">Suggest -- recipe sites to pull from</div>
+      ${recipeSourcesCache.map(s => `
+        <div class="cal-settings-row" style="gap:6px;">
+          <span style="flex:1; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(s.url)}">${escapeHtml(hostnameOf(s.url))}</span>
+          <span style="font-size:10px; color:var(--color-text-muted);" title="${s.successes} successful, ${s.failures} failed import(s)">&#x2713;${s.successes} &#x2717;${s.failures}</span>
+          <button class="icon-btn-delete" data-action="remove-recipe-source" data-url="${escapeHtml(s.url)}" title="Remove this source">&#x1F5D1;</button>
+        </div>
+      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">No sources yet -- add one below.</p>`}
+      <div class="cal-settings-row" style="gap:4px; margin-top:4px;">
+        <input type="text" id="new-recipe-source-url" placeholder="https://example.com/a-recipe/" style="flex:1; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
+        <button class="btn small" data-action="add-recipe-source">Add</button>
+      </div>
+    </div>
+  `;
+}
+
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
 
 // Returns true if it handled the click (caller should stop there),
@@ -112,6 +149,29 @@ export function handleClick(e, calendarKey, rerender) {
         // Clipboard API can be unavailable (e.g. non-HTTPS context) --
         // the text is still selected as a manual-copy fallback.
       });
+    }
+    return true;
+  }
+  const removeSourceBtn = e.target.closest('[data-action="remove-recipe-source"]');
+  if (removeSourceBtn && calendarKey === 'mealie') {
+    const url = removeSourceBtn.dataset.url;
+    fetch('/api/remove-recipe-suggestion-source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
+    return true;
+  }
+  const addSourceBtn = e.target.closest('[data-action="add-recipe-source"]');
+  if (addSourceBtn && calendarKey === 'mealie') {
+    const input = e.target.closest('.cal-settings-popover')?.querySelector('#new-recipe-source-url');
+    const url = input ? input.value.trim() : '';
+    if (url) {
+      fetch('/api/add-recipe-suggestion-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
     }
     return true;
   }

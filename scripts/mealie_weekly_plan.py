@@ -50,6 +50,27 @@ def create_recipe(name):
     return data["id"], data["name"]
 
 
+def create_recipe_from_url(url):
+    """Same create-then-re-fetch-by-slug shape as create_recipe() above --
+    Mealie's create/url endpoint (the same one its own "Import from URL"
+    button uses) scrapes the page with recipe-scrapers under the hood, so
+    not every site parses cleanly; a raised requests.HTTPError here is
+    the normal, expected way a bad source URL reports failure, not a bug
+    -- callers (recipe_suggest.py) catch it and try another source."""
+    resp = requests.post(
+        f"{MEALIE_URL}/api/recipes/create/url",
+        headers=get_headers(),
+        json={"url": url, "includeTags": False},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    slug = resp.json()
+    detail = requests.get(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
+    detail.raise_for_status()
+    data = detail.json()
+    return data["id"], data["name"]
+
+
 def get_recipe_summaries():
     resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=get_headers(), params={"perPage": 100})
     resp.raise_for_status()
