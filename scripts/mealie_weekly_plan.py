@@ -50,41 +50,46 @@ def create_recipe(name):
     return data["id"], data["name"]
 
 
-def create_recipe_from_url(url):
-    """Same create-then-re-fetch-by-slug shape as create_recipe() above --
-    Mealie's create/url endpoint (the same one its own "Import from URL"
-    button uses) scrapes the page with recipe-scrapers under the hood, so
-    not every site parses cleanly; a raised requests.HTTPError here is
-    the normal, expected way a bad source URL reports failure, not a bug
-    -- callers (recipe_suggest.py) catch it and try another source.
+def create_recipe_from_structured(name, ingredient_lines, instruction_steps):
+    """Creates a brand-new Mealie recipe directly from already-structured
+    data (plain ingredient line strings, plain instruction step strings)
+    -- no scraping, no guessing at page structure. Used by
+    recipe_suggest.py for TheMealDB-sourced suggestions, where the
+    source data is already clean. Replaced an earlier version of this
+    feature that scraped arbitrary blog URLs through Mealie's generic
+    create/url endpoint -- confirmed repeatedly, live, to be fragile
+    (slow-page timeouts, 400s on unparseable page structures, and a
+    site's own homepage "succeeding" with placeholder junk content) in
+    ways that simply don't apply when the data arrives pre-structured.
 
-    A raised HTTPError isn't the only failure mode, though: given a
-    non-recipe page (e.g. a site's homepage instead of one specific
-    recipe), Mealie's scraper can return 200 OK anyway, falling back to
-    the page's own title/tagline as the "recipe" name with no ingredients
-    or instructions at all -- confirmed on a real device importing a
-    bare domain URL, which produced a junk recipe named after the site
-    itself. Treated as a failure here (and the junk entry deleted again)
-    rather than ever being handed back as a real suggestion."""
-    resp = requests.post(
-        f"{MEALIE_URL}/api/recipes/create/url",
-        headers=get_headers(),
-        json={"url": url, "includeTags": False},
-        # A real recipe page has far more to fetch and parse than a bare
-        # homepage -- confirmed on a real device, where 20s was enough for
-        # every junk homepage URL to "succeed" instantly but timed out on
-        # 4 of 5 genuine recipe pages every single time.
-        timeout=60,
-    )
-    resp.raise_for_status()
-    slug = resp.json()
-    detail = requests.get(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
+    Read-modify-write against the full recipe object, same pattern as
+    sync_recipe_ingredients() above -- Mealie's recipe update endpoint
+    expects the complete recipe body, not a partial patch."""
+    recipe_id, _ = create_recipe(name)
+    match = next((r for r in get_recipe_summaries() if r["id"] == recipe_id), None)
+    detail = requests.get(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers())
     detail.raise_for_status()
-    data = detail.json()
-    if not data.get("recipeIngredient") or not data.get("recipeInstructions"):
-        requests.delete(f"{MEALIE_URL}/api/recipes/{slug}", headers=get_headers())
-        raise ValueError(f"scraped page has no real recipe content (no ingredients/instructions): {url}")
-    return data["id"], data["name"]
+    recipe = detail.json()
+
+    recipe["recipeIngredient"] = [
+        {
+            "quantity": None, "unit": None, "food": None,
+            "note": text, "isFood": False, "disableAmount": True,
+            "display": text, "title": None, "originalText": text,
+            "referenceId": str(uuid.uuid4()),
+        }
+        for text in ingredient_lines
+    ]
+    recipe["recipeInstructions"] = [
+        {"id": str(uuid.uuid4()), "title": "", "text": text, "ingredientReferences": []}
+        for text in instruction_steps
+    ]
+
+    put_resp = requests.put(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers(), json=recipe)
+    if not put_resp.ok:
+        requests.delete(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers())
+        raise RuntimeError(f"Mealie rejected the recipe update: {put_resp.status_code} {put_resp.text[:300]}")
+    return recipe_id, name
 
 
 def get_recipe_summaries():

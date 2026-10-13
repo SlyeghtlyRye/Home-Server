@@ -417,10 +417,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {"country": hc.get_configured_country()})
             return
 
-        if parsed.path == "/data/recipe-suggestion-sources":
-            self._send_json(200, {"sources": recipe_suggest.get_sources()})
-            return
-
         if parsed.path == "/data/holidays":
             start_s = params.get("start", [None])[0]
             end_s = params.get("end", [None])[0]
@@ -784,26 +780,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             hc.save_configured_country(country)
             self._send_json(200, {"status": "ok"})
-            return
-
-        if parsed.path == "/api/add-recipe-suggestion-source":
-            body = self._read_json_body()
-            url = (body.get("url") or "").strip()
-            if not url:
-                self._send_json(400, {"error": "missing url"})
-                return
-            recipe_suggest.add_source(url)
-            self._send_json(200, {"sources": recipe_suggest.get_sources()})
-            return
-
-        if parsed.path == "/api/remove-recipe-suggestion-source":
-            body = self._read_json_body()
-            url = (body.get("url") or "").strip()
-            if not url:
-                self._send_json(400, {"error": "missing url"})
-                return
-            recipe_suggest.remove_source(url)
-            self._send_json(200, {"sources": recipe_suggest.get_sources()})
             return
 
         if parsed.path == "/api/suggest-recipe":

@@ -20,7 +20,7 @@ scripts/kanboard_token.txt
 
 # Personal data - Calendar settings
 scripts/holiday_country.txt
-scripts/recipe_suggestion_sources.json
+scripts/suggested_recipe_ids.json
 
 # Personal data - Syncthing
 scripts/syncthing_config.json

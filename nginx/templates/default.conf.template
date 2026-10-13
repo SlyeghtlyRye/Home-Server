@@ -181,15 +181,6 @@ server {
     location /data/holiday-settings {
             proxy_pass http://172.17.0.1:9001/data/holiday-settings?key=${TRIGGER_SECRET};
     }
-    location /data/recipe-suggestion-sources {
-            proxy_pass http://172.17.0.1:9001/data/recipe-suggestion-sources?key=${TRIGGER_SECRET};
-    }
-    location /api/add-recipe-suggestion-source {
-            proxy_pass http://172.17.0.1:9001/api/add-recipe-suggestion-source?key=${TRIGGER_SECRET};
-    }
-    location /api/remove-recipe-suggestion-source {
-            proxy_pass http://172.17.0.1:9001/api/remove-recipe-suggestion-source?key=${TRIGGER_SECRET};
-    }
     location /api/suggest-recipe {
             proxy_pass http://172.17.0.1:9001/api/suggest-recipe?key=${TRIGGER_SECRET};
     }
