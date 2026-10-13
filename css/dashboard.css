@@ -123,7 +123,7 @@
     .icon-btn-delete:hover { background: #4a2b2b; }
     .preview-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--color-border-soft); flex-wrap: wrap; }
     .preview-row:last-of-type { border-bottom: none; }
-    .preview-row .date { color: var(--color-text-muted); min-width: 90px; }
+    .preview-row .date { color: var(--color-text-muted); flex: 0 0 95px; }
     .combo-wrap { position: relative; flex: 1; min-width: 180px; }
     .recipe-combo { width: 100%; background: var(--color-bg); color: white; border: 1px solid var(--color-border); padding: 8px; border-radius: 4px; font-size: 14px; }
     .recipe-combo.is-new { border-color: var(--color-warning-border); }
@@ -265,6 +265,12 @@
     .cal-meal-extra { font-size: 9px; color: var(--color-text-muted); }
     .cal-holiday { font-size: 9px; color: var(--color-warning); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .day-holiday-badge { font-size: 12px; font-weight: 600; color: var(--color-warning); margin: 2px 0 8px; }
+    .suggesting-placeholder { position: relative; overflow: hidden; }
+    .suggesting-text { animation: suggesting-pulse 1.2s ease-in-out infinite; }
+    .suggesting-bar { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: var(--color-border-soft); overflow: hidden; }
+    .suggesting-bar::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; background: var(--color-accent); border-radius: 2px; animation: suggesting-slide 1.2s ease-in-out infinite; }
+    @keyframes suggesting-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+    @keyframes suggesting-slide { 0% { left: -40%; } 100% { left: 100%; } }
     .cal-loading { text-align: center; padding: 40px 0; color: var(--color-text-muted); }
     .cal-settings-wrap { position: relative; }
     .cal-settings-gear { background: transparent; border: 1px solid var(--color-border-soft); border-radius: 6px; padding: 6px 10px; font-size: 14px; cursor: pointer; line-height: 1; }

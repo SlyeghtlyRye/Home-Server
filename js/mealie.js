@@ -26,7 +26,14 @@ const HOST_IP = window.HOST_IP || location.hostname;
 // class of bug this project chased down for Kanboard's date handling).
 function dayLabel(iso) {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('default', { weekday: 'long', month: 'short', day: 'numeric' });
+  return new Date(y, m - 1, d).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Per-browser preference, same pattern as avoidRepeats/defaultExcludedWeekdays
+// -- read by suggestRecipe()/editSuggest() on every click rather than
+// re-fetched from the server, since it's just a toggle, not real data.
+function shouldSuggestDinnersOnly() {
+  return localStorage.getItem('mealie_suggestDinnersOnly') === 'true';
 }
 
 let calendarMonth = new Date();
@@ -486,7 +493,7 @@ function editPanelBodyHtml() {
     <div class="preview-row" ${editSuggesting ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
       <div class="combo-wrap">
         ${editSuggesting
-          ? `<div class="recipe-combo" style="color:var(--color-text-muted); font-style:italic;">Suggesting...</div>`
+          ? `<div class="recipe-combo suggesting-placeholder" style="color:var(--color-text-muted); font-style:italic;"><span class="suggesting-text">Suggesting...</span><div class="suggesting-bar"></div></div>`
           : `<input
               id="edit-input"
               class="recipe-combo ${editPick.isNew ? 'is-new' : ''}"
@@ -501,6 +508,10 @@ function editPanelBodyHtml() {
       <button class="btn small" data-action="edit-reroll">Reroll</button>
       <button class="btn small" data-action="edit-suggest">Suggest</button>
     </div>
+    <label class="check-row" style="margin:4px 0 8px;">
+      <input type="checkbox" data-action="toggle-suggest-dinners-only" ${shouldSuggestDinnersOnly() ? 'checked' : ''}>
+      Suggest dinners only (skip breakfast/dessert/etc.)
+    </label>
     <div class="edit-swap-row">
       <label for="edit-swap-target">Swap with another day:</label>
       <input type="date" id="edit-swap-target">
@@ -653,8 +664,20 @@ async function editSuggest() {
   editSuggesting = true;
   renderModePanel();
   try {
-    const res = await fetch('/api/suggest-recipe', { method: 'POST' });
-    const data = await res.json();
+    const res = await fetch('/api/suggest-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly() }),
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      editSuggesting = false;
+      showStatusModal('Suggest failed: the server took too long or hit an error -- try again.', 'error');
+      renderModePanel();
+      return;
+    }
     editSuggesting = false;
     if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); renderModePanel(); return; }
     editPick.recipeId = data.recipeId;
@@ -1062,12 +1085,20 @@ function onComboBlur(dateStr) {
 function previewPanelBodyHtml() {
   const conflicts = previewConflicts || [];
   const disabled = isCommitting ? 'disabled' : '';
+  // Confirm/Cancel specifically also wait out any in-flight Suggest --
+  // saving or cancelling out from under a still-running suggestion could
+  // leave previewPicks in a half-updated state once it resolves.
+  const confirmCancelDisabled = (isCommitting || suggestingDate) ? 'disabled' : '';
   return `
     <h3 style="margin-top:0;">Preview</h3>
     ${isCommitting
       ? `<p style="color:var(--color-text-dim); font-size:13px;">Saving in the background -- feel free to switch tabs, this will finish on its own.</p>`
       : `<p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>`}
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
+    <label class="check-row" style="margin-bottom:8px;">
+      <input type="checkbox" data-action="toggle-suggest-dinners-only" ${shouldSuggestDinnersOnly() ? 'checked' : ''}>
+      Suggest dinners only (skip breakfast/dessert/etc.)
+    </label>
     ${previewPicks.map(p => {
       const isSuggesting = suggestingDate === p.date;
       return `
@@ -1075,7 +1106,7 @@ function previewPanelBodyHtml() {
         <span class="date">${dayLabel(p.date)}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
         <div class="combo-wrap">
           ${isSuggesting
-            ? `<div class="recipe-combo" style="color:var(--color-text-muted); font-style:italic;">Suggesting...</div>`
+            ? `<div class="recipe-combo suggesting-placeholder" style="color:var(--color-text-muted); font-style:italic;"><span class="suggesting-text">Suggesting...</span><div class="suggesting-bar"></div></div>`
             : `<input
                 id="input-${p.date}"
                 class="recipe-combo ${p.isNew ? 'is-new' : ''}"
@@ -1096,14 +1127,14 @@ function previewPanelBodyHtml() {
     `;
     }).join('')}
     <div class="btn-grid" style="margin-top:15px;">
-      <button class="btn save" data-action="commit" ${disabled}>Confirm & Save</button>
-      <button class="btn cancel" data-action="cancel-preview" ${disabled}>Cancel</button>
+      <button class="btn save" data-action="commit" ${confirmCancelDisabled}>Confirm & Save</button>
+      <button class="btn cancel" data-action="cancel-preview" ${confirmCancelDisabled}>Cancel</button>
     </div>
   `;
 }
 
 function cancelPreview() {
-  if (isCommitting) return;
+  if (isCommitting || suggestingDate) return;
   previewPicks = null;
   previewConflicts = [];
   renderModePanel();
@@ -1133,18 +1164,33 @@ async function rerollDay(dateStr) {
 }
 
 // Unlike rerollDay() (an instant pick from the existing library),
-// suggest-recipe hits an external website and runs it through Mealie's
-// scraper -- genuinely slower, and the backend may retry a few sources
-// internally before succeeding or giving up. Dims and disables just this
-// one row (suggestingDate) rather than blocking the whole panel, so
-// other days stay editable while this one's scrape is in flight.
+// suggest-recipe pulls a fresh meal from TheMealDB and creates it in
+// Mealie -- a real network round-trip, slower than an instant reroll.
+// Dims and disables just this one row (suggestingDate) rather than
+// blocking the whole panel, so other days stay editable meanwhile.
 async function suggestRecipe(dateStr) {
   if (isCommitting || suggestingDate) return;
   suggestingDate = dateStr;
   renderModePanel();
   try {
-    const res = await fetch('/api/suggest-recipe', { method: 'POST' });
-    const data = await res.json();
+    const res = await fetch('/api/suggest-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly() }),
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      // A non-JSON body here means nginx or the upstream gave up and
+      // served its own error page (e.g. a proxy timeout) rather than
+      // the backend's real response -- show something a person can act
+      // on instead of a raw SyntaxError dump.
+      suggestingDate = null;
+      showStatusModal('Suggest failed: the server took too long or hit an error -- try again.', 'error');
+      renderModePanel();
+      return;
+    }
     suggestingDate = null;
     if (!res.ok) { showStatusModal('Suggest failed: ' + (data.error || res.status), 'error'); renderModePanel(); return; }
     const entry = previewPicks.find(p => p.date === dateStr);
@@ -1196,7 +1242,7 @@ async function resolveNewRecipes(picks) {
 }
 
 async function commitPreview() {
-  if (isCommitting || !previewPicks || previewPicks.length === 0) return;
+  if (isCommitting || suggestingDate || !previewPicks || previewPicks.length === 0) return;
   const emptyDays = previewPicks.filter(p => !p.recipeId && !(p.isNew && p.recipeName && p.recipeName.trim()));
   if (emptyDays.length > 0) {
     showStatusModal(`These days still need a recipe before saving: ${emptyDays.map(p => p.date).join(', ')}`, 'error');
@@ -1708,6 +1754,9 @@ function wireDelegatedListeners() {
   }, { passive: false });
   modePanel.addEventListener('change', (e) => {
     if (e.target.id === 'avoid-repeats-check') toggleAvoidRepeats(e.target.checked);
+    if (e.target.closest('[data-action="toggle-suggest-dinners-only"]')) {
+      localStorage.setItem('mealie_suggestDinnersOnly', e.target.checked ? 'true' : 'false');
+    }
   });
   modePanel.addEventListener('click', (e) => {
     const modeSwitchBtn = e.target.closest('.mode-panel-mode-switch button');

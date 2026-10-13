@@ -783,8 +783,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/suggest-recipe":
+            body = self._read_json_body()
+            dinners_only = bool(body.get("dinnersOnly"))
             try:
-                recipe_id, recipe_name = recipe_suggest.suggest_recipe()
+                recipe_id, recipe_name = recipe_suggest.suggest_recipe(dinners_only=dinners_only)
                 self._send_json(200, {"recipeId": recipe_id, "recipeName": recipe_name})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})

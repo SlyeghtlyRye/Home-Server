@@ -49,16 +49,22 @@ patching around them.
   get a fresh empty recipe, then a read-modify-write PUT setting
   `recipeIngredient`/`recipeInstructions` -- same pattern as this file's
   existing `sync_recipe_ingredients()`, no scraping involved at all.
-- `scripts/recipe_suggest.py` -- `suggest_recipe()` pulls up to
-  `MAX_ATTEMPTS_PER_SUGGEST` (4) random meals, preferring one never
-  suggested before (tracked by TheMealDB's own stable meal ID in
-  `SUGGESTED_RECIPE_IDS_FILE`, default
-  `/root/scripts/suggested_recipe_ids.json`, gitignored) -- repeating a
-  meal already in the library isn't a suggestion, just noise. Falls back
-  to accepting a repeat only if every attempt in a batch lands on an
-  already-seen meal.
-- `scripts/trigger_server.py` -- `POST /api/suggest-recipe` (no body),
-  returns `{recipeId, recipeName}`.
+- `scripts/recipe_suggest.py` -- `suggest_recipe(dinners_only=False)`
+  pulls up to `MAX_ATTEMPTS_PER_SUGGEST` (4) random meals, preferring one
+  that's both never suggested before (tracked by TheMealDB's own stable
+  meal ID in `SUGGESTED_RECIPE_IDS_FILE`, default
+  `/root/scripts/suggested_recipe_ids.json`, gitignored -- repeating a
+  meal already in the library isn't a suggestion, just noise) and, when
+  `dinners_only` is set, not in `NON_DINNER_CATEGORIES` (`Breakfast`,
+  `Dessert`, `Starter`, `Side`). TheMealDB has no "Dinner" category of
+  its own -- it splits by protein/dish-type instead -- so this excludes
+  the clearly-wrong categories rather than trying to maintain an
+  include-list of every category that counts as a main course. Falls
+  back to accepting a non-matching meal only if every attempt in a batch
+  fails one or both checks.
+- `scripts/trigger_server.py` -- `POST /api/suggest-recipe`, body
+  `{dinnersOnly}` (optional, default false), returns
+  `{recipeId, recipeName}`.
 
 No user-managed source list exists any more -- there's nothing left to
 curate once the source is a large public database instead of a handful
@@ -66,14 +72,25 @@ of hand-picked blog URLs.
 
 ## Frontend
 
-- `js/mealie.js` -- `suggestRecipe(dateStr)`/`editSuggest()` are
-  unchanged in shape from the original version (still just `POST
-  /api/suggest-recipe` and assign the result to a day), but now show a
+- `js/mealie.js` -- `suggestRecipe(dateStr)`/`editSuggest()` show a
   **localized per-row loading state** instead of a blocking global
   modal: the specific day's row dims (`opacity` + `pointer-events: none`
-  on that one `.preview-row`) and its recipe field shows "Suggesting..."
-  in place of the input, while the rest of the week/panel stays fully
-  interactive. Driven by `suggestingDate`/`editSuggesting` module state.
+  on that one `.preview-row`) and its recipe field shows an animated
+  "Suggesting..." placeholder (pulsing text + an indeterminate sliding
+  progress bar, `.suggesting-bar`) in place of the input, while the rest
+  of the week/panel stays fully interactive -- Confirm/Cancel are the
+  one exception, disabled while any row is suggesting so they can't act
+  on a still-updating `previewPicks`. Driven by
+  `suggestingDate`/`editSuggesting` module state. A non-JSON response
+  (e.g. an nginx proxy timeout serving its own HTML error page) shows a
+  plain-language message instead of a raw `SyntaxError` dump.
+- `shouldSuggestDinnersOnly()` reads a per-browser localStorage flag
+  (`mealie_suggestDinnersOnly`), set via an inline checkbox in both the
+  Preview panel and the Edit panel (not the gear-icon Calendar Settings
+  popover -- this is toggled in the same moment as clicking Suggest
+  itself, so it stays inline rather than requiring a trip to a separate
+  settings UI) -- sent as `dinnersOnly` on every `/api/suggest-recipe`
+  call.
 - `js/calendar-settings.js` -- back to holidays/sync only; the
   Mealie-only recipe-source-management section that used to live in
   this shared popover was removed along with the source-list concept.
