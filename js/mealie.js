@@ -32,8 +32,14 @@ function dayLabel(iso) {
 // Per-browser preference, same pattern as avoidRepeats/defaultExcludedWeekdays
 // -- read by suggestRecipe()/editSuggest() on every click rather than
 // re-fetched from the server, since it's just a toggle, not real data.
+// Defaults to true (only 'false' turns it off) and its own checkbox is
+// hidden for now -- the user always wants dinners-only today, no UI
+// needed to express a choice nobody's making yet. Flip
+// SHOW_DINNERS_ONLY_TOGGLE back to true to re-expose it later; the
+// checkbox markup/wiring is untouched, just not rendered.
+const SHOW_DINNERS_ONLY_TOGGLE = false;
 function shouldSuggestDinnersOnly() {
-  return localStorage.getItem('mealie_suggestDinnersOnly') === 'true';
+  return localStorage.getItem('mealie_suggestDinnersOnly') !== 'false';
 }
 
 let calendarMonth = new Date();
@@ -508,10 +514,11 @@ function editPanelBodyHtml() {
       <button class="btn small" data-action="edit-reroll">Reroll</button>
       <button class="btn small" data-action="edit-suggest">Suggest</button>
     </div>
+    ${SHOW_DINNERS_ONLY_TOGGLE ? `
     <label class="check-row" style="margin:4px 0 8px;">
       <input type="checkbox" data-action="toggle-suggest-dinners-only" ${shouldSuggestDinnersOnly() ? 'checked' : ''}>
       Suggest dinners only (skip breakfast/dessert/etc.)
-    </label>
+    </label>` : ''}
     <div class="edit-swap-row">
       <label for="edit-swap-target">Swap with another day:</label>
       <input type="date" id="edit-swap-target">
@@ -1095,10 +1102,11 @@ function previewPanelBodyHtml() {
       ? `<p style="color:var(--color-text-dim); font-size:13px;">Saving in the background -- feel free to switch tabs, this will finish on its own.</p>`
       : `<p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>`}
     ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
+    ${SHOW_DINNERS_ONLY_TOGGLE ? `
     <label class="check-row" style="margin-bottom:8px;">
       <input type="checkbox" data-action="toggle-suggest-dinners-only" ${shouldSuggestDinnersOnly() ? 'checked' : ''}>
       Suggest dinners only (skip breakfast/dessert/etc.)
-    </label>
+    </label>` : ''}
     ${previewPicks.map(p => {
       const isSuggesting = suggestingDate === p.date;
       return `
