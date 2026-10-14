@@ -18,6 +18,9 @@ ENV_FILE = os.path.join(ROOT, ".env")
 ENV_EXAMPLE = os.path.join(ROOT, ".env.example")
 JS_CONFIG_FILE = os.path.join(ROOT, "js", "config.js")
 SYSTEMD_UNIT_PATH = "/etc/systemd/system/mealie-trigger.service"
+CERTS_DIR = os.path.join(ROOT, "nginx", "certs")
+CERT_FILE = os.path.join(CERTS_DIR, "selfsigned.crt")
+CERT_KEY_FILE = os.path.join(CERTS_DIR, "selfsigned.key")
 
 SYSTEMD_UNIT_CONTENT = """[Unit]
 Description=Mealie Meal Plan Trigger
@@ -109,6 +112,43 @@ def write_js_config(host_ip, dry_run, log_lines):
     with open(JS_CONFIG_FILE, "w") as f:
         f.write(content)
     _log(log_lines, f"Wrote {JS_CONFIG_FILE}")
+
+
+def generate_self_signed_cert(host_ip, dry_run, log_lines):
+    """Self-signed because there's no publicly-resolvable domain for an
+    internal-only hostname like home.dashboard -- a real CA-issued cert
+    isn't possible here. Regenerated unconditionally (same reasoning as
+    write_js_config() above, just cheap enough not to bother checking
+    whether it's already current) so a HOST_IP change always lands in
+    the IP SAN rather than leaving a stale cert that only matches the
+    device's old address. subjectAltName is required -- modern browsers
+    reject a cert that only has a CN, no SAN at all.
+
+    Uses openssl via subprocess rather than adding the `cryptography`
+    pip package as a new dependency -- openssl is already present on
+    every Debian-based image this project targets, and every other
+    install in this repo is already informal/no-requirements.txt."""
+    if dry_run:
+        _log(log_lines, f"[dry-run] would generate a self-signed TLS cert "
+                         f"({CERT_FILE}) covering home.dashboard, "
+                         f"home.dashboard.local, home.dashboard.internal, and {host_ip}")
+        return
+    os.makedirs(CERTS_DIR, exist_ok=True)
+    san = (
+        "subjectAltName=DNS:home.dashboard,DNS:home.dashboard.local,"
+        f"DNS:home.dashboard.internal,IP:{host_ip},IP:127.0.0.1"
+    )
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
+            "-keyout", CERT_KEY_FILE, "-out", CERT_FILE,
+            "-subj", "/CN=home.dashboard",
+            "-addext", san,
+        ],
+        check=True, capture_output=True,
+    )
+    os.chmod(CERT_KEY_FILE, 0o600)
+    _log(log_lines, f"Generated self-signed TLS cert at {CERT_FILE}")
 
 
 def generate_docs(dry_run, log_lines):
@@ -215,6 +255,7 @@ def run_setup(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     _log(log_lines, f"{'[DRY RUN] ' if dry_run else ''}Setting up...")
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
+    generate_self_signed_cert(host_ip, dry_run, log_lines)
     generate_docs(dry_run, log_lines)
     ensure_python_deps(dry_run, log_lines)
     if skip_service_restart:
@@ -233,6 +274,7 @@ def run_reset(host_ip, timezone, dry_run, skip_service_restart=False, return_log
     remove_personal_data(dry_run, log_lines)
     write_env(host_ip, timezone, dry_run, log_lines)
     write_js_config(host_ip, dry_run, log_lines)
+    generate_self_signed_cert(host_ip, dry_run, log_lines)
     generate_docs(dry_run, log_lines)
     ensure_python_deps(dry_run, log_lines)
     if skip_service_restart:

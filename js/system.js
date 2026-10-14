@@ -54,6 +54,28 @@ function renderShellHtml() {
         <button class="btn small" data-action="load-past-updates">Show Past Updates</button>
       </div>
     </div>
+    ${location.protocol !== 'https:' ? `
+    <div class="week-block">
+      <h3>HTTPS Certificate</h3>
+      <p style="color:var(--color-text-dim); font-size:14px;">
+        This dashboard's HTTPS uses a self-signed certificate -- there's no
+        publicly-resolvable domain for an internal address, so a real
+        CA-issued cert isn't possible. Download it once per device and
+        install it as a trusted profile to stop browsers warning about it
+        or silently blocking background requests. On iPhone: open this
+        page in Safari, tap the download, then Settings &rarr; Profile
+        Downloaded &rarr; Install, then Settings &rarr; General &rarr;
+        About &rarr; Certificate Trust Settings &rarr; enable full trust.
+        This card disappears on its own once you're viewing the dashboard
+        over https:// in a given browser -- reaching this page over HTTPS
+        at all already means that browser accepted the cert, otherwise its
+        own warning screen would have blocked the page before any of this
+        could even load.
+      </p>
+      <div class="btn-grid">
+        <a class="btn small" href="/selfsigned.crt" download="home-dashboard.crt" style="text-decoration:none; text-align:center;">Download Certificate</a>
+      </div>
+    </div>` : ''}
     <div class="week-block">
       <h3>Factory Reset</h3>
       <p style="color:var(--color-text-dim); font-size:14px;">

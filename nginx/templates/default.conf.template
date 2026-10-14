@@ -9,7 +9,25 @@ upstream kanboard {
 }
 server {
     listen 80;
+    listen 443 ssl;
+    # Self-signed -- there's no publicly-resolvable domain for an
+    # internal-only hostname like home.dashboard, so a real CA-issued
+    # cert isn't possible here. Generated (and regenerated whenever
+    # HOST_IP changes) by reset_manager.py's generate_self_signed_cert(),
+    # not committed -- see nginx/certs/.gitignore.
+    ssl_certificate /etc/nginx/certs/selfsigned.crt;
+    ssl_certificate_key /etc/nginx/certs/selfsigned.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
     server_name home.dashboard.local home.dashboard.internal;
+    # The public cert only -- never the private key -- served so a
+    # device (e.g. an iPhone in Safari) can download and install it as a
+    # trusted profile without needing SSH/file-transfer at all. Safe to
+    # serve plainly: a certificate is meant to be handed to clients,
+    # that's the whole point of the public/private split.
+    location = /selfsigned.crt {
+        alias /etc/nginx/certs/selfsigned.crt;
+        add_header Content-Type application/x-x509-ca-cert;
+    }
     location / {
         root /usr/share/nginx/html;
         try_files $uri $uri/ /index.html;

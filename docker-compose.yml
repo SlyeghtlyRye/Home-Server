@@ -43,6 +43,7 @@ services:
     container_name: nginx
     ports:
       - "80:80"
+      - "443:443"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -54,6 +55,12 @@ services:
       - ./js:/usr/share/nginx/html/js:ro
       - ./css:/usr/share/nginx/html/css:ro
       - ./docs:/usr/share/nginx/html/docs:ro
+      # Directory mount, not a single-file one -- a single-file bind mount
+      # can go stale when the host file is replaced rather than edited in
+      # place (the exact issue updater.py's own docstring documents for
+      # dashboard.html), which would matter a lot here since the cert
+      # gets regenerated whenever HOST_IP changes.
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - pihole
       - mealie
