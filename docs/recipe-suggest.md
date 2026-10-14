@@ -34,17 +34,27 @@ guess at, data arrives already clean and structured. Switching to it
 eliminated every one of the above failure modes at the root instead of
 patching around them.
 
-## Suggest options popup
+## Suggest popup -- filter, then review before committing
 
-Clicking Suggest opens a small popup (cuisine dropdown + category
-dropdown, both populated live from TheMealDB's own `list.php` -- never
-hardcoded, so they can't drift out of date with what the API actually
-has) before pulling a meal. "Any"/"Any" behaves exactly like the
-original pure-random version. A user explicitly asked for "suggest top
-meal by users" too, but TheMealDB's free API has no popularity/rating
-concept at all -- it's a static recipe database, not a social/rated
-platform -- so cuisine + category (both real, well-supported filters)
-replaced that idea instead of being left unaddressed.
+Clicking Suggest opens a popup with two steps:
+
+1. **Filters** -- cuisine dropdown + category dropdown, both populated
+   live from TheMealDB's own `list.php` (never hardcoded, so they can't
+   drift out of date with what the API actually has). "Any"/"Any"
+   behaves like pure random. A user explicitly asked for "suggest top
+   meal by users" too, but TheMealDB's free API has no popularity/rating
+   concept at all -- it's a static recipe database, not a social/rated
+   platform -- so cuisine + category (both real, well-supported filters)
+   replaced that idea instead of being left unaddressed.
+2. **Review** -- TheMealDB picks a candidate meal, but *nothing is
+   created in Mealie yet*. The popup shows its name, photo, and (when
+   TheMealDB has one) a "View recipe" link that opens the original
+   source page or YouTube video in a **new tab** (`target="_blank"`,
+   doesn't navigate away from the popup or lose any state) so the meal
+   can actually be reviewed before committing to it. From here: **Use
+   This Meal** creates it in Mealie and assigns it to the day, **Try
+   Another** re-picks within the same filters without closing the popup,
+   **Cancel** backs out entirely.
 
 `filter.php` only accepts one parameter per call (can't combine area +
 category server side), so picking both filters by whichever TheMealDB
@@ -66,28 +76,42 @@ looked-up detail afterward (`recipe_suggest._pick_filtered()`).
   `[(measure, ingredient), ...]` pairs; `meal_instructions()` splits its
   single instructions blob into individual steps on newlines.
 - `scripts/mealie_weekly_plan.py` -- `create_recipe_from_structured(name,
-  ingredient_lines, instruction_steps)` creates a new Mealie recipe
-  directly from already-structured plain-text data: `create_recipe()` to
-  get a fresh empty recipe, then a read-modify-write PUT setting
-  `recipeIngredient`/`recipeInstructions` -- same pattern as this file's
-  existing `sync_recipe_ingredients()`, no scraping involved at all.
-- `scripts/recipe_suggest.py` -- `suggest_recipe(dinners_only=False)`
-  pulls up to `MAX_ATTEMPTS_PER_SUGGEST` (4) random meals, preferring one
-  that's both never suggested before (tracked by TheMealDB's own stable
-  meal ID in `SUGGESTED_RECIPE_IDS_FILE`, default
-  `/root/scripts/suggested_recipe_ids.json`, gitignored -- repeating a
-  meal already in the library isn't a suggestion, just noise) and, when
-  `dinners_only` is set, not in `NON_DINNER_CATEGORIES` (`Breakfast`,
-  `Dessert`, `Starter`, `Side`). TheMealDB has no "Dinner" category of
-  its own -- it splits by protein/dish-type instead -- so this excludes
-  the clearly-wrong categories rather than trying to maintain an
-  include-list of every category that counts as a main course. Falls
-  back to accepting a non-matching meal only if every attempt in a batch
-  fails one or both checks.
+  ingredient_lines, instruction_steps, org_url=None)` creates a new
+  Mealie recipe directly from already-structured plain-text data:
+  `create_recipe()` to get a fresh empty recipe, then a read-modify-write
+  PUT setting `recipeIngredient`/`recipeInstructions` (and `orgURL` when
+  given -- TheMealDB's `strSource`/`strYoutube`, so the recipe keeps a
+  link back to where it came from even after the popup closes) -- same
+  pattern as this file's existing `sync_recipe_ingredients()`, no
+  scraping involved at all.
+- `scripts/recipe_suggest.py` splits picking from creating, matching the
+  popup's two steps:
+  - `pick_meal(dinners_only=False, area=None, category=None,
+    exclude_id=None)` -- picks a candidate meal *without creating
+    anything in Mealie*. Pulls up to `MAX_ATTEMPTS_PER_SUGGEST` (4)
+    candidates, preferring one that's both never suggested before
+    (tracked by TheMealDB's own stable meal ID in
+    `SUGGESTED_RECIPE_IDS_FILE`, default
+    `/root/scripts/suggested_recipe_ids.json`, gitignored) and, when
+    `dinners_only` applies, not in `NON_DINNER_CATEGORIES` (`Breakfast`,
+    `Dessert`, `Starter`, `Side` -- TheMealDB has no "Dinner" category of
+    its own, it splits by protein/dish-type instead, so this excludes
+    the clearly-wrong ones rather than maintaining an include-list).
+    `exclude_id` is how "Try Another" avoids immediately re-showing the
+    meal just previewed. An explicit category choice overrides
+    `dinners_only` entirely -- asking for "Dessert" on purpose shouldn't
+    then get rejected for not being dinner.
+  - `confirm_meal(meal_id)` -- called only after the user clicks "Use
+    This Meal". Re-fetches fresh from TheMealDB by id rather than
+    trusting whatever the browser sends back, then actually creates the
+    Mealie recipe and records the id as suggested.
 - `scripts/trigger_server.py` -- `GET /data/mealdb-areas` / `GET
   /data/mealdb-categories` back the popup's dropdowns. `POST
-  /api/suggest-recipe`, body `{dinnersOnly, area, category}` (all
-  optional), returns `{recipeId, recipeName}`.
+  /api/suggest-recipe-preview`, body `{dinnersOnly, area, category,
+  excludeId}` (all optional), returns `{mealId, name, thumb, sourceUrl}`
+  without touching Mealie. `POST /api/suggest-recipe-confirm`, body
+  `{mealId}`, actually creates the recipe and returns
+  `{recipeId, recipeName}`.
 
 No user-managed source list exists any more -- there's nothing left to
 curate once the source is a large public database instead of a handful
@@ -99,10 +123,14 @@ of hand-picked blog URLs.
   `#status-overlay`/`#status-modal` DOM core.js's own `showConfirmModal()`
   manipulates directly (appending a custom row the same way), rather
   than adding a new generic "form modal" primitive to core.js for the
-  one place that currently needs selects instead of a plain message.
-  Resolves to `{area, category}` or `null` if cancelled; both
-  `suggestRecipe()`/`editSuggest()` await it first and bail out on
-  cancel, before ever touching the loading state below.
+  one place that currently needs it. Internally swaps the row's content
+  between a filters step, a loading step, an error-with-retry step, and
+  the review step (photo/name/link + Use This Meal/Try Another/Cancel)
+  -- all within the same popup instance, no page navigation involved.
+  Resolves to `{mealId}` only once "Use This Meal" is clicked, or `null`
+  if cancelled at any point; both `suggestRecipe()`/`editSuggest()` await
+  it first and bail out on cancel, before ever touching the loading
+  state below or calling `/api/suggest-recipe-confirm`.
 - `suggestRecipe(dateStr)`/`editSuggest()` show a
   **localized per-row loading state** instead of a blocking global
   modal: the specific day's row dims (`opacity` + `pointer-events: none`
@@ -120,8 +148,8 @@ of hand-picked blog URLs.
   Preview panel and the Edit panel (not the gear-icon Calendar Settings
   popover -- this is toggled in the same moment as clicking Suggest
   itself, so it stays inline rather than requiring a trip to a separate
-  settings UI) -- sent as `dinnersOnly` on every `/api/suggest-recipe`
-  call.
+  settings UI) -- sent as `dinnersOnly` on every
+  `/api/suggest-recipe-preview` call.
 - `js/calendar-settings.js` -- back to holidays/sync only; the
   Mealie-only recipe-source-management section that used to live in
   this shared popover was removed along with the source-list concept.

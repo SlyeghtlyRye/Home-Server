@@ -187,7 +187,10 @@ server {
     location /data/mealdb-categories {
             proxy_pass http://172.17.0.1:9001/data/mealdb-categories?key=${TRIGGER_SECRET};
     }
-    location /api/suggest-recipe {
+    location /api/suggest-recipe-preview {
+            proxy_pass http://172.17.0.1:9001/api/suggest-recipe-preview?key=${TRIGGER_SECRET};
+    }
+    location /api/suggest-recipe-confirm {
             # nginx's own default proxy_read_timeout (60s) can be hit by
             # Mealie's recipe create+PUT calls under memory pressure,
             # independent of how fast TheMealDB itself responds -- if
@@ -195,7 +198,7 @@ server {
             # which the frontend then fails to parse as JSON. Padded well
             # past any realistic worst case for this specific endpoint.
             proxy_read_timeout 90s;
-            proxy_pass http://172.17.0.1:9001/api/suggest-recipe?key=${TRIGGER_SECRET};
+            proxy_pass http://172.17.0.1:9001/api/suggest-recipe-confirm?key=${TRIGGER_SECRET};
     }
     location /api/save-holiday-country {
             proxy_pass http://172.17.0.1:9001/api/save-holiday-country?key=${TRIGGER_SECRET};

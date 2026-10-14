@@ -797,15 +797,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {"status": "ok"})
             return
 
-        if parsed.path == "/api/suggest-recipe":
+        if parsed.path == "/api/suggest-recipe-preview":
             body = self._read_json_body()
             dinners_only = bool(body.get("dinnersOnly"))
             area = (body.get("area") or "").strip() or None
             category = (body.get("category") or "").strip() or None
+            exclude_id = (body.get("excludeId") or "").strip() or None
             try:
-                recipe_id, recipe_name = recipe_suggest.suggest_recipe(
-                    dinners_only=dinners_only, area=area, category=category,
+                meal = recipe_suggest.pick_meal(
+                    dinners_only=dinners_only, area=area, category=category, exclude_id=exclude_id,
                 )
+                self._send_json(200, {
+                    "mealId": meal["idMeal"],
+                    "name": meal["strMeal"],
+                    "thumb": meal.get("strMealThumb") or "",
+                    "sourceUrl": meal.get("strSource") or meal.get("strYoutube") or "",
+                })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/suggest-recipe-confirm":
+            body = self._read_json_body()
+            meal_id = (body.get("mealId") or "").strip()
+            if not meal_id:
+                self._send_json(400, {"error": "missing mealId"})
+                return
+            try:
+                recipe_id, recipe_name = recipe_suggest.confirm_meal(meal_id)
                 self._send_json(200, {"recipeId": recipe_id, "recipeName": recipe_name})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})

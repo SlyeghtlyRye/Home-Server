@@ -668,15 +668,15 @@ async function editReroll() {
 
 async function editSuggest() {
   if (editSuggesting) return;
-  const options = await showSuggestOptionsModal();
-  if (!options) return;
+  const picked = await showSuggestOptionsModal();
+  if (!picked) return;
   editSuggesting = true;
   renderModePanel();
   try {
-    const res = await fetch('/api/suggest-recipe', {
+    const res = await fetch('/api/suggest-recipe-confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly(), area: options.area, category: options.category }),
+      body: JSON.stringify({ mealId: picked.mealId }),
     });
     let data;
     try {
@@ -1173,65 +1173,127 @@ async function loadMealdbFilterOptions() {
   }
 }
 
+async function fetchSuggestPreview(dinnersOnly, area, category, excludeId) {
+  const res = await fetch('/api/suggest-recipe-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dinnersOnly, area, category, excludeId: excludeId || '' }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
+  return data;
+}
+
 // Reuses the same #status-overlay/#status-modal DOM core.js's own
-// showConfirmModal() manipulates directly, with custom select-based
-// content instead of a plain message -- there's no generic "form modal"
-// primitive in core.js, and this is the only place that needs one.
-// Resolves to {area, category} (either may be '' for "Any"), or null if
-// cancelled.
+// showConfirmModal() manipulates directly, with custom content instead
+// of a plain message -- there's no generic "form modal" primitive in
+// core.js, and this is the only place that needs one. Two steps in one
+// popup: pick filters, then review the actual meal TheMealDB picked
+// (name, photo, a link to open its source/video in a new tab) before
+// anything is created in Mealie -- "Try another" re-picks without
+// closing the popup, "Use this meal" is the only path that commits.
+// Resolves to {mealId}, or null if cancelled at any point.
 async function showSuggestOptionsModal() {
   await loadMealdbFilterOptions();
+  const overlay = document.getElementById('status-overlay');
+  const modal = document.getElementById('status-modal');
+  const spinner = document.getElementById('status-spinner');
+  const dismiss = document.getElementById('status-dismiss');
+  modal.classList.remove('error', 'success');
+  spinner.style.display = 'none';
+  dismiss.style.display = 'none';
+
+  let row = document.getElementById('suggest-options-row');
+  if (!row) {
+    row = document.createElement('div');
+    row.id = 'suggest-options-row';
+    row.style.marginTop = '14px';
+    modal.appendChild(row);
+  }
+  overlay.style.display = 'flex';
+
   return new Promise((resolve) => {
-    const overlay = document.getElementById('status-overlay');
-    const modal = document.getElementById('status-modal');
-    const spinner = document.getElementById('status-spinner');
-    const dismiss = document.getElementById('status-dismiss');
-    document.getElementById('status-message').textContent = 'Suggest a recipe';
-    modal.classList.remove('error', 'success');
-    spinner.style.display = 'none';
-    dismiss.style.display = 'none';
-
-    let row = document.getElementById('suggest-options-row');
-    if (!row) {
-      row = document.createElement('div');
-      row.id = 'suggest-options-row';
-      row.style.marginTop = '14px';
-      modal.appendChild(row);
-    }
-    row.innerHTML = `
-      <div style="text-align:left; margin-bottom:10px;">
-        <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Cuisine</label>
-        <select id="suggest-area-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-          <option value="">Any cuisine</option>
-          ${mealdbAreasCache.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
-        </select>
-      </div>
-      <div style="text-align:left; margin-bottom:14px;">
-        <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Category</label>
-        <select id="suggest-category-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
-          <option value="">Any category</option>
-          ${mealdbCategoriesCache.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
-        </select>
-      </div>
-      <div style="display:flex; gap:10px; justify-content:center;">
-        <button class="btn small cancel" id="suggest-options-cancel">Cancel</button>
-        <button class="btn small save" id="suggest-options-go">Suggest</button>
-      </div>
-    `;
-    row.style.display = 'block';
-    overlay.style.display = 'flex';
-
     const finish = (result) => {
       row.style.display = 'none';
       overlay.style.display = 'none';
       resolve(result);
     };
-    document.getElementById('suggest-options-go').onclick = () => {
-      const area = document.getElementById('suggest-area-select').value;
-      const category = document.getElementById('suggest-category-select').value;
-      finish({ area, category });
-    };
-    document.getElementById('suggest-options-cancel').onclick = () => finish(null);
+
+    function renderFilterStep() {
+      document.getElementById('status-message').textContent = 'Suggest a recipe';
+      row.style.display = 'block';
+      row.innerHTML = `
+        <div style="text-align:left; margin-bottom:10px;">
+          <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Cuisine</label>
+          <select id="suggest-area-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+            <option value="">Any cuisine</option>
+            ${mealdbAreasCache.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="text-align:left; margin-bottom:14px;">
+          <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Category</label>
+          <select id="suggest-category-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+            <option value="">Any category</option>
+            ${mealdbCategoriesCache.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button class="btn small cancel" id="suggest-options-cancel">Cancel</button>
+          <button class="btn small save" id="suggest-options-go">Find a Recipe</button>
+        </div>
+      `;
+      document.getElementById('suggest-options-go').onclick = () => {
+        const area = document.getElementById('suggest-area-select').value;
+        const category = document.getElementById('suggest-category-select').value;
+        fetchAndRenderPreview(area, category, null);
+      };
+      document.getElementById('suggest-options-cancel').onclick = () => finish(null);
+    }
+
+    function renderLoadingStep() {
+      row.innerHTML = `<p class="suggesting-text" style="color:var(--color-text-muted); font-size:13px; margin:10px 0;">Finding a recipe...</p>`;
+    }
+
+    function renderErrorStep(message, area, category) {
+      row.innerHTML = `
+        <p style="color:var(--color-warning); font-size:13px; margin:10px 0;">${escapeHtml(message)}</p>
+        <div style="display:flex; gap:10px; justify-content:center;">
+          <button class="btn small cancel" id="suggest-preview-cancel">Cancel</button>
+          <button class="btn small save" id="suggest-preview-retry">Try Again</button>
+        </div>
+      `;
+      document.getElementById('suggest-preview-cancel').onclick = () => finish(null);
+      document.getElementById('suggest-preview-retry').onclick = () => fetchAndRenderPreview(area, category, null);
+    }
+
+    function renderPreviewStep(meal, area, category) {
+      document.getElementById('status-message').textContent = 'Review before adding';
+      row.innerHTML = `
+        ${meal.thumb ? `<img src="${escapeHtml(meal.thumb)}" alt="" style="width:100%; max-width:220px; border-radius:8px; margin-bottom:10px;">` : ''}
+        <div style="font-weight:600; font-size:15px; margin-bottom:6px;">${escapeHtml(meal.name)}</div>
+        ${meal.sourceUrl ? `<a href="${escapeHtml(meal.sourceUrl)}" target="_blank" rel="noopener" class="meal-link" style="display:inline-block; margin-bottom:14px;">View recipe &rarr;</a>` : '<div style="margin-bottom:14px;"></div>'}
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+          <button class="btn small cancel" id="suggest-preview-cancel">Cancel</button>
+          <button class="btn small" id="suggest-preview-another">Try Another</button>
+          <button class="btn small save" id="suggest-preview-use">Use This Meal</button>
+        </div>
+      `;
+      document.getElementById('suggest-preview-cancel').onclick = () => finish(null);
+      document.getElementById('suggest-preview-another').onclick = () => fetchAndRenderPreview(area, category, meal.mealId);
+      document.getElementById('suggest-preview-use').onclick = () => finish({ mealId: meal.mealId });
+    }
+
+    async function fetchAndRenderPreview(area, category, excludeId) {
+      renderLoadingStep();
+      try {
+        const meal = await fetchSuggestPreview(shouldSuggestDinnersOnly(), area, category, excludeId);
+        renderPreviewStep(meal, area, category);
+      } catch (err) {
+        renderErrorStep('Couldn\'t find a recipe: ' + err, area, category);
+      }
+    }
+
+    renderFilterStep();
   });
 }
 
@@ -1265,15 +1327,15 @@ async function rerollDay(dateStr) {
 // blocking the whole panel, so other days stay editable meanwhile.
 async function suggestRecipe(dateStr) {
   if (isCommitting || suggestingDate) return;
-  const options = await showSuggestOptionsModal();
-  if (!options) return;
+  const picked = await showSuggestOptionsModal();
+  if (!picked) return;
   suggestingDate = dateStr;
   renderModePanel();
   try {
-    const res = await fetch('/api/suggest-recipe', {
+    const res = await fetch('/api/suggest-recipe-confirm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly(), area: options.area, category: options.category }),
+      body: JSON.stringify({ mealId: picked.mealId }),
     });
     let data;
     try {

@@ -50,7 +50,7 @@ def create_recipe(name):
     return data["id"], data["name"]
 
 
-def create_recipe_from_structured(name, ingredient_lines, instruction_steps):
+def create_recipe_from_structured(name, ingredient_lines, instruction_steps, org_url=None):
     """Creates a brand-new Mealie recipe directly from already-structured
     data (plain ingredient line strings, plain instruction step strings)
     -- no scraping, no guessing at page structure. Used by
@@ -84,6 +84,8 @@ def create_recipe_from_structured(name, ingredient_lines, instruction_steps):
         {"id": str(uuid.uuid4()), "title": "", "text": text, "ingredientReferences": []}
         for text in instruction_steps
     ]
+    if org_url:
+        recipe["orgURL"] = org_url
 
     put_resp = requests.put(f"{MEALIE_URL}/api/recipes/{match['slug']}", headers=get_headers(), json=recipe)
     if not put_resp.ok:

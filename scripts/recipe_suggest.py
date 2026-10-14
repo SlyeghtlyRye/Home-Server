@@ -90,32 +90,51 @@ def _pick_filtered(area, category, suggested_ids, apply_dinner_filter):
     return meal or fallback
 
 
-def suggest_recipe(dinners_only=False, area=None, category=None):
-    """Returns (recipe_id, recipe_name) for a freshly-created recipe.
+def pick_meal(dinners_only=False, area=None, category=None, exclude_id=None):
+    """Picks a candidate meal WITHOUT creating anything in Mealie yet --
+    backs the Suggest popup's preview step, so the user can review a
+    meal (name, photo, source/video link) and open it in a new tab
+    before anything is actually added to their library. exclude_id lets
+    "Try another" avoid immediately re-showing the meal just previewed,
+    on top of the persistent already-suggested set.
 
     Prefers a meal never suggested before (tracked by TheMealDB's own
     stable meal ID) -- repeating a meal already in the library isn't a
     suggestion, it's just noise. An explicit category choice (e.g.
-    "Dessert" from the Suggest popup) overrides dinners_only entirely --
-    the user asked for that category on purpose, so silently excluding
-    it again would contradict their own choice; dinners_only still
-    applies to a plain cuisine filter or pure random, where there's no
-    explicit category to defer to."""
+    "Dessert" from the popup) overrides dinners_only entirely -- the
+    user asked for that category on purpose, so silently excluding it
+    again would contradict their own choice; dinners_only still applies
+    to a plain cuisine filter or pure random, where there's no explicit
+    category to defer to."""
     suggested_ids = _load_suggested_ids()
+    if exclude_id:
+        suggested_ids = suggested_ids | {exclude_id}
     apply_dinner_filter = dinners_only and not category
 
     if area or category:
-        meal = _pick_filtered(area, category, suggested_ids, apply_dinner_filter)
-    else:
-        meal = _pick_random(suggested_ids, apply_dinner_filter)
+        return _pick_filtered(area, category, suggested_ids, apply_dinner_filter)
+    return _pick_random(suggested_ids, apply_dinner_filter)
+
+
+def confirm_meal(meal_id):
+    """Creates the Mealie recipe for a meal the user already previewed
+    and approved in the Suggest popup. Re-fetches fresh from TheMealDB
+    by id rather than trusting whatever the browser sends back -- same
+    "server, not client-held state, is the source of truth" reasoning
+    used everywhere else in this codebase. Returns (recipe_id, name)."""
+    meal = mealdb_client.lookup_meal(meal_id)
 
     ingredient_lines = [
         f"{measure} {ingredient}".strip()
         for measure, ingredient in mealdb_client.meal_ingredients(meal)
     ]
     instruction_steps = mealdb_client.meal_instructions(meal)
-    recipe_id, name = mwp.create_recipe_from_structured(meal["strMeal"], ingredient_lines, instruction_steps)
+    source_url = meal.get("strSource") or meal.get("strYoutube") or None
+    recipe_id, name = mwp.create_recipe_from_structured(
+        meal["strMeal"], ingredient_lines, instruction_steps, org_url=source_url,
+    )
 
+    suggested_ids = _load_suggested_ids()
     suggested_ids.add(meal["idMeal"])
     _save_suggested_ids(suggested_ids)
     return recipe_id, name
