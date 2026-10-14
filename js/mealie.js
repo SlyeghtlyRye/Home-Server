@@ -1219,7 +1219,7 @@ async function showSuggestOptionsModal() {
       resolve(result);
     };
 
-    function renderFilterStep() {
+    function renderFilterStep(presetArea, presetCategory) {
       document.getElementById('status-message').textContent = 'Suggest a recipe';
       row.style.display = 'block';
       row.innerHTML = `
@@ -1227,14 +1227,14 @@ async function showSuggestOptionsModal() {
           <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Cuisine</label>
           <select id="suggest-area-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
             <option value="">Any cuisine</option>
-            ${mealdbAreasCache.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+            ${mealdbAreasCache.map(a => `<option value="${escapeHtml(a)}" ${a === presetArea ? 'selected' : ''}>${escapeHtml(a)}</option>`).join('')}
           </select>
         </div>
         <div style="text-align:left; margin-bottom:14px;">
           <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Category</label>
           <select id="suggest-category-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
             <option value="">Any category</option>
-            ${mealdbCategoriesCache.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+            ${mealdbCategoriesCache.map(c => `<option value="${escapeHtml(c)}" ${c === presetCategory ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div style="display:flex; gap:10px; justify-content:center;">
@@ -1254,16 +1254,24 @@ async function showSuggestOptionsModal() {
       row.innerHTML = `<p class="suggesting-text" style="color:var(--color-text-muted); font-size:13px; margin:10px 0;">Finding a recipe...</p>`;
     }
 
+    // "Change Filters" goes back to the filter step with the current
+    // picks preselected -- the point raised was that a dead-end (e.g. no
+    // matches for this cuisine+category combination) shouldn't force
+    // cancelling the whole popup and starting over; "Try Again" stays
+    // too since not every error here is a bad combination -- a brief
+    // network hiccup reaching TheMealDB is still worth a plain retry.
     function renderErrorStep(message, area, category) {
       row.innerHTML = `
         <p style="color:var(--color-warning); font-size:13px; margin:10px 0;">${escapeHtml(message)}</p>
-        <div style="display:flex; gap:10px; justify-content:center;">
+        <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
           <button class="btn small cancel" id="suggest-preview-cancel">Cancel</button>
-          <button class="btn small save" id="suggest-preview-retry">Try Again</button>
+          <button class="btn small" id="suggest-preview-retry">Try Again</button>
+          <button class="btn small save" id="suggest-preview-refilter">Change Filters</button>
         </div>
       `;
       document.getElementById('suggest-preview-cancel').onclick = () => finish(null);
       document.getElementById('suggest-preview-retry').onclick = () => fetchAndRenderPreview(area, category, null);
+      document.getElementById('suggest-preview-refilter').onclick = () => renderFilterStep(area, category);
     }
 
     function renderPreviewStep(meal, area, category) {
@@ -1274,7 +1282,7 @@ async function showSuggestOptionsModal() {
         ${meal.sourceUrl ? `<a href="${escapeHtml(meal.sourceUrl)}" target="_blank" rel="noopener" class="meal-link" style="display:inline-block; margin-bottom:14px;">View recipe &rarr;</a>` : '<div style="margin-bottom:14px;"></div>'}
         <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
           <button class="btn small cancel" id="suggest-preview-cancel">Cancel</button>
-          <button class="btn small" id="suggest-preview-another">Try Another</button>
+          <button class="btn small" id="suggest-preview-another" style="background:var(--color-accent); color:var(--color-bg);">Try Another</button>
           <button class="btn small save" id="suggest-preview-use">Use This Meal</button>
         </div>
       `;
