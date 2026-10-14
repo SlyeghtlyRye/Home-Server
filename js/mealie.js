@@ -668,13 +668,15 @@ async function editReroll() {
 
 async function editSuggest() {
   if (editSuggesting) return;
+  const options = await showSuggestOptionsModal();
+  if (!options) return;
   editSuggesting = true;
   renderModePanel();
   try {
     const res = await fetch('/api/suggest-recipe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly() }),
+      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly(), area: options.area, category: options.category }),
     });
     let data;
     try {
@@ -1148,6 +1150,91 @@ function cancelPreview() {
   renderModePanel();
 }
 
+// ---------- Suggest options popup ----------
+
+let mealdbAreasCache = null; // [string], loaded once
+let mealdbCategoriesCache = null; // [string], loaded once
+
+async function loadMealdbFilterOptions() {
+  if (mealdbAreasCache && mealdbCategoriesCache) return;
+  try {
+    const [areasRes, categoriesRes] = await Promise.all([
+      fetch('/data/mealdb-areas'),
+      fetch('/data/mealdb-categories'),
+    ]);
+    const areasData = await areasRes.json();
+    const categoriesData = await categoriesRes.json();
+    mealdbAreasCache = areasData.areas || [];
+    mealdbCategoriesCache = categoriesData.categories || [];
+  } catch (err) {
+    console.error('Failed to load Suggest filter options', err);
+    mealdbAreasCache = mealdbAreasCache || [];
+    mealdbCategoriesCache = mealdbCategoriesCache || [];
+  }
+}
+
+// Reuses the same #status-overlay/#status-modal DOM core.js's own
+// showConfirmModal() manipulates directly, with custom select-based
+// content instead of a plain message -- there's no generic "form modal"
+// primitive in core.js, and this is the only place that needs one.
+// Resolves to {area, category} (either may be '' for "Any"), or null if
+// cancelled.
+async function showSuggestOptionsModal() {
+  await loadMealdbFilterOptions();
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('status-overlay');
+    const modal = document.getElementById('status-modal');
+    const spinner = document.getElementById('status-spinner');
+    const dismiss = document.getElementById('status-dismiss');
+    document.getElementById('status-message').textContent = 'Suggest a recipe';
+    modal.classList.remove('error', 'success');
+    spinner.style.display = 'none';
+    dismiss.style.display = 'none';
+
+    let row = document.getElementById('suggest-options-row');
+    if (!row) {
+      row = document.createElement('div');
+      row.id = 'suggest-options-row';
+      row.style.marginTop = '14px';
+      modal.appendChild(row);
+    }
+    row.innerHTML = `
+      <div style="text-align:left; margin-bottom:10px;">
+        <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Cuisine</label>
+        <select id="suggest-area-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+          <option value="">Any cuisine</option>
+          ${mealdbAreasCache.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="text-align:left; margin-bottom:14px;">
+        <label style="display:block; font-size:12px; color:var(--color-text-muted); margin-bottom:4px;">Category</label>
+        <select id="suggest-category-select" style="width:100%; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+          <option value="">Any category</option>
+          ${mealdbCategoriesCache.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button class="btn small cancel" id="suggest-options-cancel">Cancel</button>
+        <button class="btn small save" id="suggest-options-go">Suggest</button>
+      </div>
+    `;
+    row.style.display = 'block';
+    overlay.style.display = 'flex';
+
+    const finish = (result) => {
+      row.style.display = 'none';
+      overlay.style.display = 'none';
+      resolve(result);
+    };
+    document.getElementById('suggest-options-go').onclick = () => {
+      const area = document.getElementById('suggest-area-select').value;
+      const category = document.getElementById('suggest-category-select').value;
+      finish({ area, category });
+    };
+    document.getElementById('suggest-options-cancel').onclick = () => finish(null);
+  });
+}
+
 async function rerollDay(dateStr) {
   if (isCommitting) return;
   const excludeIds = previewPicks.filter(p => p.recipeId).map(p => p.recipeId);
@@ -1178,13 +1265,15 @@ async function rerollDay(dateStr) {
 // blocking the whole panel, so other days stay editable meanwhile.
 async function suggestRecipe(dateStr) {
   if (isCommitting || suggestingDate) return;
+  const options = await showSuggestOptionsModal();
+  if (!options) return;
   suggestingDate = dateStr;
   renderModePanel();
   try {
     const res = await fetch('/api/suggest-recipe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly() }),
+      body: JSON.stringify({ dinnersOnly: shouldSuggestDinnersOnly(), area: options.area, category: options.category }),
     });
     let data;
     try {

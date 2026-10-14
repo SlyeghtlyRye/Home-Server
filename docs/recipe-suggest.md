@@ -34,15 +34,37 @@ guess at, data arrives already clean and structured. Switching to it
 eliminated every one of the above failure modes at the root instead of
 patching around them.
 
+## Suggest options popup
+
+Clicking Suggest opens a small popup (cuisine dropdown + category
+dropdown, both populated live from TheMealDB's own `list.php` -- never
+hardcoded, so they can't drift out of date with what the API actually
+has) before pulling a meal. "Any"/"Any" behaves exactly like the
+original pure-random version. A user explicitly asked for "suggest top
+meal by users" too, but TheMealDB's free API has no popularity/rating
+concept at all -- it's a static recipe database, not a social/rated
+platform -- so cuisine + category (both real, well-supported filters)
+replaced that idea instead of being left unaddressed.
+
+`filter.php` only accepts one parameter per call (can't combine area +
+category server side), so picking both filters by whichever TheMealDB
+supports directly and checks the other against each candidate's full
+looked-up detail afterward (`recipe_suggest._pick_filtered()`).
+
 ## Backend
 
-- `scripts/mealdb_client.py` -- thin wrapper around
-  `https://www.themealdb.com/api/json/v1/1/random.php` (the API's free,
-  no-signup-required test key, fine for a household's low click volume).
-  `fetch_random_meal()` returns one raw meal dict; `meal_ingredients()`
-  collapses TheMealDB's 20 numbered `strIngredientN`/`strMeasureN`
-  fields into `[(measure, ingredient), ...]` pairs; `meal_instructions()`
-  splits its single instructions blob into individual steps on newlines.
+- `scripts/mealdb_client.py` -- thin wrapper around TheMealDB's free,
+  no-signup-required test key (`1`, fine for a household's low click
+  volume). `fetch_random_meal()` (`random.php`) returns one raw meal
+  dict; `list_areas()`/`list_categories()` (`list.php?a=list`/`?c=list`)
+  back the popup's dropdowns; `filter_meals()` (`filter.php`) returns
+  meal summaries (id/name/thumb only) matching one area or category;
+  `lookup_meal()` (`lookup.php`) gets full detail (ingredients/
+  instructions included) by id, needed after filter_meals() since its
+  summaries don't carry them. `meal_ingredients()` collapses TheMealDB's
+  20 numbered `strIngredientN`/`strMeasureN` fields into
+  `[(measure, ingredient), ...]` pairs; `meal_instructions()` splits its
+  single instructions blob into individual steps on newlines.
 - `scripts/mealie_weekly_plan.py` -- `create_recipe_from_structured(name,
   ingredient_lines, instruction_steps)` creates a new Mealie recipe
   directly from already-structured plain-text data: `create_recipe()` to
@@ -62,9 +84,10 @@ patching around them.
   include-list of every category that counts as a main course. Falls
   back to accepting a non-matching meal only if every attempt in a batch
   fails one or both checks.
-- `scripts/trigger_server.py` -- `POST /api/suggest-recipe`, body
-  `{dinnersOnly}` (optional, default false), returns
-  `{recipeId, recipeName}`.
+- `scripts/trigger_server.py` -- `GET /data/mealdb-areas` / `GET
+  /data/mealdb-categories` back the popup's dropdowns. `POST
+  /api/suggest-recipe`, body `{dinnersOnly, area, category}` (all
+  optional), returns `{recipeId, recipeName}`.
 
 No user-managed source list exists any more -- there's nothing left to
 curate once the source is a large public database instead of a handful
@@ -72,7 +95,15 @@ of hand-picked blog URLs.
 
 ## Frontend
 
-- `js/mealie.js` -- `suggestRecipe(dateStr)`/`editSuggest()` show a
+- `js/mealie.js` -- `showSuggestOptionsModal()` reuses the same
+  `#status-overlay`/`#status-modal` DOM core.js's own `showConfirmModal()`
+  manipulates directly (appending a custom row the same way), rather
+  than adding a new generic "form modal" primitive to core.js for the
+  one place that currently needs selects instead of a plain message.
+  Resolves to `{area, category}` or `null` if cancelled; both
+  `suggestRecipe()`/`editSuggest()` await it first and bail out on
+  cancel, before ever touching the loading state below.
+- `suggestRecipe(dateStr)`/`editSuggest()` show a
   **localized per-row loading state** instead of a blocking global
   modal: the specific day's row dims (`opacity` + `pointer-events: none`
   on that one `.preview-row`) and its recipe field shows an animated

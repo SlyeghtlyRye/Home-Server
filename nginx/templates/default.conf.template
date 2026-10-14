@@ -181,6 +181,12 @@ server {
     location /data/holiday-settings {
             proxy_pass http://172.17.0.1:9001/data/holiday-settings?key=${TRIGGER_SECRET};
     }
+    location /data/mealdb-areas {
+            proxy_pass http://172.17.0.1:9001/data/mealdb-areas?key=${TRIGGER_SECRET};
+    }
+    location /data/mealdb-categories {
+            proxy_pass http://172.17.0.1:9001/data/mealdb-categories?key=${TRIGGER_SECRET};
+    }
     location /api/suggest-recipe {
             # nginx's own default proxy_read_timeout (60s) can be hit by
             # Mealie's recipe create+PUT calls under memory pressure,

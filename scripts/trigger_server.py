@@ -17,6 +17,7 @@ import kanboard_client as kbc
 import holidays_client as hc
 import ical_builder
 import recipe_suggest
+import mealdb_client
 
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
@@ -417,6 +418,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {"country": hc.get_configured_country()})
             return
 
+        if parsed.path == "/data/mealdb-areas":
+            try:
+                self._send_json(200, {"areas": mealdb_client.list_areas()})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/mealdb-categories":
+            try:
+                self._send_json(200, {"categories": mealdb_client.list_categories()})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         if parsed.path == "/data/holidays":
             start_s = params.get("start", [None])[0]
             end_s = params.get("end", [None])[0]
@@ -785,8 +800,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/api/suggest-recipe":
             body = self._read_json_body()
             dinners_only = bool(body.get("dinnersOnly"))
+            area = (body.get("area") or "").strip() or None
+            category = (body.get("category") or "").strip() or None
             try:
-                recipe_id, recipe_name = recipe_suggest.suggest_recipe(dinners_only=dinners_only)
+                recipe_id, recipe_name = recipe_suggest.suggest_recipe(
+                    dinners_only=dinners_only, area=area, category=category,
+                )
                 self._send_json(200, {"recipeId": recipe_id, "recipeName": recipe_name})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
