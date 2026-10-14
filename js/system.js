@@ -61,11 +61,25 @@ function renderShellHtml() {
         This dashboard's HTTPS uses a self-signed certificate -- there's no
         publicly-resolvable domain for an internal address, so a real
         CA-issued cert isn't possible. Download it once per device and
-        install it as a trusted profile to stop browsers warning about it
-        or silently blocking background requests. On iPhone: open this
-        page in Safari, tap the download, then Settings &rarr; Profile
-        Downloaded &rarr; Install, then Settings &rarr; General &rarr;
-        About &rarr; Certificate Trust Settings &rarr; enable full trust.
+        install it as a trusted certificate to stop browsers warning about
+        it or silently blocking background requests.
+      </p>
+      <p style="color:var(--color-text-dim); font-size:13px;">
+        <strong>On iPhone:</strong> open this page in Safari, tap the
+        download below, then Settings &rarr; Profile Downloaded &rarr;
+        Install, then Settings &rarr; General &rarr; About &rarr;
+        Certificate Trust Settings &rarr; enable full trust for it.
+      </p>
+      <p style="color:var(--color-text-dim); font-size:13px;">
+        <strong>On Android:</strong> tap the download below, then Settings
+        &rarr; Security (sometimes under "Security & privacy" or
+        "Biometrics and security" depending on manufacturer) &rarr;
+        Encryption &amp; credentials &rarr; Install a certificate &rarr;
+        CA certificate, then pick the downloaded file. A screen lock
+        (PIN/pattern/password) must already be set for this option to be
+        available at all.
+      </p>
+      <p style="color:var(--color-text-dim); font-size:13px;">
         This card disappears on its own once you're viewing the dashboard
         over https:// in a given browser -- reaching this page over HTTPS
         at all already means that browser accepted the cert, otherwise its
