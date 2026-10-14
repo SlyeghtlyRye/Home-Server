@@ -61,15 +61,26 @@ def _pick_random(suggested_ids, apply_dinner_filter):
 
 
 def _pick_filtered(area, category, suggested_ids, apply_dinner_filter):
-    """filter.php only accepts one parameter per call, so a caller
-    wanting both area and category filters it by whichever TheMealDB
-    supports directly, then checks the other against each candidate's
-    full looked-up detail (filter.php's own summaries don't include
-    category/area at all)."""
-    primary_area, primary_category = (area, None) if area else (None, category)
-    summaries = mealdb_client.filter_meals(area=primary_area, category=primary_category)
-    if not summaries:
-        raise RuntimeError(f"TheMealDB has no meals matching that filter.")
+    """filter.php only accepts one parameter per call, so area+category
+    together are resolved as the exact INTERSECTION of both filters' own
+    id lists (two cheap summary calls) rather than filtering by one and
+    randomly sampling a handful of candidates hoping some of them happen
+    to match the other too -- that sampling approach, tried first,
+    silently fell back to the first candidate regardless of category
+    whenever the sample missed (confirmed live: picking "Pasta" category
+    alongside an unrelated cuisine could come back as a dessert, because
+    no pasta dish from that cuisine was among the few checked). The
+    intersection guarantees every candidate genuinely matches both."""
+    if area and category:
+        area_summaries = mealdb_client.filter_meals(area=area)
+        category_ids = {s["idMeal"] for s in mealdb_client.filter_meals(category=category)}
+        summaries = [s for s in area_summaries if s["idMeal"] in category_ids]
+        if not summaries:
+            raise RuntimeError(f"TheMealDB has no {category} meals in {area} cuisine -- try a different combination.")
+    else:
+        summaries = mealdb_client.filter_meals(area=area, category=category)
+        if not summaries:
+            raise RuntimeError("TheMealDB has no meals matching that filter.")
 
     unseen = [s for s in summaries if s["idMeal"] not in suggested_ids]
     pool = unseen if unseen else summaries
@@ -77,17 +88,15 @@ def _pick_filtered(area, category, suggested_ids, apply_dinner_filter):
     candidates = pool[:MAX_ATTEMPTS_PER_SUGGEST]
 
     meal = None
-    fallback = None
     for summary in candidates:
         full = mealdb_client.lookup_meal(summary["idMeal"])
-        fallback = fallback or full
-        if area and category and full.get("strCategory") != category:
-            continue
         if apply_dinner_filter and full.get("strCategory") in NON_DINNER_CATEGORIES:
             continue
         meal = full
         break
-    return meal or fallback
+    if meal is None:
+        meal = mealdb_client.lookup_meal(candidates[0]["idMeal"])
+    return meal
 
 
 def pick_meal(dinners_only=False, area=None, category=None, exclude_id=None):

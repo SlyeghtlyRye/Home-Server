@@ -57,9 +57,16 @@ Clicking Suggest opens a popup with two steps:
    **Cancel** backs out entirely.
 
 `filter.php` only accepts one parameter per call (can't combine area +
-category server side), so picking both filters by whichever TheMealDB
-supports directly and checks the other against each candidate's full
-looked-up detail afterward (`recipe_suggest._pick_filtered()`).
+category server side). When both are picked, `_pick_filtered()`
+computes the exact intersection of both filters' own id lists (two
+cheap summary calls) rather than filtering by one and randomly sampling
+a few candidates hoping some match the other -- that sampling approach,
+tried first, confirmed live to silently fall back to the first candidate
+regardless of category whenever the sample missed (picking "Pasta"
+alongside an unrelated cuisine could come back as a dessert). The
+intersection guarantees every candidate genuinely matches both, and
+raises a clear error instead of a wrong result if the combination
+genuinely has no matches.
 
 ## Backend
 
