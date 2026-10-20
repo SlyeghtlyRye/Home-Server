@@ -922,14 +922,12 @@ async function planSelected() {
   const dates = includedDates();
   if (dates.length === 0) { showStatusModal('Select at least one day first.', 'error'); return; }
 
-  const conflicts = dates.filter(d => plannedMap[d]);
-  if (conflicts.length > 0) {
-    const list = conflicts.map(d => `${d} (${plannedMap[d].name})`).join('\n');
-    const proceed = await showConfirmModal(
-      `${conflicts.length} of your selected day(s) already have a meal planned:\n\n${list}\n\nContinuing will replace them. Proceed?`
-    );
-    if (!proceed) return;
-  }
+  // Planning over an already-planned day no longer replaces it (the
+  // backend's preview_dates() just keeps the existing meal for that
+  // date) -- so this used to be a confirm-before-overwrite prompt, but
+  // now nothing destructive is actually happening, just tracked here so
+  // the preview can show which days were left untouched.
+  const alreadyPlanned = dates.filter(d => plannedMap[d]);
 
   showStatusModal('Building preview...', 'loading');
   try {
@@ -941,7 +939,7 @@ async function planSelected() {
     const data = await res.json();
     if (!res.ok) { showStatusModal('Failed: ' + (data.error || res.status), 'error'); return; }
     previewPicks = data.picks;
-    previewConflicts = conflicts;
+    previewConflicts = alreadyPlanned;
     hideStatusModal();
     renderModePanel();
   } catch (err) {
@@ -1103,7 +1101,7 @@ function previewPanelBodyHtml() {
     ${isCommitting
       ? `<p style="color:var(--color-text-dim); font-size:13px;">Saving in the background -- feel free to switch tabs, this will finish on its own.</p>`
       : `<p style="color:var(--color-text-muted); font-size:13px;">Tap a field to see your recipes, type to filter. If nothing matches, it'll be created as new automatically on save.</p>`}
-    ${conflicts.length > 0 ? `<div class="warning-box">&#x26A0; ${conflicts.length} day(s) will overwrite an existing planned meal.</div>` : ''}
+    ${conflicts.length > 0 ? `<div class="warning-box">&#x2139; ${conflicts.length} day(s) already had a meal planned -- left unchanged below.</div>` : ''}
     ${SHOW_DINNERS_ONLY_TOGGLE ? `
     <label class="check-row" style="margin-bottom:8px;">
       <input type="checkbox" data-action="toggle-suggest-dinners-only" ${shouldSuggestDinnersOnly() ? 'checked' : ''}>
@@ -1113,7 +1111,7 @@ function previewPanelBodyHtml() {
       const isSuggesting = suggestingDate === p.date;
       return `
       <div class="preview-row" ${isSuggesting ? 'style="opacity:0.6; pointer-events:none;"' : ''}>
-        <span class="date">${dayLabel(p.date)}${conflicts.includes(p.date) ? ' &#x26A0;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
+        <span class="date">${dayLabel(p.date)}${conflicts.includes(p.date) ? ' &#x2139;' : ''}${holidaysByDate[p.date] ? ` <span style="color:var(--color-warning); font-size:11px;">&#x1F389; ${escapeHtml(holidaysByDate[p.date])}</span>` : ''}</span>
         <div class="combo-wrap">
           ${isSuggesting
             ? `<div class="recipe-combo suggesting-placeholder" style="color:var(--color-text-muted); font-style:italic;"><span class="suggesting-text">Suggesting...</span><div class="suggesting-bar"></div></div>`

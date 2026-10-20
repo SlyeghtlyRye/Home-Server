@@ -359,6 +359,19 @@ def preview_dates(dates, avoid_repeats=True, overrides=None):
     history = load_history() if avoid_repeats else {}
     pool = filter_recent(recipes, history) if avoid_repeats else recipes
 
+    # Planning over a day that already has a meal shouldn't silently
+    # replace it -- confirmed as unwanted: selecting a range that
+    # includes an already-planned day used to roll a brand new random
+    # pick over it every time. Now it just keeps what's already there.
+    # An explicit override still wins over the existing plan, same as it
+    # already won over a fresh random pick.
+    existing_by_date = {}
+    if dates:
+        for e in get_mealplan_entries(min(dates), max(dates)):
+            recipe = e.get("recipe") or {}
+            if recipe.get("id"):
+                existing_by_date[e["date"]] = (recipe["id"], recipe.get("name", "(unknown)"))
+
     picks = []
     used_ids = set()
     for d in dates:
@@ -366,6 +379,11 @@ def preview_dates(dates, avoid_repeats=True, overrides=None):
         if d_iso in overrides:
             rid = overrides[d_iso]
             name = next((n for i, n in recipes if i == rid), "(unknown)")
+            picks.append({"date": d_iso, "recipeId": rid, "recipeName": name})
+            used_ids.add(rid)
+            continue
+        if d_iso in existing_by_date:
+            rid, name = existing_by_date[d_iso]
             picks.append({"date": d_iso, "recipeId": rid, "recipeName": name})
             used_ids.add(rid)
             continue
