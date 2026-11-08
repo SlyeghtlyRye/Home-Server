@@ -418,6 +418,23 @@
     .list-dropdown[open] summary::before { transform: rotate(90deg); }
     .list-dropdown ul { margin-top: 10px; }
 
+/* ---------- Docs viewer (js/docs.js renderMarkdown) ---------- */
+
+    .doc-body h3 { font-size: 15px; margin: 18px 0 6px; }
+    .doc-body li { margin: 4px 0; }
+    .doc-code {
+      white-space: pre; overflow-x: auto; font-size: 12px; margin: 8px 0;
+      padding: 8px 10px; background: var(--color-bg); border-radius: 4px;
+      border: 1px solid var(--color-border-soft);
+    }
+    .doc-table-wrap { overflow-x: auto; margin: 8px 0; }
+    .doc-table { border-collapse: collapse; font-size: 13px; width: 100%; }
+    .doc-table th, .doc-table td {
+      border: 1px solid var(--color-border-soft); padding: 6px 8px;
+      text-align: left; vertical-align: top;
+    }
+    .doc-table th { background: var(--color-bg); }
+
 /* ---------- System panel: status cards, software update history ---------- */
 
     .commit-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }

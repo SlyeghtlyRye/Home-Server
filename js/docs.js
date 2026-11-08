@@ -1,53 +1,135 @@
 // docs.js -- renders docs/*.md inline. Minimal hand-rolled markdown
-// renderer (headings, lists, inline code, bold, paragraphs only) --
-// deliberately not a full parser or a third-party library, since docs
-// content only ever uses a small known subset of markdown.
+// renderer -- deliberately not a full parser or a third-party library.
+// Supports the subset the docs actually use: #/##/### headings,
+// paragraphs (wrapped source lines are joined back into one paragraph),
+// "- " and "1. " lists (indented lines continue the item above, indented
+// "- " lines become sub-points), fenced code blocks (including ones
+// indented inside a list item), pipe tables, **bold**, *italic*,
+// `inline code`, and docs/*.svg image embeds.
 import { registerApp, escapeHtml } from './core.js';
 
 let docsList = [];
 
+function inlineFormat(text) {
+  // Pull code spans out first so ** and * inside them stay literal.
+  const codes = [];
+  let out = escapeHtml(text).replace(/`([^`]+)`/g, (_, c) => {
+    codes.push(c);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  out = out.replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s.,;:!?)]|$)/g, '$1<em>$2</em>');
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+
+function splitTableRow(line) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+}
+
 function renderMarkdown(text) {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   let html = '';
-  let inList = false;
+  let para = [];
+  let list = null; // { tag: 'ul' | 'ol', start, items: [html] }
 
-  const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
-
-  const inlineFormat = (line) => {
-    let out = escapeHtml(line);
-    out = out.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    out = out.replace(/`(.+?)`/g, '<code>$1</code>');
-    return out;
+  const flushPara = () => {
+    if (para.length) html += `<p>${inlineFormat(para.join(' '))}</p>`;
+    para = [];
   };
+  const flushList = () => {
+    if (!list) return;
+    const start = list.tag === 'ol' && list.start !== 1 ? ` start="${list.start}"` : '';
+    html += `<${list.tag}${start}>${list.items.map(i => `<li>${i}</li>`).join('')}</${list.tag}>`;
+    list = null;
+  };
+  const flushAll = () => { flushPara(); flushList(); };
 
-  for (const rawLine of lines) {
-    const line = rawLine;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
     if (line.startsWith('tags:')) continue;
-    const imgMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
-    if (imgMatch) {
-      closeList();
-      const alt = imgMatch[1];
-      const src = imgMatch[2];
-      if (/^docs\/[\w.-]+\.svg$/.test(src)) {
-        html += `<div class="svg-embed" data-svg-src="/${src}" data-svg-alt="${escapeHtml(alt)}"><p style="color:#888; margin:0;">Loading diagram...</p></div>`;
+
+    // Fenced code block. Inside a list item it's indented; it's rendered
+    // inside that item so a numbered list keeps counting past it.
+    if (trimmed.startsWith('```')) {
+      const indent = line.length - line.trimStart().length;
+      const code = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith('```'); i++) {
+        code.push(lines[i].slice(Math.min(indent, lines[i].length - lines[i].trimStart().length)));
       }
-    } else if (/^# /.test(line)) {
-      closeList();
-      html += `<h1>${inlineFormat(line.slice(2))}</h1>`;
-    } else if (/^## /.test(line)) {
-      closeList();
-      html += `<h2>${inlineFormat(line.slice(3))}</h2>`;
-    } else if (/^- /.test(line)) {
-      if (!inList) { html += '<ul>'; inList = true; }
-      html += `<li>${inlineFormat(line.slice(2))}</li>`;
-    } else if (line.trim() === '') {
-      closeList();
-    } else {
-      closeList();
-      html += `<p>${inlineFormat(line)}</p>`;
+      const block = `<pre class="doc-code"><code>${escapeHtml(code.join('\n'))}</code></pre>`;
+      if (list && indent > 0) {
+        list.items[list.items.length - 1] += block;
+      } else {
+        flushAll();
+        html += block;
+      }
+      continue;
     }
+
+    // Pipe table: a "|" row followed by a |---| separator row.
+    if (trimmed.startsWith('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
+      flushAll();
+      const header = splitTableRow(line);
+      const rows = [];
+      for (i += 2; i < lines.length && lines[i].trim().startsWith('|'); i++) rows.push(splitTableRow(lines[i]));
+      i--;
+      html += '<div class="doc-table-wrap"><table class="doc-table"><thead><tr>'
+        + header.map(h => `<th>${inlineFormat(h)}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + rows.map(r => `<tr>${r.map(c => `<td>${inlineFormat(c)}</td>`).join('')}</tr>`).join('')
+        + '</tbody></table></div>';
+      continue;
+    }
+
+    const img = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (img) {
+      flushAll();
+      if (/^docs\/[\w.-]+\.svg$/.test(img[2])) {
+        html += `<div class="svg-embed" data-svg-src="/${img[2]}" data-svg-alt="${escapeHtml(img[1])}"><p style="color:#888; margin:0;">Loading diagram...</p></div>`;
+      }
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3}) (.*)$/);
+    if (heading) {
+      flushAll();
+      const level = heading[1].length;
+      html += `<h${level}>${inlineFormat(heading[2])}</h${level}>`;
+      continue;
+    }
+
+    const bullet = line.match(/^[-*] (.*)$/);
+    const numbered = line.match(/^(\d+)\. (.*)$/);
+    if (bullet || numbered) {
+      flushPara();
+      const tag = bullet ? 'ul' : 'ol';
+      if (!list || list.tag !== tag) {
+        flushList();
+        list = { tag, start: numbered ? parseInt(numbered[1], 10) : 1, items: [] };
+      }
+      list.items.push(inlineFormat(bullet ? bullet[1] : numbered[2]));
+      continue;
+    }
+
+    if (trimmed === '') {
+      flushPara();
+      continue;
+    }
+
+    // Indented line right after a list item: continues that item.
+    if (list && /^\s{2,}/.test(line)) {
+      const sub = trimmed.match(/^[-*] (.*)$/);
+      list.items[list.items.length - 1] += sub
+        ? `<br>&bull; ${inlineFormat(sub[1])}`
+        : ` ${inlineFormat(trimmed)}`;
+      continue;
+    }
+
+    flushList();
+    para.push(trimmed.replace(/^> ?/, ''));
   }
-  closeList();
+  flushAll();
   return html;
 }
 
@@ -96,7 +178,7 @@ async function openDoc(filename) {
     const data = await res.json();
     root.innerHTML = `
       <button class="btn small" data-action="back-to-index" style="margin-bottom:15px;">&larr; All docs</button>
-      <div class="week-block">${renderMarkdown(data.content)}</div>
+      <div class="week-block doc-body">${renderMarkdown(data.content)}</div>
     `;
     await inlineEmbeddedSvgs(root);
   } catch (err) {

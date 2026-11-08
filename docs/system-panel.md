@@ -277,12 +277,19 @@ container's image mid-extraction, surfacing as Mealie crash-looping on a
 `ValueError: bad marshal data` error that took an overnight retry loop to
 clear. `_schedule_background_restart()` (`scripts/updater.py`) and
 `restart_all_containers_staggered()` (`update.sh`) now recreate each
-service individually with a 20-second pause between them instead --
+service individually instead, each one waiting until it reports healthy
+(`docker compose up --wait --wait-timeout 300`, which replaced an
+earlier fixed 20-second pause; a service that never gets healthy only
+logs a warning and doesn't block the rest) --
 `syncthing`, `pihole`, `kanboard`, `mealie`, `nginx` in that order
 (respecting `docker-compose.yml`'s `depends_on`: nginx depends on
 pihole/mealie/kanboard, so those go first), with `mealie` -- the one
 full Python app server, and the one that actually crashed -- last, after
-everything else has had a chance to settle. Both the CLI's "accept
+everything else has had a chance to settle. *(Correction, 2026-11-08:
+the root cause of that crash loop was later found to be the USB root
+drive, not memory/IO contention -- see "Mealie 'bad marshal data' crash
+loops" below. Staggering is kept because it's still gentler on this
+hardware, but it does not prevent the crash.)* Both the CLI's "accept
 default" path and the dashboard's Install Update button go through this
 same staggered sequence now, so neither is quietly left on the riskier
 all-at-once behavior while the other gets fixed.
@@ -330,3 +337,78 @@ because it's *not* self-referential) should go through the same
 `reset_manager.py`-style pattern: one function, called for real or in
 dry-run, both text-logged, so a "preview" mode is never extra work to keep
 in sync.
+
+## Mealie "bad marshal data" crash loops (root cause: the USB drive)
+
+**Symptom:** Mealie never comes up; `docker logs mealie` repeats
+`ValueError: bad marshal data (unknown type code / invalid reference)`
+while importing some library. It happened after the 2026-10 update and
+again on 2026-11-08 (about 1,900 crash/restart cycles that day).
+
+**It isn't memory pressure, and it isn't corruption while the image was
+being extracted.** Diagnosed 2026-11-08:
+
+- The root filesystem, Docker included, is on `/dev/sda`, a USB flash
+  drive reporting USB ID `346d:5678` / "VendorCo ProductCode". That ID is
+  a well-known signature of cheap and often counterfeit drives.
+- Running `marshal.loads` over every `.pyc` in the Mealie image (9,225
+  files) found 1 corrupt file. After dropping the page cache and running
+  the same scan again, it found 3 *different* corrupt files, and the
+  first one was now fine. The bytes on disk didn't change; the drive
+  returns wrong data on random reads, with no I/O errors in the kernel
+  log.
+- Running out of memory gets processes OOM-killed; it never writes bad
+  bytes into files. And `PYTHONDONTWRITEBYTECODE` only stops new `.pyc`
+  writes, so it can't help with the image's own `.pyc` files.
+
+**Why one bad read turns into a crash loop lasting hours:** the bad bytes
+stay in the kernel page cache, so every container restart gets the same
+corrupted copy from RAM without re-reading the drive. It only clears when
+that page happens to be evicted, which is why an earlier episode "cleared
+after an overnight retry loop".
+
+**Automatic recovery:** `scripts/storage_watchdog.py` runs inside
+`mealie-trigger.service`. Every 60s it checks Mealie's recent logs for
+corrupted-read signatures. When it finds one, it runs `sync`, drops the
+page cache (`/proc/sys/vm/drop_caches`), and restarts Mealie, so the next
+start reads fresh bytes from the drive. It has a 5-minute cooldown, and
+it leaves alone a container someone deliberately stopped. If it has to
+heal 3 times in an hour, it logs that the corruption may now be
+persistent on disk and the image should be re-pulled. Its messages are
+in the `mealie-trigger` service logs (System panel -> service logs).
+
+**The real fix is hardware:** move the root filesystem to a reputable
+SSD or USB drive (and check the power supply, since a La Frite on a weak
+micro-USB supply can make USB storage flaky). The same bad reads can hit
+any file, including Mealie's SQLite database, so keep backups somewhere off this drive until it's replaced.
+`scripts/migrate.py export` does that, and is also how you move
+everything onto the replacement drive. See `migration.md`.
+
+## Container startup and image versions
+
+- **nginx starts even when an app is down.** It resolves Pi-hole, Mealie
+  and Kanboard per request instead of once at startup. See
+  `nginx-and-networking.md`.
+- **Every container has a healthcheck.** nginx was the only one without
+  one; it now checks that it actually serves the dashboard page. The
+  status cards and `--wait` both rely on these.
+- **Image versions are pinned** in `docker-compose.yml` to exactly what
+  was running on 2026-11-08 (matched by digest, so nothing changed on
+  the device): Pi-hole `2026.06.0`, Kanboard `v1.2.52`, nginx
+  `1.31.2-alpine`, Syncthing `2.1.3`, Mealie `v3.19.2`. With `:latest`,
+  any fresh pull (a new drive via `migrate.py`, a re-pull after
+  corruption) could quietly jump a major version against existing data.
+  To upgrade, bump the tag, read that app's release notes, and update
+  as usual.
+- **`mealie-trigger.service` starts after Docker** (`After=`/`Wants=docker.service`).
+  The unit used to be written only at first-time setup. Now every update
+  (the dashboard button or `update.sh`) rewrites it when the template in
+  `reset_manager.py` has changed (`updater.refresh_systemd_unit()`), so
+  existing devices get the same improvements.
+- **Swap:** this device has a 1 GB `/swapfile` on the failing USB drive.
+  It's a corruption risk, but it can't be removed yet: zram swap was
+  measured at 419 of 457 MB used, so the file is the only overflow left
+  and removing it risks OOM kills. `migrate.py prepare-drive` records its
+  size, and the new drive's first boot recreates it there, where it's
+  safe.
+

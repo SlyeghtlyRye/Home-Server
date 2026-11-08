@@ -1461,4 +1461,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Auto-recovers Mealie from the USB drive's transient read corruption
+    # ("bad marshal data" crash loops) -- see storage_watchdog.py.
+    import storage_watchdog
+    storage_watchdog.start()
     http.server.ThreadingHTTPServer(("0.0.0.0", 9001), Handler).serve_forever()

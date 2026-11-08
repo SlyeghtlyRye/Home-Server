@@ -4,9 +4,18 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# Image versions are PINNED (not :latest) -- pinned 2026-11-08 to exactly
+# the images that were running then (matched by digest), so nothing
+# changed on the device. Why: a fresh pull (migrate.py prepare-drive/import
+# on a new drive, a re-pull after storage corruption, a new device) used to
+# grab whatever :latest meant that day, which could silently jump a major
+# version against existing data -- Pi-hole 5->6 already broke configs once.
+# To upgrade: bump the tag here, read that app's release notes, commit,
+# then update like any other docker-compose.yml change.
+
 services:
   pihole:
-    image: pihole/pihole:latest
+    image: pihole/pihole:2026.06.0
     container_name: pihole
     environment:
       - TZ=${TIMEZONE}
@@ -26,7 +35,7 @@ services:
     logging: *default-logging
 
   kanboard:
-    image: kanboard/kanboard:latest
+    image: kanboard/kanboard:v1.2.52
     container_name: kanboard
     environment:
       - TZ=${TIMEZONE}
@@ -39,7 +48,7 @@ services:
     logging: *default-logging
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.31.2-alpine
     container_name: nginx
     ports:
       - "80:80"
@@ -61,6 +70,18 @@ services:
       # dashboard.html), which would matter a lot here since the cert
       # gets regenerated whenever HOST_IP changes.
       - ./nginx/certs:/etc/nginx/certs:ro
+    # The only container without an image-provided healthcheck -- this
+    # gives the System panel a real "serving pages" signal, and lets the
+    # staggered restart's `docker compose up --wait` wait for it properly.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Ordering only, for `docker compose up`. nginx no longer *needs* these
+    # running to start -- it resolves them per request (see the comment at
+    # the top of nginx/templates/default.conf.template).
     depends_on:
       - pihole
       - mealie
@@ -79,9 +100,13 @@ services:
       # This device only has ~914Mi RAM total. Mealie's default (Gunicorn
       # + Uvicorn workers, min 2 even on a small SBC) forks a second full
       # copy of the app right at startup -- exactly when memory is most
-      # strained. Pinned to 1 worker to halve that peak. PYTHONDONTWRITEBYTECODE
-      # rules out a corrupted .pyc cache (what "bad marshal data" actually is)
-      # as a contributor if disk/CPU contention ever causes a partial write.
+      # strained. Pinned to 1 worker to halve that peak.
+      # PYTHONDONTWRITEBYTECODE only stops Python *writing* new .pyc files;
+      # it does nothing about the image's own .pyc files being *read* back
+      # corrupted. "bad marshal data" crash loops are caused by the USB
+      # root drive returning bad bytes on read, not by memory pressure --
+      # see docs/system-panel.md and scripts/storage_watchdog.py, which
+      # auto-recovers from them.
       - WEB_CONCURRENCY=1
       - PYTHONDONTWRITEBYTECODE=1
     volumes:
@@ -89,16 +114,17 @@ services:
     ports:
       - "9000:9000"
     restart: unless-stopped
-    # Soft reservation, not a hard mem_limit -- Mealie is the one that
-    # already crashes under memory pressure, so capping it further would
-    # risk more OOM-kills, not fewer. This just tells the kernel to
+    # Soft reservation, not a hard mem_limit -- Mealie is the biggest
+    # process here, so capping it would risk OOM-kills. (Its recurring
+    # crash loops turned out to be storage read corruption, not memory --
+    # see storage_watchdog.py.) This just tells the kernel to
     # reclaim from everything else first when the device gets tight,
     # giving Mealie first claim on what's actually free.
     mem_reservation: 400m
     logging: *default-logging
 
   syncthing:
-    image: syncthing/syncthing:latest
+    image: syncthing/syncthing:2.1.3
     container_name: syncthing
     hostname: home-server
     environment:

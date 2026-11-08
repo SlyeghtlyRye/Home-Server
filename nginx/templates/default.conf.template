@@ -1,12 +1,18 @@
-upstream pihole {
-    server pihole:80;
-}
-upstream mealie {
-    server mealie:9000;
-}
-upstream kanboard {
-    server kanboard:80;
-}
+# Container names are resolved PER REQUEST through Docker's embedded DNS
+# (127.0.0.11), not once at startup via `upstream` blocks. With static
+# upstreams, nginx refuses to start at all ("host not found in upstream")
+# if any one of them isn't running at that moment -- and Docker's DNS only
+# answers for running containers. So a crash-looping Mealie during a
+# reboot/update/nginx restart used to take the WHOLE dashboard down with
+# it, System panel included. Now nginx always starts, and a down app just
+# returns 502 on its own subdomain until it's back. valid=10s re-resolves
+# quickly after a container is recreated with a new IP.
+#
+# ($pihole_upstream etc. are nginx runtime variables, not envsubst ones --
+# the image's envsubst only replaces variables defined in its environment,
+# same reason $arg_action below survives templating.)
+resolver 127.0.0.11 valid=10s ipv6=off;
+resolver_timeout 5s;
 server {
     listen 80;
     listen 443 ssl;
@@ -341,7 +347,8 @@ server {
     listen 80;
     server_name home.pihole.local home.pihole.internal;
     location / {
-        proxy_pass http://pihole;
+        set $pihole_upstream pihole:80;
+        proxy_pass http://$pihole_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -351,7 +358,8 @@ server {
     listen 80;
     server_name home.meals.local home.meals.internal;
     location / {
-        proxy_pass http://mealie;
+        set $mealie_upstream mealie:9000;
+        proxy_pass http://$mealie_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -361,7 +369,8 @@ server {
     listen 80;
     server_name home.chores.local home.chores.internal;
     location / {
-        proxy_pass http://kanboard;
+        set $kanboard_upstream kanboard:80;
+        proxy_pass http://$kanboard_upstream;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

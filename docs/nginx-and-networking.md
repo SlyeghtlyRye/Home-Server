@@ -62,6 +62,29 @@ isn't possible here -- the cert is self-signed instead.
   port mapping and the certs volume mount only take effect on
   recreation, not a plain restart).
 
+## Why app containers are resolved per request, not via `upstream` blocks
+
+The `home.pihole` / `home.meals` / `home.chores` proxies use
+`set $mealie_upstream mealie:9000; proxy_pass http://$mealie_upstream;`
+with `resolver 127.0.0.11` (Docker's embedded DNS). They don't use
+static `upstream { server mealie:9000; }` blocks.
+
+Static upstreams are resolved once, when nginx starts, and nginx refuses
+to start at all if any of them fails to resolve. Docker's DNS only
+answers for containers that are running. So when Mealie was
+crash-looping (see system-panel.md), anything that restarted nginx (a
+reboot, an update, the Restart button) took the **whole dashboard**
+down, including the System panel you'd use to fix it. Confirmed with
+`nginx -t`: the old config fails with `host not found in upstream`
+when the app containers aren't resolvable, and the new one passes.
+
+With per-request resolution, nginx always starts, and a down app returns
+502 on its own subdomain only. `valid=10s` makes nginx re-resolve soon
+after a container is recreated with a new IP. `$mealie_upstream` and
+the others are nginx runtime variables. The nginx image's `envsubst`
+only replaces variables defined in its environment, so they survive
+templating, the same way `$arg_action` does.
+
 ## Why the trigger server is reached via 172.17.0.1, not a hostname
 
 nginx's `proxy_pass` resolver doesn't read `/etc/hosts`, and using a

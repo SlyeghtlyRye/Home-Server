@@ -298,12 +298,39 @@ def apply_update(force=False):
     # `window.HOST_IP` global, throwing a SyntaxError on every page load
     # no matter how many unrelated updates it pulled.
     reset_manager.write_js_config(reset_manager.read_current_host_ip(), dry_run=False, log_lines=log_lines)
+    refresh_systemd_unit(log_lines)
 
     restart_plan = _classify_restart(changed_files, env_keys_added)
     log_lines.append(_describe_restart_plan(restart_plan))
     _schedule_background_restart(restart_plan)
 
     return {"status": "ok", "message": "Update applied.", "log": log_lines}
+
+
+# Upper bound per service for the staggered restart's --wait. Mealie's
+# cold start on the S805X is the slow one; 5 min is generous for it.
+WAIT_TIMEOUT = 300
+
+
+def refresh_systemd_unit(log_lines):
+    """Rewrites mealie-trigger.service if reset_manager's template has
+    changed since setup. Before this, the unit was only ever written at
+    first-time setup, so improvements to it never reached existing devices
+    (same trap the js/config.js comment above describes). Takes effect on
+    the service's next restart, which the restart plan handles."""
+    path = reset_manager.SYSTEMD_UNIT_PATH
+    try:
+        with open(path) as f:
+            current = f.read()
+    except OSError:
+        current = None
+    if current == reset_manager.SYSTEMD_UNIT_CONTENT:
+        return False
+    with open(path, "w") as f:
+        f.write(reset_manager.SYSTEMD_UNIT_CONTENT)
+    subprocess.run(["systemctl", "daemon-reload"], check=False)
+    log_lines.append(f"Updated {path} to the current template.")
+    return True
 
 
 def _schedule_background_restart(plan):
@@ -318,11 +345,12 @@ def _schedule_background_restart(plan):
     steps = []
     if plan["compose_full"]:
         # One "docker compose up -d --force-recreate" (no service name)
-        # pulls/extracts every container at once -- fine on a beefy
-        # machine, but on a memory-constrained device (seen firsthand:
-        # 914Mi total RAM) that peak contention has been enough to
-        # corrupt a container's image during extraction, surfacing as a
-        # "bad marshal data" crash loop after a routine update.
+        # recreates every container at once -- fine on a beefy machine,
+        # but a lot of simultaneous memory/IO on a 914Mi device.
+        # (The "bad marshal data" crash loop this was originally blamed
+        # on turned out to be the USB root drive returning corrupted
+        # bytes on read -- see storage_watchdog.py -- but staggering is
+        # still the gentler choice on this hardware.)
         # Recreating one service at a time, with a pause between each,
         # spreads the same work out instead of hitting it all at once --
         # same end state, far lower peak memory/IO pressure. Order
@@ -331,9 +359,15 @@ def _schedule_background_restart(plan):
         # one full Python app server, and the one that's actually
         # crashed under load -- recreated last, after everything else
         # has had a chance to settle.
+        # --wait blocks until the container reports healthy (or just
+        # "running", if it has no healthcheck) instead of a fixed sleep:
+        # quicker when a service comes up fast, and actually patient when
+        # Mealie's slow first start on this CPU takes longer than 20s.
+        # `|| true` so one service that never gets healthy (e.g. a Mealie
+        # crash loop) can't stop the rest of the chain from being recreated.
         for service in ("syncthing", "pihole", "kanboard", "mealie", "nginx"):
-            steps.append(f"docker compose up -d --force-recreate {service}")
-            steps.append("sleep 20")
+            steps.append(f"(docker compose up -d --force-recreate --wait "
+                         f"--wait-timeout {WAIT_TIMEOUT} {service} || true)")
     elif plan["nginx_only"]:
         steps.append("docker compose up -d --force-recreate nginx")
     if plan["trigger"]:
@@ -364,6 +398,11 @@ if __name__ == "__main__":
         print(f"NEEDS_TRIGGER={'1' if plan['trigger'] else '0'}")
         print(f"NEEDS_COMPOSE_FULL={'1' if plan['compose_full'] else '0'}")
         print(f"NEEDS_NGINX_ONLY={'1' if plan['nginx_only'] else '0'}")
+    elif len(sys.argv) >= 2 and sys.argv[1] == "refresh-unit":
+        # update.sh's way into refresh_systemd_unit(), same idea as `plan`.
+        out = []
+        refresh_systemd_unit(out)
+        print("\n".join(out) or "mealie-trigger.service already current.")
     else:
         print("Usage: updater.py plan <local-commit> <remote-commit> [--env-added]", file=sys.stderr)
         sys.exit(1)

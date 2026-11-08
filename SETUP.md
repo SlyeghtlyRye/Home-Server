@@ -118,6 +118,10 @@ a subfolder. This repo *is* the live working directory — every path in the
 config, Docker Compose file, and systemd service assumes it lives at
 `/root`.
 
+> **Moving from an old device or drive?** Stop after this step and follow
+> [docs/migration.md](docs/migration.md): `scripts/migrate.py import` restores
+> all your data and does everything Step 4 would.
+
 ## Step 4 — Run the installer
 
 ```bash

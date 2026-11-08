@@ -22,9 +22,14 @@ CERTS_DIR = os.path.join(ROOT, "nginx", "certs")
 CERT_FILE = os.path.join(CERTS_DIR, "selfsigned.crt")
 CERT_KEY_FILE = os.path.join(CERTS_DIR, "selfsigned.key")
 
+# After/Wants docker.service: everything this service does (system
+# panel, storage watchdog, Mealie API calls) goes through Docker, so at
+# boot it should come up after Docker rather than racing it. Existing
+# devices pick up changes here via updater.refresh_systemd_unit().
 SYSTEMD_UNIT_CONTENT = """[Unit]
 Description=Mealie Meal Plan Trigger
-After=network.target
+After=network.target docker.service
+Wants=docker.service
 
 [Service]
 ExecStart=/usr/bin/python3 /root/scripts/trigger_server.py
