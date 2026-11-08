@@ -36,19 +36,32 @@ import time
 CONTAINERS = ("mealie",)
 
 # Error text that can only come from corrupted file bytes, never from a
-# config/code bug: a .pyc whose marshal payload doesn't parse, or a .py
-# source file with NUL bytes in it.
+# config/code bug. Matched loosely on purpose: the same corrupted .pyc
+# surfaces with different wording depending on which bytes came back
+# wrong -- seen live: "ValueError: bad marshal data (unknown type code)",
+# "... (invalid reference)", and "EOFError: marshal data too short". The
+# first version only matched "bad marshal data", so on 2026-11-08 it
+# healed once, then sat out a 25-minute crash loop of "too short" errors.
 SIGNATURES = (
-    "bad marshal data",
+    "marshal data",            # bad marshal data (...) / marshal data too short
+    "bad magic number",        # corrupted .pyc header
     "source code string cannot contain null bytes",
+    "source code cannot contain null bytes",
 )
 
-CHECK_INTERVAL = 60       # seconds between checks
-HEAL_COOLDOWN = 300       # min seconds between heals for one container
-# If healing keeps being needed this often, the corruption is probably
-# persistent (a bad write, not just a bad read) and dropping the cache
-# can't fix it -- the image needs to be re-pulled.
-ESCALATE_AFTER = 3        # heals...
+# Heal after EVERY corrupted-read crash, not once per few minutes: a
+# Mealie start reads thousands of files, and on a degrading drive several
+# starts in a row can each hit a different bad read (seen 2026-11-08:
+# jwt, then isodate, ...). Each needs its own cache drop to get a clean
+# re-read, and once one start gets through, Mealie has everything it
+# imports in memory and stays up. A 5-minute cooldown here turned a
+# 1-minute recovery into a 25-minute outage.
+CHECK_INTERVAL = 30       # seconds between checks
+HEAL_COOLDOWN = 60        # min seconds between heals for one container
+# Needing this many heals in an hour means the drive is getting worse --
+# or, if the SAME file fails every time, it's corrupt on disk and the
+# image needs a re-pull. Either way, a human should look.
+ESCALATE_AFTER = 10       # heals...
 ESCALATE_WINDOW = 3600    # ...within this many seconds
 
 _last_heal = {}           # container -> unix time of last heal
@@ -134,9 +147,10 @@ def check_once(now=None):
         _heal_history[name] = history
         if len(history) >= ESCALATE_AFTER:
             _log(f"{name}: healed {len(history)} times in the last hour -- the "
-                 f"corruption may now be persistent on disk. Re-pull the image "
-                 f"(docker compose rm -sf {name} && docker rmi <image> && "
-                 f"docker compose up -d {name}) and replace the USB drive.")
+                 f"drive is degrading; replace it (docs/migration.md). If `docker "
+                 f"logs {name}` shows the SAME file failing every time, it's corrupt "
+                 f"on disk: re-pull the image (docker compose rm -sf {name} && "
+                 f"docker rmi <image> && docker compose up -d {name}).")
 
 
 def _loop():

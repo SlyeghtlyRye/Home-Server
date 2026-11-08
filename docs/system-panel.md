@@ -368,14 +368,31 @@ that page happens to be evicted, which is why an earlier episode "cleared
 after an overnight retry loop".
 
 **Automatic recovery:** `scripts/storage_watchdog.py` runs inside
-`mealie-trigger.service`. Every 60s it checks Mealie's recent logs for
-corrupted-read signatures. When it finds one, it runs `sync`, drops the
-page cache (`/proc/sys/vm/drop_caches`), and restarts Mealie, so the next
-start reads fresh bytes from the drive. It has a 5-minute cooldown, and
-it leaves alone a container someone deliberately stopped. If it has to
-heal 3 times in an hour, it logs that the corruption may now be
-persistent on disk and the image should be re-pulled. Its messages are
-in the `mealie-trigger` service logs (System panel -> service logs).
+`mealie-trigger.service`. Every 30s it checks Mealie's recent logs for
+corrupted-read errors. It matches loosely, because the same problem
+shows up as `bad marshal data (...)`, `marshal data too short`, or a bad
+`.pyc` magic number, depending on which bytes came back wrong. When it
+finds one, it runs `sync`, drops the page cache
+(`/proc/sys/vm/drop_caches`), and restarts Mealie, so the next start
+reads fresh bytes from the drive. It leaves alone a container someone
+deliberately stopped.
+
+It heals after **every** such crash (60s cooldown), because on a
+degrading drive several starts in a row can each hit a *different* bad
+read, and each needs its own cache drop. Once one start gets through,
+Mealie has everything it imports in memory and stays up. This was
+learned live during the 2026-11-08 deploy. The first version had a
+5-minute cooldown and only matched `bad marshal data`. It healed once,
+then sat out a 25-minute loop of `marshal data too short` errors.
+Manually dropping the cache and retrying showed each failure hitting a
+different file (`jwt`, then `isodate`), confirming the bad reads are
+intermittent and the files on disk are fine.
+
+At 10 heals in an hour it logs that the drive is degrading. If
+`docker logs mealie` shows the *same* file failing every time, that file
+is corrupt on disk, and the fix is re-pulling the image instead. Its
+messages are in the `mealie-trigger` service logs (System panel ->
+service logs).
 
 **The real fix is hardware:** move the root filesystem to a reputable
 SSD or USB drive (and check the power supply, since a La Frite on a weak
