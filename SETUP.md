@@ -196,7 +196,9 @@ Two flags on `setup.sh` let you rehearse the reset/setup flow safely:
 ## Known issues / troubleshooting
 
 These are real problems hit during development — included here so you don't
-have to rediscover them.
+have to rediscover them. For the bigger ones written up as full debugging
+case studies (how each was tracked down, not just the fix), see
+`docs/dev-findings.md`.
 
 **`apt` fails with `getaddrinfo (16: Device or resource busy)`**
 Usually means `/etc/resolv.conf` is a dangling symlink to
