@@ -745,6 +745,21 @@ git fetch -q origin "$REPO_BRANCH"
 git checkout -q -f -B "$REPO_BRANCH" "$REPO_COMMIT"
 git branch -q --set-upstream-to="origin/$REPO_BRANCH" "$REPO_BRANCH"
 
+# Pi-hole publishes port 53 on the host, but a fresh Armbian runs
+# systemd-resolved with its stub listener on 127.0.0.53:53, which blocks
+# Docker from binding 0.0.0.0:53 (seen 2026-11-08: pihole "address already
+# in use"). Turn off just the stub listener -- resolved keeps running, so
+# Tailscale's DNS integration still works -- and point resolv.conf at the
+# real upstream list instead of the (now gone) stub.
+if systemctl is-active --quiet systemd-resolved; then
+    mkdir -p /etc/systemd/resolved.conf.d
+    printf '[Resolve]\n# Pi-hole needs port 53 (home-server)\nDNSStubListener=no\n' \
+        > /etc/systemd/resolved.conf.d/10-pihole.conf
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    systemctl restart systemd-resolved
+    log "freed port 53 for Pi-hole (systemd-resolved stub listener off)"
+fi
+
 IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
 log "this device's IP: ${IP:-unknown}"
 python3 /root/scripts/migrate.py import "$M/backup.tar.gz" --yes ${IP:+--host-ip "$IP"}

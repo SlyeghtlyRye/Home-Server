@@ -33,6 +33,9 @@ NODES = {
     "updater":   {"label": "updater.py",             "layer": "host"},
     "envcheck":  {"label": "check_env_updates.py",    "layer": "host"},
     "stc":       {"label": "syncthing_client.py",    "layer": "host"},
+    "watchdog":  {"label": "storage_watchdog.py",    "layer": "host"},
+    "migrate":   {"label": "migrate.py",             "layer": "host"},
+    "swapboot":  {"label": "swapboot.py",            "layer": "host"},
 
     "core_js":     {"label": "core.js",             "layer": "frontend"},
     "calsettings_js": {"label": "calendar-settings.js", "layer": "frontend"},
@@ -87,6 +90,9 @@ EDGES = [
     ("config_js", "core_js"),
     ("trigger", "stc"),
     ("stc", "syncthing"),
+    ("trigger", "watchdog"),
+    ("watchdog", "mealie"),
+    ("migrate", "resetmgr"),
 ]
 
 # Real, on-disk sources the completeness checker cross-references against.
@@ -108,6 +114,9 @@ CODE_MAPPING = {
     "sysstat": "scripts/system_status.py",
     "resetmgr": "scripts/reset_manager.py",
     "updater": "scripts/updater.py",
+    "watchdog": "scripts/storage_watchdog.py",
+    "migrate": "scripts/migrate.py",
+    "swapboot": "scripts/swapboot.py",
     "envcheck": "scripts/check_env_updates.py",
     "core_js": "js/core.js",
     "mealie_js": "js/mealie.js",
