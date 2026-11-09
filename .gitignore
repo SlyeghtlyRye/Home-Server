@@ -63,3 +63,6 @@ audiobooks/scheduler.log
 # Git credentials and machine-specific git config
 .git-credentials
 .gitconfig
+
+# Left behind by migrate.py prepare-drive first-boot restore (restore.log etc.)
+home-server-migration/
