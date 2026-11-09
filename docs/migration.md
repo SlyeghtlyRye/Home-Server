@@ -114,6 +114,38 @@ first-boot installer. You then swap drives and it sets itself up.
    identity are copied over, so the server keeps its Tailscale IP with no
    re-login. Keep the old drive untouched until then, as your fallback.
 
+## Switching drives without unplugging (swapboot)
+
+With two boot drives plugged in at once (say the old drive and its
+replacement), `scripts/swapboot.py` picks which one boots, so there's no
+need to pull drives to switch:
+
+```
+python3 scripts/swapboot.py status               # what's running, what boots next
+python3 scripts/swapboot.py set other --reboot   # boot the other drive
+python3 scripts/swapboot.py set current          # stay on this one
+```
+
+How it works: the board's bootloader (U-Boot, in its SPI flash) runs the
+first `/boot/boot.scr` it finds on any USB drive, and Armbian's boot
+script then boots the drive it was read from. `swapboot.py install`
+(run automatically by `set`) adds a few lines to that script on each
+drive: before booting, check every USB drive for a
+`/boot/swapboot-target` file and boot *that* drive instead. `set` just
+moves that one marker file. With no marker anywhere, the patch does
+nothing and boot behaves as stock. The originals are kept as
+`boot.cmd.pre-swapboot` / `boot.scr.pre-swapboot`, and
+`swapboot.py uninstall` removes the patch.
+
+`status` shows on the "Booted from" line whether swapboot redirected the
+current boot (the patched script adds `swapboot=<read-from>:<booted>` to
+the kernel command line).
+
+**If a drive fails to boot:** unplug the other drive. A single drive
+always boots itself, because the marker can only redirect to a drive
+that's plugged in. If an Armbian update ever replaces `boot.cmd`,
+`status` shows that drive as unpatched; run `swapboot.py install` again.
+
 ## Manual path (separate backup stick)
 
 If you'd rather keep a standalone backup, or are moving to a different
