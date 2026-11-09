@@ -22,7 +22,7 @@ python3 scripts/migrate.py prepare-drive /dev/sdb   # or: make a new drive resto
 |---|---|
 | Every Docker volume in the compose project: Mealie (recipes, images, DB), Kanboard, Pi-hole, Syncthing | The repo itself (a fresh `git clone` provides it) |
 | `.env`, `js/config.js`, TLS certs, `dnsmasq-custom.conf` | Docker images (pulled fresh on import, on purpose; see below) |
-| Mealie/Kanboard tokens, meal history, calendar settings, Syncthing config | Tailscale login, icecast2 config (host services; set up by hand) |
+| Mealie/Kanboard tokens, meal history, calendar settings, Syncthing config | Tailscale login, icecast2 config: `prepare-drive` carries these over automatically; after a manual import, set them up by hand |
 | Streams library, profiles, progress, and `audiobooks/local_files` | |
 
 The archive contains secrets (`.env`, API tokens), so it's written as
@@ -109,9 +109,10 @@ first-boot installer. You then swap drives and it sets itself up.
    2 minutes, up to 6 times. Run `systemctl start home-server-restore` to
    try again after that.
 5. **Once everything works:** delete
-   `/root/home-server-migration/backup.tar.gz` (it holds secrets), and
-   log back in to Tailscale (`tailscale up`) if you use it. Keep the old
-   drive untouched until then, as your fallback.
+   `/root/home-server-migration/backup.tar.gz` (it holds secrets). Tailscale
+   and icecast2 come back on their own: their config and Tailscale's node
+   identity are copied over, so the server keeps its Tailscale IP with no
+   re-login. Keep the old drive untouched until then, as your fallback.
 
 ## Manual path (separate backup stick)
 

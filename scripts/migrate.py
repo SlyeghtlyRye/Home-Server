@@ -27,7 +27,8 @@ What's deliberately NOT in it:
     clone (dd / Etcher / Win32DiskImager) would carry that corruption
     straight onto the new drive; a fresh install + data import doesn't.
   - host services outside this repo's control (Tailscale login, icecast2
-    config) -- re-set those up by hand on the new device.
+    config) -- re-set those up by hand after a plain import. prepare-drive
+    DOES carry them (staged next to the archive, restored by firstboot.sh).
 
 Why every read is verified: on a drive that silently returns wrong
 bytes, a plain `tar` can produce an archive that's corrupt with no error
@@ -628,7 +629,8 @@ def cmd_import(args):
               "if needed restore from Mealie's own backups (Settings -> Backups):")
         for p in problems:
             print(f"  {p}")
-    print("Not migrated (set up by hand if you use them): Tailscale login, icecast2 config.")
+    print("Not part of the archive: Tailscale login, icecast2 config (prepare-drive restores those "
+          "separately; after a plain import, set them up by hand if you use them).")
 
 
 # ---------------------------------------------------------- prepare-drive
@@ -693,6 +695,35 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 if [ -n "${TIMEZONE:-}" ]; then timedatectl set-timezone "$TIMEZONE" || true; fi
+
+# Host services that live outside the repo (staged by prepare-drive under
+# host/ only if the old device had them). Failures here are logged, not
+# fatal: they shouldn't block restoring the dashboard itself.
+# Steps are chained with && on purpose: these functions are called as an
+# `if` condition, where bash ignores `set -e`, so a failed step would
+# otherwise fall through and get reported as success.
+restore_tailscale() {
+    { command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh; } &&
+    { systemctl stop tailscaled || true; } &&
+    mkdir -p /var/lib/tailscale && chmod 700 /var/lib/tailscale &&
+    cp -a "$M/host/tailscale/." /var/lib/tailscale/ &&
+    systemctl enable --now tailscaled
+}
+restore_icecast() {
+    apt-get install -y -q icecast2 &&
+    cp -a "$M/host/icecast2/." /etc/icecast2/ &&
+    chown root:icecast /etc/icecast2/icecast.xml && chmod 640 /etc/icecast2/icecast.xml &&
+    { systemctl enable icecast2 || true; } &&
+    systemctl restart icecast2
+}
+if [ -d "$M/host/tailscale" ] && [ ! -f "$M/host/tailscale.done" ]; then
+    log "restoring Tailscale (same node identity -- no re-login needed)"
+    if restore_tailscale; then touch "$M/host/tailscale.done"; else log "WARNING: Tailscale restore failed -- run 'tailscale up' by hand"; fi
+fi
+if [ -d "$M/host/icecast2" ] && [ ! -f "$M/host/icecast2.done" ]; then
+    log "restoring icecast2"
+    if restore_icecast; then touch "$M/host/icecast2.done"; else log "WARNING: icecast2 restore failed"; fi
+fi
 
 log "fetching $REPO_URL ($REPO_BRANCH @ $REPO_COMMIT)"
 cd /root
@@ -852,8 +883,34 @@ def stage_new_root(new_root, repo):
                 copied += 1
     print(f"  copied hostname + {copied} network config file(s)")
 
+    # Host services outside the repo, restored by firstboot.sh. Tailscale's
+    # state dir holds the node key, so the new drive comes back as the same
+    # Tailscale device (same 100.x IP, no login). Logs are skipped.
+    staged = []
+    for name, src_dir, skip in (
+        ("tailscale", os.path.join(HOST_VAR_LIB, "tailscale"), re.compile(r"\.log.*\.txt$|^tailscaled\.log")),
+        ("icecast2", os.path.join(HOST_ETC, "icecast2"), None),
+    ):
+        if not os.path.isdir(src_dir):
+            continue
+        for dirpath, _dirs, files in os.walk(src_dir):
+            for fn in files:
+                if skip and skip.search(fn):
+                    continue
+                src = os.path.join(dirpath, fn)
+                if os.path.islink(src) or not os.path.isfile(src):
+                    continue
+                rel = os.path.relpath(src, src_dir)
+                _write(os.path.join(mdir, "host", name, rel), _verified_bytes(src),
+                       os.stat(src).st_mode & 0o777)
+        os.chmod(os.path.join(mdir, "host"), 0o700)
+        staged.append(name)
+    if staged:
+        print(f"  staged host services for first boot: {', '.join(staged)}")
+
 
 # Overridable for tests only.
+HOST_VAR_LIB = "/var/lib"
 HOST_ETC = "/etc"
 HOST_ROOT_HOME = "/root"
 HOST_PROC_SWAPS = "/proc/swaps"
