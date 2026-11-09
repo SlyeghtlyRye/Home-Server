@@ -10,6 +10,13 @@ import { registerApp, escapeHtml } from './core.js';
 
 let docsList = [];
 
+// Where this project's source lives. Shown in the "More info" section and
+// as a per-doc "View on GitHub" link (file history, raw source).
+const REPO_URL = 'https://github.com/SlyeghtlyRye/Home-Server';
+const REPO_BRANCH = 'main';
+// Featured in "More info" instead of the main grid.
+const FINDINGS_DOC = 'dev-findings.md';
+
 function inlineFormat(text) {
   // Pull code spans out first so ** and * inside them stay literal.
   const codes = [];
@@ -154,16 +161,32 @@ function renderDocsIndex() {
     root.innerHTML = '<p style="color:var(--color-text-muted);">No documentation found.</p>';
     return;
   }
+  const findings = docsList.find(d => d.filename === FINDINGS_DOC);
+  const cardStyle = 'text-align:left; display:block; font-weight:normal;';
+  const docCard = d => `
+          <div class="profile-card" data-action="open-doc" data-filename="${escapeHtml(d.filename)}" style="${cardStyle}">
+            <div style="font-weight:bold; margin-bottom:6px;">${escapeHtml(d.title)}</div>
+            <div style="font-size:11px; color:var(--color-text-muted);">${d.tags.map(t => escapeHtml(t)).join(', ')}</div>
+          </div>`;
   root.innerHTML = `
     <div class="week-block">
       <h3>Documentation</h3>
       <div class="profile-picker-grid">
-        ${docsList.map(d => `
-          <div class="profile-card" data-action="open-doc" data-filename="${d.filename}" style="text-align:left; display:block; font-weight:normal;">
-            <div style="font-weight:bold; margin-bottom:6px;">${escapeHtml(d.title)}</div>
-            <div style="font-size:11px; color:var(--color-text-muted);">${d.tags.map(t => escapeHtml(t)).join(', ')}</div>
-          </div>
-        `).join('')}
+        ${docsList.filter(d => d !== findings).map(docCard).join('')}
+      </div>
+    </div>
+    <div class="week-block">
+      <h3>More info</h3>
+      <div class="profile-picker-grid">
+        ${findings ? `
+          <div class="profile-card" data-action="open-doc" data-filename="${escapeHtml(findings.filename)}" style="${cardStyle}">
+            <div style="font-weight:bold; margin-bottom:6px;">&#x1F50D; ${escapeHtml(findings.title)}</div>
+            <div style="font-size:11px; color:var(--color-text-muted);">How real problems on this server were tracked down: the failing drive, hidden volumes, port clashes, and more.</div>
+          </div>` : ''}
+        <a class="profile-card" href="${REPO_URL}" target="_blank" rel="noopener noreferrer" style="${cardStyle} text-decoration:none; color:inherit;">
+          <div style="font-weight:bold; margin-bottom:6px;">&#x1F4BB; Source code on GitHub &#x2197;</div>
+          <div style="font-size:11px; color:var(--color-text-muted);">${escapeHtml(REPO_URL.replace(/^https:\/\//, ''))}: code, change history, and every doc here.</div>
+        </a>
       </div>
     </div>
   `;
@@ -176,8 +199,12 @@ async function openDoc(filename) {
     const res = await fetch(`/data/docs-content?filename=${encodeURIComponent(filename)}`);
     if (!res.ok) throw new Error('server responded ' + res.status);
     const data = await res.json();
+    const sourceUrl = `${REPO_URL}/blob/${REPO_BRANCH}/docs/${encodeURIComponent(filename)}`;
     root.innerHTML = `
-      <button class="btn small" data-action="back-to-index" style="margin-bottom:15px;">&larr; All docs</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px;">
+        <button class="btn small" data-action="back-to-index">&larr; All docs</button>
+        <a href="${sourceUrl}" target="_blank" rel="noopener noreferrer" style="font-size:12px; color:var(--color-text-muted);">View on GitHub &#x2197;</a>
+      </div>
       <div class="week-block doc-body">${renderMarkdown(data.content)}</div>
     `;
     await inlineEmbeddedSvgs(root);
