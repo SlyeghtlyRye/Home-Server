@@ -1008,6 +1008,7 @@ def cmd_prepare_drive(args):
     print("\nThe new drive is ready. Next:\n"
           "  1. poweroff\n"
           "  2. unplug the OLD drive, leave only the new one in, power on\n"
+          "     (or keep both plugged in: python3 scripts/swapboot.py set <new drive> --reboot)\n"
           "  3. wait ~20-40 min (Docker install + image downloads + restore).\n"
           "     Progress: ssh root@<ip>, then  tail -f /root/home-server-migration/restore.log\n"
           "Keep the old drive untouched until the new one is confirmed working.")
