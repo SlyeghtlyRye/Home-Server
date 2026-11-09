@@ -40,7 +40,13 @@ services:
     environment:
       - TZ=${TIMEZONE}
     volumes:
-      - kanboard_data:/var/www/html/data
+      # /var/www/app/data is where the image actually keeps db.sqlite.
+      # This used to say /var/www/html/data (an unused path), so the real
+      # DB lived in an anonymous volume: not backed up by migrate.py, and
+      # a fresh empty DB (new API token) whenever that volume was dropped.
+      # Found 2026-11-08 when the drive migration came up with Kanboard
+      # rejecting the saved token.
+      - kanboard_data:/var/www/app/data
     ports:
       - "3000:80"
     restart: unless-stopped
