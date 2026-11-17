@@ -157,6 +157,8 @@ function setButtonState(state) {
   if (!btn) return;
   btn.classList.remove('checking', 'ok', 'bad');
   btn.classList.add(state);
+  // A quiet checkmark when everything's fine; "!" only when it needs you.
+  btn.textContent = state === 'ok' ? '✓' : '!';
   btn.title = {
     checking: 'Checking connection...',
     ok: 'All data endpoints reachable. Click for details or to refresh.',

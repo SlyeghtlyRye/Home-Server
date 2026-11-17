@@ -118,7 +118,11 @@
     }
     .health-btn:hover { color: white; border-color: var(--color-accent); }
     .health-btn.checking { opacity: 0.6; }
-    .health-btn.ok { color: var(--color-success-border); border-color: var(--color-success-border); }
+    .health-btn.ok {
+      color: var(--color-success-border); border-color: var(--color-success-border);
+      opacity: 0.4; transition: opacity 0.2s;
+    }
+    .health-btn.ok:hover, .health-btn.ok:focus-visible, .health-btn.ok[aria-expanded="true"] { opacity: 1; }
     .health-btn.bad {
       color: white; background: var(--color-danger-border); border-color: var(--color-danger-border);
       animation: health-pulse 1.6s ease-in-out infinite;
@@ -201,6 +205,17 @@
     .combo-item:hover { background: var(--color-selected-bg); }
     .combo-item.info { color: var(--color-text-muted); font-style: italic; cursor: default; }
     .combo-item.info:hover { background: transparent; }
+
+    /* Kanboard saved tasks & events: type tag, Task/Event pick, "Save for next time" */
+    .combo-item[data-saved-id] { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .kb-type-tag {
+      flex: 0 0 auto; font-size: 11px; padding: 1px 7px; border-radius: 10px;
+      border: 1px solid var(--color-border); color: var(--color-text-dim); font-style: normal;
+    }
+    .kb-type-tag.event { border-color: var(--color-event); color: var(--color-event); }
+    .kb-type-pick { display: inline-flex; gap: 10px; font-size: 13px; }
+    .kb-save-next { font-size: 12px; color: var(--color-text-dim); }
+    .kb-save-next[hidden] { display: none; }
     .new-hint { font-size: 11px; color: var(--color-warning); margin-top: 2px; display: none; }
     .new-hint.show { display: block; }
     label.check-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0; font-size: 14px; color: var(--color-text-dim); }
