@@ -282,6 +282,7 @@ function renderModePanel() {
     el.classList.remove('show');
     el.innerHTML = '';
     modePanelShowModeSwitcher = false;
+    reserveSpaceForModePanel();
     return;
   }
 
@@ -314,6 +315,31 @@ function renderModePanel() {
     </div>`;
   el.classList.add('show');
   el.style.width = modePanelWidth ? `${modePanelWidth}px` : '';
+  reserveSpaceForModePanel();
+}
+
+// The panel is position:fixed over the bottom of the screen, so without
+// this it sat on top of the calendar's lower weeks with no way to scroll
+// past it -- Schedule's day-picking couldn't reach the days it covered.
+// Pads the calendar by the panel's live height (ResizeObserver also
+// catches drag-resizes and content changes) so every day can be scrolled
+// into view above it. The padding lives on the calendar container, so it
+// disappears with the view itself when leaving Kanboard.
+let modePanelSpacer = null;
+function reserveSpaceForModePanel() {
+  const el = document.getElementById('kb-mode-panel');
+  const container = document.getElementById('kb-calendar-container');
+  if (!el || !container) return;
+  const apply = () => {
+    container.style.paddingBottom = el.classList.contains('show') ? `${el.offsetHeight + 24}px` : '';
+  };
+  if (!modePanelSpacer || modePanelSpacer.el !== el) {
+    modePanelSpacer?.observer.disconnect();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    modePanelSpacer = { el, observer };
+  }
+  apply();
 }
 
 function startModePanelResize(e) {
