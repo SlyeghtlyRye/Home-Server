@@ -853,6 +853,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/api/update-chore-bucket-per-week":
+            body = self._read_json_body()
+            bucket_id = (body.get("id") or "").strip()
+            if not bucket_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            try:
+                bucket = chore_buckets.set_per_week(bucket_id, body.get("perWeek", 0))
+            except (TypeError, ValueError) as e:
+                self._send_json(400, {"error": str(e)})
+                return
+            if bucket is None:
+                self._send_json(404, {"error": "no saved item with that id"})
+                return
+            self._send_json(200, {"bucket": bucket})
+            return
+
         if parsed.path == "/api/remove-chore-bucket":
             body = self._read_json_body()
             bucket_id = (body.get("id") or "").strip()

@@ -8,11 +8,10 @@ Deliberately thin, by explicit request:
   one person every time; who's doing it is chosen fresh each time a
   bucket is placed on a day, same as Reroll never locking in a
   particular assignee either.
-- No automatic cadence/recurrence (no "this bucket always wants
-  Tue+Fri") -- Schedule picks days manually (same direct multi-select
-  as the rest of this calendar), then picks a bucket per day. An
-  auto-cadence layer could build on top of this later if wanted, but
-  isn't part of this first pass.
+- No automatic placement yet -- Schedule picks days manually. Each
+  bucket can carry an Auto Schedule setting, "perWeek" (times per week,
+  0-7, absent = 0), set from the gear popover; it's stored for a future
+  Auto Schedule button to use, and nothing reads it to create tasks yet.
 
 Plain JSON file, same pattern as recipe_suggest.py's suggested-id
 tracking -- gitignored, read fresh on every call, no caching.
@@ -59,6 +58,26 @@ def add_bucket(name, task_type="task", start_time=None, due_time=None):
     buckets.append(bucket)
     _save(buckets)
     return bucket
+
+
+MAX_PER_WEEK = 7
+
+
+def set_per_week(bucket_id, per_week):
+    """Auto Schedule setting: how many times a week this item should
+    happen (0 = not auto-scheduled). Only the setting is stored for now --
+    nothing places tasks from it yet. Returns the updated bucket, or None
+    if no bucket has that id."""
+    per_week = int(per_week)
+    if not 0 <= per_week <= MAX_PER_WEEK:
+        raise ValueError(f"times per week must be 0-{MAX_PER_WEEK}")
+    buckets = _load()
+    for b in buckets:
+        if b["id"] == bucket_id:
+            b["perWeek"] = per_week
+            _save(buckets)
+            return b
+    return None
 
 
 def remove_bucket(bucket_id):

@@ -89,7 +89,9 @@
       border-bottom: 1px solid var(--color-border-soft);
       position: sticky;
       top: 0;
-      z-index: 100;
+      /* Above the floating mode panel (200) and calendar settings popover
+         (210), so they scroll under the header rather than over it. */
+      z-index: 300;
     }
     .app-header-inner {
       max-width: 1200px;
@@ -232,6 +234,27 @@
     .kb-type-pick { display: inline-flex; gap: 10px; font-size: 13px; }
     .kb-save-next { font-size: 12px; color: var(--color-text-dim); }
     .kb-save-next[hidden] { display: none; }
+
+    /* Kanboard gear: Auto Schedule settings (times per week per saved item) */
+    .auto-sched-toggle {
+      display: flex; justify-content: space-between; align-items: center; width: 100%;
+      margin-top: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+      background: var(--color-bg); color: white; border: 1px solid var(--color-border); font-size: 12px;
+    }
+    .auto-sched-toggle:hover { border-color: var(--color-accent); }
+    .auto-sched-summary { color: var(--color-text-muted); font-size: 11px; }
+    .auto-sched-list { margin-top: 6px; }
+    .auto-sched-hint { font-size: 11px; color: var(--color-text-muted); margin: 4px 0 6px; }
+    .auto-sched-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--color-border-soft); font-size: 12px; }
+    .auto-sched-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .auto-sched-input {
+      width: 44px; padding: 4px; text-align: center; border-radius: 4px; font-size: 12px;
+      background: var(--color-surface); color: white; border: 1px solid var(--color-border);
+      transition: border-color 0.3s;
+    }
+    .auto-sched-input.saved { border-color: var(--color-success-border); }
+    .auto-sched-input.save-failed { border-color: var(--color-danger-border); }
+    .auto-sched-unit { color: var(--color-text-muted); font-size: 11px; }
     .new-hint { font-size: 11px; color: var(--color-warning); margin-top: 2px; display: none; }
     .new-hint.show { display: block; }
     label.check-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0; font-size: 14px; color: var(--color-text-dim); }
@@ -360,7 +383,10 @@
       border: 1px solid var(--color-border);
       border-radius: 6px;
       padding: 12px;
-      z-index: 50;
+      /* Above the floating mode panel (#kb-mode-panel/#mode-panel, 200),
+         which otherwise covered the popover's lower half -- its saved
+         items and Auto Schedule settings. */
+      z-index: 210;
       box-shadow: 0 6px 14px rgba(0,0,0,0.4);
       text-align: left;
       font-size: 13px;

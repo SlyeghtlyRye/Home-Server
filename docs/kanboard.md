@@ -149,10 +149,14 @@ Schedule/Quick Add toggle (`docs/mealie.md`).
   explicitly requested: a chore is general, not tied to one person
   every time, so who's doing it is chosen fresh at placement time, the
   same way Reroll never locks in a particular assignee either.
-- **No automatic cadence** -- a saved item is just name + type + optional
-  default time, not a recurrence rule. "Sweeping always wants Tue+Fri"
-  isn't handled yet; Schedule's manual day-picking covers that for now,
-  with auto-cadence left as a possible later layer on top of this.
+- **Auto Schedule: settings only, so far.** Each saved item can carry
+  `perWeek` (times per week, 0-7; absent = 0), set from the gear
+  popover's "Auto Schedule settings" list (`autoScheduleSettingsHtml()`,
+  saved per box on change via `/api/update-chore-bucket-per-week`, no
+  full re-render so other boxes keep their edits). Nothing places tasks
+  from it yet -- it's the input for a future Auto Schedule button in
+  Schedule. Schedule's manual day-picking is still the only way to place
+  items.
 - Saved items can also be added/removed from the gear-icon Calendar Settings popover
   (`js/calendar-settings.js`), a Kanboard-only section gated the same
   `calendarKey === 'kanboard'` way `icalUrl()` already branches for its

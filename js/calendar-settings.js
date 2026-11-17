@@ -22,7 +22,8 @@ import { escapeHtml } from './core.js';
 let openPopoverKey = null; // which calendar's popover is open ('mealie'/'kanboard'), or null
 let countriesCache = null; // [{code, name}], loaded once, shared by both calendars
 let currentCountryCache = null; // the one global country code, or "" if unset
-let bucketsCache = null; // [{id, name, type, startTime, dueTime}], Kanboard-only
+let bucketsCache = null; // [{id, name, type, startTime, dueTime, perWeek?}], Kanboard-only
+let autoSettingsOpen = false; // Kanboard gear: Auto Schedule settings list expanded
 
 function showHolidaysStorageKey(calendarKey) {
   return `${calendarKey}_showHolidays`;
@@ -130,8 +131,70 @@ function bucketsSectionHtml() {
         </select>
         <button class="btn small" data-action="add-chore-bucket">Add</button>
       </div>
+      ${bucketsCache.length ? autoScheduleSettingsHtml() : ''}
     </div>
   `;
+}
+
+// Auto Schedule settings: how many times a week each saved item should
+// happen (0 = not auto-scheduled). Settings only for now -- stored on
+// each saved item as perWeek for a future Auto Schedule button to use.
+function autoScheduleSettingsHtml() {
+  const setCount = bucketsCache.filter(b => (b.perWeek || 0) > 0).length;
+  return `
+    <button class="auto-sched-toggle" data-action="toggle-auto-schedule-settings" aria-expanded="${autoSettingsOpen}">
+      <span>&#x23F1;&#xFE0E; Auto Schedule settings</span>
+      <span class="auto-sched-summary">${setCount ? `${setCount} set` : ''} ${autoSettingsOpen ? '&#x25B4;' : '&#x25BE;'}</span>
+    </button>
+    ${autoSettingsOpen ? `
+      <div class="auto-sched-list">
+        <p class="auto-sched-hint">How many times a week should each one happen? Leave at 0 to skip it.</p>
+        ${bucketsCache.map(b => `
+          <label class="auto-sched-row">
+            <span class="auto-sched-name">${escapeHtml(b.name)}</span>
+            <span class="kb-type-tag ${b.type === 'event' ? 'event' : ''}">${b.type === 'event' ? '&#x1F389; Event' : 'Task'}</span>
+            <input type="number" min="0" max="7" step="1" inputmode="numeric"
+                   class="auto-sched-input" data-action="auto-schedule-per-week" data-id="${escapeHtml(b.id)}"
+                   value="${b.perWeek || 0}" aria-label="${escapeHtml(b.name)}: times per week">
+            <span class="auto-sched-unit">/ week</span>
+          </label>
+        `).join('')}
+      </div>
+    ` : ''}
+  `;
+}
+
+// Saves one Auto Schedule "times per week" box. Deliberately no full
+// re-render: other boxes may be mid-edit, and the input already shows the
+// value. Only the summary count ("2 set") is patched in place.
+async function savePerWeek(input) {
+  const id = input.dataset.id;
+  const bucket = (bucketsCache || []).find(b => b.id === id);
+  const previous = bucket?.perWeek || 0;
+  const n = Math.round(Number(input.value));
+  const perWeek = Number.isFinite(n) ? Math.min(7, Math.max(0, n)) : 0;
+  input.value = perWeek;
+  input.classList.remove('save-failed', 'saved');
+  try {
+    const res = await fetch('/api/update-chore-bucket-per-week', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, perWeek }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (bucket) bucket.perWeek = perWeek;
+    input.classList.add('saved');
+    setTimeout(() => input.classList.remove('saved'), 1200);
+  } catch {
+    input.value = previous;
+    input.classList.add('save-failed');
+    input.title = "Couldn't save -- check the connection and try again";
+  }
+  const summary = input.closest('.cal-settings-popover')?.querySelector('.auto-sched-summary');
+  if (summary) {
+    const setCount = (bucketsCache || []).filter(b => (b.perWeek || 0) > 0).length;
+    summary.innerHTML = `${setCount ? `${setCount} set` : ''} &#x25B4;`;
+  }
 }
 
 // Returns true if it handled the click (caller should stop there),
@@ -156,6 +219,12 @@ export function handleClick(e, calendarKey, rerender, onBucketsChanged = () => {
         // the text is still selected as a manual-copy fallback.
       });
     }
+    return true;
+  }
+  const autoToggle = e.target.closest('[data-action="toggle-auto-schedule-settings"]');
+  if (autoToggle && calendarKey === 'kanboard') {
+    autoSettingsOpen = !autoSettingsOpen;
+    rerender();
     return true;
   }
   const removeBucketBtn = e.target.closest('[data-action="remove-chore-bucket"]');
@@ -194,6 +263,11 @@ export function handleClick(e, calendarKey, rerender, onBucketsChanged = () => {
 }
 
 export function handleChange(e, calendarKey, rerender) {
+  const perWeekInput = e.target.closest('[data-action="auto-schedule-per-week"]');
+  if (perWeekInput && calendarKey === 'kanboard') {
+    savePerWeek(perWeekInput);
+    return true;
+  }
   const holidaysCheckbox = e.target.closest('[data-action="cal-settings-show-holidays"]');
   if (holidaysCheckbox && holidaysCheckbox.dataset.calendar === calendarKey) {
     localStorage.setItem(showHolidaysStorageKey(calendarKey), holidaysCheckbox.checked ? 'true' : 'false');
