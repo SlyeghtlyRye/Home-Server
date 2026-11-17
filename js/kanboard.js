@@ -20,7 +20,7 @@
 // (css/dashboard.css), not by sharing one element, for the same reason.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showConfirmModal, escapeHtml, isoOf } from './core.js';
-import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
+import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml, getChoreBuckets,
          handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- see the
 // matching comment in mealie.js for why (gitignored/per-device file, so
@@ -53,7 +53,6 @@ let planSubMode = PLAN_SUBMODES.includes(localStorage.getItem('kanboard_planSubM
   : 'quick';
 let scheduleSelectedDates = new Set(); // ISO strings, only meaningful mid-selection
 let schedulePicks = null; // null until "Schedule Selected Days" clicked, then {iso: {bucketId}}
-let bucketsCache = null; // [{id, name, type, startTime, dueTime}], loaded lazily on first use
 
 // Mirrors mealie.js's modePanelHeight/Width/ShowModeSwitcher exactly (own
 // localStorage keys so the two tabs' panel sizes don't fight each other).
@@ -386,24 +385,13 @@ function dayLabel(iso) {
   return new Date(y, m - 1, d).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-async function loadBuckets() {
-  if (bucketsCache) return;
-  try {
-    const res = await fetch('/data/chore-buckets');
-    const data = await res.json();
-    bucketsCache = data.buckets || [];
-  } catch (err) {
-    console.error('Failed to load chore buckets', err);
-    bucketsCache = [];
-  }
-}
-
 function scheduleFormHtml() {
+  // One shared bucket list, owned by calendar-settings.js (the gear
+  // popover that adds/removes buckets) -- a separate copy here used to go
+  // stale, so buckets added from the gear never showed up in Schedule.
+  const bucketsCache = getChoreBuckets();
   if (bucketsCache === null) {
-    // Lazy-loaded on first entering Schedule sub-mode, not up front with
-    // the rest of the calendar's data -- most Plan visits use Quick Add
-    // and never need this list at all.
-    loadBuckets().then(() => renderModePanel());
+    loadCalendarSettingsData().then(() => renderModePanel());
     return `<h3 style="margin-top:0;">Schedule</h3><p style="color:var(--color-text-muted); font-size:13px;">Loading buckets...</p>`;
   }
 
@@ -478,7 +466,7 @@ function buildSchedule() {
 function onScheduleBucketSelect(date, bucketId) {
   if (!schedulePicks || !schedulePicks[date]) return;
   schedulePicks[date].bucketId = bucketId || null;
-  const bucket = bucketId ? bucketsCache.find(b => b.id === bucketId) : null;
+  const bucket = bucketId ? (getChoreBuckets() || []).find(b => b.id === bucketId) : null;
   const container = document.getElementById(`kb-schedule-extra-${date}`);
   if (container) container.innerHTML = scheduleRowExtraHtml(date, bucket);
 }
@@ -501,7 +489,7 @@ async function confirmSchedule() {
   showStatusModal('Scheduling...', 'loading');
   try {
     for (const d of dates) {
-      const bucket = bucketsCache.find(b => b.id === schedulePicks[d].bucketId);
+      const bucket = (getChoreBuckets() || []).find(b => b.id === schedulePicks[d].bucketId);
       if (!bucket) continue;
       const assigneeInput = document.getElementById(`kb-assignee-input-sched-${d}`);
       const startInput = document.getElementById(`kb-schedule-start-${d}`);
@@ -810,7 +798,7 @@ function wireDelegatedListeners() {
 
   const calendarContainer = document.getElementById('kb-calendar-container');
   calendarContainer.addEventListener('click', (e) => {
-    if (handleCalSettingsClick(e, 'kanboard', renderCalendar)) return;
+    if (handleCalSettingsClick(e, 'kanboard', renderCalendar, renderModePanel)) return;
     if (e.target.closest('[data-action="kb-prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="kb-next-month"]')) return changeMonth(1);
     const dayEl = e.target.closest('.cal-day');

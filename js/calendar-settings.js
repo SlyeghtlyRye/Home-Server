@@ -57,6 +57,12 @@ export async function loadCalendarSettingsData() {
   }
 }
 
+// The shared bucket list (null until loadCalendarSettingsData() has run)
+// -- Kanboard's Schedule panel reads this rather than keeping its own copy.
+export function getChoreBuckets() {
+  return bucketsCache;
+}
+
 function icalUrl(calendarKey) {
   const path = calendarKey === 'mealie' ? '/data/mealie-ical' : '/data/kanboard-ical';
   const holidaysParam = shouldShowHolidays(calendarKey) ? '1' : '0';
@@ -128,7 +134,9 @@ function bucketsSectionHtml() {
 // Returns true if it handled the click (caller should stop there),
 // false otherwise -- matches this codebase's existing delegated-listener
 // convention of a chain of `if (...) return ...;` checks.
-export function handleClick(e, calendarKey, rerender) {
+// onBucketsChanged (optional): called after a bucket add/remove lands, so
+// Kanboard's Schedule panel can redraw its dropdowns with the new list.
+export function handleClick(e, calendarKey, rerender, onBucketsChanged = () => {}) {
   const toggleBtn = e.target.closest('[data-action="toggle-cal-settings"]');
   if (toggleBtn && toggleBtn.dataset.calendar === calendarKey) {
     openPopoverKey = openPopoverKey === calendarKey ? null : calendarKey;
@@ -154,7 +162,7 @@ export function handleClick(e, calendarKey, rerender) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
-    }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
+    }).then(() => loadCalendarSettingsData()).then(() => { rerender(); onBucketsChanged(); }).catch(() => {});
     return true;
   }
   const addBucketBtn = e.target.closest('[data-action="add-chore-bucket"]');
@@ -168,7 +176,7 @@ export function handleClick(e, calendarKey, rerender) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, type }),
-      }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
+      }).then(() => loadCalendarSettingsData()).then(() => { rerender(); onBucketsChanged(); }).catch(() => {});
     }
     return true;
   }
