@@ -103,11 +103,17 @@ which this project wasn't using before:
 ## Schedule -- a toggle inside Plan mode, for buckets
 
 Plan mode has a second way to work, switched with a Quick Add /
-Schedule toggle in the calendar header (`kb-plan-submode`, only shown
-while `calendarMode === 'plan'`): instead of filling in one task's
+Schedule toggle (`kb-plan-submode`): instead of filling in one task's
 details on one clicked day, Schedule drops a reusable **bucket**
 (Sweeping, Trash, Date Night -- anything created often enough to be
 worth not retyping) onto one or more days at once.
+
+**Lives in the floating mode panel's header row, not the calendar
+header.** The toggle only matters while Plan mode's panel is actually
+open, so it sits next to the `mode-panel-badge` there instead of on
+the calendar itself (visible in View/Edit too, where the toggle would
+mean nothing) -- same change, same reasoning, as Mealie's identical
+Schedule/Quick Add toggle (`docs/mealie.md`).
 
 - **Day selection is direct multi-select, not Mealie's week-block
   mechanic.** Mealie's Plan mode adds a whole 7-day block per click
@@ -143,15 +149,21 @@ worth not retyping) onto one or more days at once.
   own feed path -- add/remove, same list-with-a-delete-button pattern
   this project already built once for Mealie's (since-removed)
   recipe-suggestion source list.
-- The panel's visibility gate changed to accommodate this: it used to
-  hide whenever no single day was `selectedIso`'d; now it also stays
-  visible through all of Schedule's steps (`scheduling = calendarMode
-  === 'plan' && planSubMode === 'schedule'`), since Schedule's own
-  selection state is a `Set`, not a single `selectedIso`. Closing the
-  panel from inside Schedule exits back to Quick Add rather than just
-  clearing a `selectedIso` that was never set in the first place --
-  without that, the X button would appear to do nothing while
-  scheduling.
+- **The panel now stays visible the whole time Plan mode is active**,
+  even with nothing selected in either sub-mode -- it used to hide
+  whenever no single day was `selectedIso`'d, which already couldn't
+  work for Schedule (`scheduleSelectedDates` is a `Set`, not a single
+  `selectedIso`), so Schedule was already special-cased to stay open
+  via `scheduling = calendarMode === 'plan' && planSubMode ===
+  'schedule'`. Quick Add now gets the same treatment for the toggle's
+  sake: `visible = calendarMode === 'plan' || !!selectedIso`, with
+  `planIdleBodyHtml()` filling the panel with a one-line hint
+  ("Click a day...") whenever there's nothing selected yet. Closing
+  the panel (`closePanel()`) resets whichever sub-mode's in-progress
+  state exists (`selectedIso`, or `scheduleSelectedDates`/
+  `schedulePicks`) but no longer forces a switch back to Quick Add --
+  an earlier version of this had to, since only Quick Add's empty
+  state used to hide the panel; now both sub-modes idle in place.
 
 ## Recurrence: pre-materialized real tasks, not Kanboard's recurrence plugin
 

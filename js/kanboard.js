@@ -97,19 +97,25 @@ function setPlanSubMode(mode) {
   renderModePanel();
 }
 
+// Resets whichever submode's in-progress state exists, but -- unlike an
+// earlier version of this -- never forces a submode switch: both Quick
+// Add and Schedule now keep their panel open (idle) when there's nothing
+// selected, same as Mealie's equivalent, so closing one no longer needs
+// to borrow the other's "nothing to show" state just to disappear.
 function closePanel() {
   selectedIso = null;
+  scheduleSelectedDates = new Set();
+  schedulePicks = null;
   modePanelShowModeSwitcher = false;
-  // The panel stays visible through all of Schedule's steps even with
-  // no single selectedIso (see renderModePanel()'s gate), so closing it
-  // from there has to actually leave Schedule sub-mode, not just clear
-  // a selectedIso that was never set in the first place.
-  if (calendarMode === 'plan' && planSubMode === 'schedule') {
-    setPlanSubMode('quick');
-    return;
-  }
   renderCalendar();
   renderModePanel();
+}
+
+// Shown in Plan's panel (Quick Add sub-mode) before a day's clicked --
+// it still has to render something, since the panel stays visible the
+// whole time Plan mode is active now.
+function planIdleBodyHtml() {
+  return `<p style="color:var(--color-text-dim); font-size:14px; margin:0;">Click a day to add a task or event.</p>`;
 }
 
 // ---------- Today's tasks ----------
