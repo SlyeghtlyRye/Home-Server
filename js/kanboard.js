@@ -223,11 +223,6 @@ function renderCalendar() {
         <h3>${firstOfMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
         <button class="btn small" data-action="kb-next-month">&rarr;</button>
       </div>
-      ${calendarMode === 'plan' ? `
-      <div class="mode-toggle">
-        <button data-action="kb-plan-submode" data-submode="quick" class="${planSubMode === 'quick' ? 'active' : ''}">Quick Add</button>
-        <button data-action="kb-plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
-      </div>` : ''}
       ${renderSettingsGearHtml('kanboard')}
     </div>
     <div class="cal-grid">
@@ -800,8 +795,6 @@ function wireDelegatedListeners() {
     if (handleCalSettingsClick(e, 'kanboard', renderCalendar)) return;
     if (e.target.closest('[data-action="kb-prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="kb-next-month"]')) return changeMonth(1);
-    const submodeBtn = e.target.closest('[data-action="kb-plan-submode"]');
-    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
     const dayEl = e.target.closest('.cal-day');
     if (dayEl) return onDayClick(dayEl.dataset.iso);
   });
@@ -824,6 +817,8 @@ function wireDelegatedListeners() {
   panel.addEventListener('click', (e) => {
     const modeSwitchBtn = e.target.closest('.mode-panel-mode-switch button');
     if (modeSwitchBtn) return setCalendarMode(modeSwitchBtn.dataset.kbMode);
+    const submodeBtn = e.target.closest('[data-action="kb-plan-submode"]');
+    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
 
     const item = e.target.closest('.combo-item');
     if (item && item.dataset.personName) {
