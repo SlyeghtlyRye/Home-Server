@@ -24,6 +24,14 @@ _request_id = itertools.count(1)
 STATUS_OPEN = 1
 STATUS_CLOSED = 0
 
+# "Event" vs "task" reuses Kanboard's own native color_id field rather
+# than adding a new custom field -- a task is just left at Kanboard's
+# own default color (never set explicitly), an event gets this one
+# color_id set at create/update time. Reading it back the same way (see
+# get_tasks_in_range()) means the type lives entirely in a field
+# Kanboard already has, visible even in Kanboard's own UI.
+EVENT_COLOR_ID = "purple"
+
 
 def get_auth():
     """Reads the token fresh from disk on every call, same reasoning as
@@ -275,15 +283,17 @@ def get_tasks_in_range(start, end):
             "assignee": people_by_id.get(owner_id) if owner_id else None,
             "startTime": _hhmm(start_dt),
             "dueTime": _hhmm(due_dt) if due_dt.time() != NO_TIME else None,
+            "type": "event" if t.get("color_id") == EVENT_COLOR_ID else "task",
         })
     return by_date
 
 
-def create_task(title, due_date, due_time=None, start_time=None, assignee=None):
+def create_task(title, due_date, due_time=None, start_time=None, assignee=None, task_type="task"):
     """due_time/start_time are datetime.time objects, or None for "no
     specific time" -- due_time defaults to NO_TIME (midnight) when
     omitted, since every write always includes a full datetime (see
-    _to_kb_datetime)."""
+    _to_kb_datetime). task_type is "task" (Kanboard's own default
+    color, never set explicitly) or "event" (EVENT_COLOR_ID)."""
     project_id = get_or_create_tasks_project()
     due_dt = datetime.combine(due_date, due_time or NO_TIME)
     params = {
@@ -291,6 +301,8 @@ def create_task(title, due_date, due_time=None, start_time=None, assignee=None):
         "project_id": project_id,
         "date_due": _to_kb_datetime(due_dt),
     }
+    if task_type == "event":
+        params["color_id"] = EVENT_COLOR_ID
     if start_time:
         params["date_started"] = _to_kb_datetime(datetime.combine(due_date, start_time))
     membership_error = None
@@ -331,7 +343,7 @@ def create_task(title, due_date, due_time=None, start_time=None, assignee=None):
     return task_id
 
 
-def create_recurring_tasks(title, interval_days, start_date, count, due_time=None, start_time=None, assignee=None):
+def create_recurring_tasks(title, interval_days, start_date, count, due_time=None, start_time=None, assignee=None, task_type="task"):
     """No series linkage (no tags/parent-child) -- each occurrence is a
     fully independent task once created, matching Mealie's Edit mode
     semantics (an edit/delete only ever touches one day). due_time/
@@ -339,23 +351,27 @@ def create_recurring_tasks(title, interval_days, start_date, count, due_time=Non
     created = []
     for i in range(count):
         due = start_date + timedelta(days=interval_days * i)
-        created.append(create_task(title, due, due_time=due_time, start_time=start_time, assignee=assignee))
+        created.append(create_task(title, due, due_time=due_time, start_time=start_time, assignee=assignee, task_type=task_type))
     return created
 
 
-def update_task(task_id, title, due_date, due_time=None, start_time=None, assignee=None):
+def update_task(task_id, title, due_date, due_time=None, start_time=None, assignee=None, task_type="task"):
     """title/due_date are always required -- the Edit form always submits
     full current values (same convention as title/assignee already used),
     not a sparse "only what changed" patch, so there's no separate
     "don't touch this field" case to handle for due_time/start_time
     either: omitting one just means "no specific time", same as
-    create_task."""
+    create_task. task_type is the same convention -- always sent, since
+    switching an existing event back to a plain task (or vice versa)
+    needs an explicit color_id change either way, not a default-omitted
+    one that would leave the old color untouched."""
     task = rpc("getTask", {"task_id": task_id})
     params = {
         "id": task_id,
         "title": title,
         "date_due": _to_kb_datetime(datetime.combine(due_date, due_time or NO_TIME)),
         "date_started": _to_kb_datetime(datetime.combine(due_date, start_time)) if start_time else 0,
+        "color_id": EVENT_COLOR_ID if task_type == "event" else "yellow",
     }
     if assignee is not None:
         if assignee.strip():

@@ -22,6 +22,7 @@ import { escapeHtml } from './core.js';
 let openPopoverKey = null; // which calendar's popover is open ('mealie'/'kanboard'), or null
 let countriesCache = null; // [{code, name}], loaded once, shared by both calendars
 let currentCountryCache = null; // the one global country code, or "" if unset
+let bucketsCache = null; // [{id, name, type, startTime, dueTime}], Kanboard-only
 
 function showHolidaysStorageKey(calendarKey) {
   return `${calendarKey}_showHolidays`;
@@ -37,18 +38,22 @@ export function shouldShowHolidays(calendarKey) {
 // up front, same pattern as mealie.js's allRecipes/kanboard.js's allPeople).
 export async function loadCalendarSettingsData() {
   try {
-    const [countriesRes, settingsRes] = await Promise.all([
+    const [countriesRes, settingsRes, bucketsRes] = await Promise.all([
       fetch('/data/holiday-countries'),
       fetch('/data/holiday-settings'),
+      fetch('/data/chore-buckets'),
     ]);
     const countriesData = await countriesRes.json();
     const settingsData = await settingsRes.json();
+    const bucketsData = await bucketsRes.json();
     countriesCache = countriesData.countries || [];
     currentCountryCache = settingsData.country || '';
+    bucketsCache = bucketsData.buckets || [];
   } catch (err) {
     console.error('Failed to load calendar settings', err);
     countriesCache = countriesCache || [];
     currentCountryCache = currentCountryCache || '';
+    bucketsCache = bucketsCache || [];
   }
 }
 
@@ -90,6 +95,33 @@ function popoverBodyHtml(calendarKey) {
       <input type="text" class="cal-settings-feed-url" data-calendar="${calendarKey}" readonly value="${escapeHtml(icalUrl(calendarKey))}">
       <button class="btn small" data-action="copy-feed-url" data-calendar="${calendarKey}">Copy</button>
     </div>
+    ${calendarKey === 'kanboard' ? bucketsSectionHtml() : ''}
+  `;
+}
+
+// Kanboard-only -- Schedule's reusable bucket presets. Mealie has no
+// equivalent concept, so this section only renders in Kanboard's
+// popover, the same calendarKey-branch icalUrl() above already uses for
+// its own Mealie-vs-Kanboard feed path.
+function bucketsSectionHtml() {
+  return `
+    <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border-soft);">
+      <div style="color:var(--color-text-muted); font-size:11px; margin-bottom:4px;">Schedule -- reusable buckets</div>
+      ${bucketsCache.map(b => `
+        <div class="cal-settings-row" style="gap:6px;">
+          <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${b.type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(b.name)}</span>
+          <button class="icon-btn-delete" data-action="remove-chore-bucket" data-id="${b.id}" title="Remove this bucket">&#x1F5D1;</button>
+        </div>
+      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">No buckets yet -- add one below.</p>`}
+      <div class="cal-settings-row" style="gap:4px; margin-top:4px;">
+        <input type="text" id="new-bucket-name" placeholder="e.g. Sweeping, Date Night" style="flex:1; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
+        <select id="new-bucket-type" style="background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
+          <option value="task">Task</option>
+          <option value="event">Event</option>
+        </select>
+        <button class="btn small" data-action="add-chore-bucket">Add</button>
+      </div>
+    </div>
   `;
 }
 
@@ -112,6 +144,31 @@ export function handleClick(e, calendarKey, rerender) {
         // Clipboard API can be unavailable (e.g. non-HTTPS context) --
         // the text is still selected as a manual-copy fallback.
       });
+    }
+    return true;
+  }
+  const removeBucketBtn = e.target.closest('[data-action="remove-chore-bucket"]');
+  if (removeBucketBtn && calendarKey === 'kanboard') {
+    const id = removeBucketBtn.dataset.id;
+    fetch('/api/remove-chore-bucket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
+    return true;
+  }
+  const addBucketBtn = e.target.closest('[data-action="add-chore-bucket"]');
+  if (addBucketBtn && calendarKey === 'kanboard') {
+    const nameInput = e.target.closest('.cal-settings-popover')?.querySelector('#new-bucket-name');
+    const typeSelect = e.target.closest('.cal-settings-popover')?.querySelector('#new-bucket-type');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const type = typeSelect ? typeSelect.value : 'task';
+    if (name) {
+      fetch('/api/add-chore-bucket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, type }),
+      }).then(() => loadCalendarSettingsData()).then(rerender).catch(() => {});
     }
     return true;
   }

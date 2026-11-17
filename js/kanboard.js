@@ -39,6 +39,22 @@ let calendarMode = CALENDAR_MODES.includes(localStorage.getItem('kanboard_calend
   : 'plan';
 let selectedIso = null;
 
+// ---------- Schedule (Plan mode's "from buckets" sub-flow) ----------
+// A toggle inside Plan mode, not a separate mode tab -- Quick Add (the
+// existing single-day form above) is unchanged; Schedule is a second
+// way to use Plan mode, for dropping reusable buckets (Sweeping, Date
+// Night) onto one or more days at once. Direct multi-select, not
+// Mealie's "click adds a whole week block" mechanic -- chores/events
+// are just as often "add one specific day" as "fill the week", and
+// having to exclude six days to add one date night would be backwards.
+const PLAN_SUBMODES = ['quick', 'schedule'];
+let planSubMode = PLAN_SUBMODES.includes(localStorage.getItem('kanboard_planSubMode'))
+  ? localStorage.getItem('kanboard_planSubMode')
+  : 'quick';
+let scheduleSelectedDates = new Set(); // ISO strings, only meaningful mid-selection
+let schedulePicks = null; // null until "Schedule Selected Days" clicked, then {iso: {bucketId}}
+let bucketsCache = null; // [{id, name, type, startTime, dueTime}], loaded lazily on first use
+
 // Mirrors mealie.js's modePanelHeight/Width/ShowModeSwitcher exactly (own
 // localStorage keys so the two tabs' panel sizes don't fight each other).
 let modePanelHeight = parseInt(localStorage.getItem('kanboard_modePanelHeight'), 10) || null;
@@ -57,7 +73,26 @@ function setCalendarMode(mode) {
 
 function onDayClick(iso) {
   modePanelShowModeSwitcher = false;
+  if (calendarMode === 'plan' && planSubMode === 'schedule') {
+    if (schedulePicks) return; // already past day-selection -- Clear/Back first
+    if (scheduleSelectedDates.has(iso)) scheduleSelectedDates.delete(iso);
+    else scheduleSelectedDates.add(iso);
+    renderCalendar();
+    renderModePanel();
+    return;
+  }
   selectedIso = selectedIso === iso ? null : iso;
+  renderCalendar();
+  renderModePanel();
+}
+
+function setPlanSubMode(mode) {
+  if (planSubMode === mode) return;
+  planSubMode = mode;
+  localStorage.setItem('kanboard_planSubMode', mode);
+  scheduleSelectedDates = new Set();
+  schedulePicks = null;
+  selectedIso = null;
   renderCalendar();
   renderModePanel();
 }
@@ -65,6 +100,14 @@ function onDayClick(iso) {
 function closePanel() {
   selectedIso = null;
   modePanelShowModeSwitcher = false;
+  // The panel stays visible through all of Schedule's steps even with
+  // no single selectedIso (see renderModePanel()'s gate), so closing it
+  // from there has to actually leave Schedule sub-mode, not just clear
+  // a selectedIso that was never set in the first place.
+  if (calendarMode === 'plan' && planSubMode === 'schedule') {
+    setPlanSubMode('quick');
+    return;
+  }
   renderCalendar();
   renderModePanel();
 }
@@ -180,6 +223,11 @@ function renderCalendar() {
         <h3>${firstOfMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}</h3>
         <button class="btn small" data-action="kb-next-month">&rarr;</button>
       </div>
+      ${calendarMode === 'plan' ? `
+      <div class="mode-toggle">
+        <button data-action="kb-plan-submode" data-submode="quick" class="${planSubMode === 'quick' ? 'active' : ''}">Quick Add</button>
+        <button data-action="kb-plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
+      </div>` : ''}
       ${renderSettingsGearHtml('kanboard')}
     </div>
     <div class="cal-grid">
@@ -198,11 +246,12 @@ function renderCalendar() {
     if (iso === todayIso) cls += ' today';
     if (tasks.length > 0) cls += ' planned';
     if (iso === selectedIso) cls += ' kb-selected';
+    if (calendarMode === 'plan' && planSubMode === 'schedule' && scheduleSelectedDates.has(iso)) cls += ' kb-selected';
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
         ${holiday ? `<div class="cal-holiday" title="${escapeHtml(holiday)}">${escapeHtml(holiday)}</div>` : ''}
-        ${tasks.length > 0 ? `<div class="cal-meal">${escapeHtml(tasks[0].title)}</div>` : ''}
+        ${tasks.length > 0 ? `<div class="cal-meal${tasks[0].type === 'event' ? ' cal-event' : ''}">${tasks[0].type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(tasks[0].title)}</div>` : ''}
         ${tasks.length > 1 ? `<div class="cal-meal-extra">+${tasks.length - 1} more</div>` : ''}
       </div>
     `;
@@ -222,14 +271,16 @@ function renderModePanel() {
   const el = document.getElementById('kb-mode-panel');
   if (!el) return;
 
-  if (!selectedIso) {
+  const scheduling = calendarMode === 'plan' && planSubMode === 'schedule';
+  if (!selectedIso && !scheduling) {
     el.classList.remove('show');
     el.innerHTML = '';
     modePanelShowModeSwitcher = false;
     return;
   }
 
-  const contentHtml = calendarMode === 'plan' ? planFormHtml(selectedIso)
+  const contentHtml = scheduling ? scheduleFormHtml()
+    : calendarMode === 'plan' ? planFormHtml(selectedIso)
     : calendarMode === 'view' ? viewListHtml(selectedIso)
     : editListHtml(selectedIso);
 
@@ -311,6 +362,162 @@ function assigneeComboHtml(comboKey, value) {
   `;
 }
 
+// Mirrors mealie.js's dayLabel() exactly -- same local-time-safe
+// parsing (Date(y, m-1, d), not new Date(iso) which parses as UTC
+// midnight and can roll back a day in any timezone behind UTC), same
+// "weekday, month day" shorthand, for the same reason: reading several
+// selected days at once as bare ISO strings is harder than it needs
+// to be, and the project's own precedent already solved this once.
+function dayLabel(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('default', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+async function loadBuckets() {
+  if (bucketsCache) return;
+  try {
+    const res = await fetch('/data/chore-buckets');
+    const data = await res.json();
+    bucketsCache = data.buckets || [];
+  } catch (err) {
+    console.error('Failed to load chore buckets', err);
+    bucketsCache = [];
+  }
+}
+
+function scheduleFormHtml() {
+  if (bucketsCache === null) {
+    // Lazy-loaded on first entering Schedule sub-mode, not up front with
+    // the rest of the calendar's data -- most Plan visits use Quick Add
+    // and never need this list at all.
+    loadBuckets().then(() => renderModePanel());
+    return `<h3 style="margin-top:0;">Schedule</h3><p style="color:var(--color-text-muted); font-size:13px;">Loading buckets...</p>`;
+  }
+
+  if (!schedulePicks) {
+    const dates = [...scheduleSelectedDates].sort();
+    return `
+      <h3 style="margin-top:0;">Schedule</h3>
+      <p style="color:var(--color-text-muted); font-size:13px;">Click days on the calendar to select them, then schedule a bucket onto each.</p>
+      ${dates.length > 0 ? `
+        <ul style="margin:0 0 12px; padding-left:18px; font-size:13px; color:var(--color-text-dim);">
+          ${dates.map(d => `<li>${dayLabel(d)}</li>`).join('')}
+        </ul>
+      ` : `<p class="meal-empty">No days selected yet.</p>`}
+      <div class="btn-stack" style="margin-top:12px;">
+        ${dates.length > 0 ? `<button class="btn save" data-action="kb-schedule-build">Schedule ${dates.length} Day${dates.length > 1 ? 's' : ''}</button>` : ''}
+        ${dates.length > 0 ? `<button class="btn clear" data-action="kb-schedule-clear-selection">Clear Selection</button>` : ''}
+      </div>
+    `;
+  }
+
+  const dates = Object.keys(schedulePicks).sort();
+  return `
+    <h3 style="margin-top:0;">Schedule</h3>
+    <p style="color:var(--color-text-muted); font-size:13px;">Pick a bucket for each day, or leave it as "None" to skip that day.</p>
+    ${bucketsCache.length === 0 ? `<p class="meal-empty">No buckets yet -- add one from the gear icon's settings first.</p>` : ''}
+    ${dates.map(d => {
+      const pick = schedulePicks[d];
+      const bucket = pick.bucketId ? bucketsCache.find(b => b.id === pick.bucketId) : null;
+      return `
+      <div class="preview-row" style="flex-wrap:wrap;">
+        <span class="date">${dayLabel(d)}</span>
+        <select data-action="kb-schedule-bucket-select" data-date="${d}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;">
+          <option value="">-- None --</option>
+          ${bucketsCache.map(b => `<option value="${b.id}" ${pick.bucketId === b.id ? 'selected' : ''}>${b.type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(b.name)}</option>`).join('')}
+        </select>
+        <span id="kb-schedule-extra-${d}" style="display:contents;">${scheduleRowExtraHtml(d, bucket)}</span>
+      </div>
+      `;
+    }).join('')}
+    <div class="btn-stack" style="margin-top:12px;">
+      <button class="btn save" data-action="kb-schedule-confirm">Confirm &amp; Create</button>
+      <button class="btn cancel" data-action="kb-schedule-back">Back</button>
+    </div>
+  `;
+}
+
+// Split out from scheduleFormHtml()'s per-row markup so
+// onScheduleBucketSelect() can patch just one day's extra fields
+// in place (see its own comment for why that matters).
+function scheduleRowExtraHtml(d, bucket) {
+  if (!bucket) return '';
+  return `
+    ${assigneeComboHtml(`sched-${d}`, '')}
+    <label style="font-size:12px; color:var(--color-text-muted);">From <input type="time" id="kb-schedule-start-${d}" value="${bucket.startTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+    <label style="font-size:12px; color:var(--color-text-muted);">Until <input type="time" id="kb-schedule-due-${d}" value="${bucket.dueTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+  `;
+}
+
+function buildSchedule() {
+  const picks = {};
+  for (const d of scheduleSelectedDates) picks[d] = { bucketId: null };
+  schedulePicks = picks;
+  renderModePanel();
+}
+
+// Patches just this one day's extra-fields container instead of calling
+// renderModePanel() (which would redraw every row from scratch) --
+// scheduling several days at once means someone may have already typed
+// an assignee or a custom time for a different day; a full re-render
+// here would silently throw that away the moment any other day's
+// bucket choice changed.
+function onScheduleBucketSelect(date, bucketId) {
+  if (!schedulePicks || !schedulePicks[date]) return;
+  schedulePicks[date].bucketId = bucketId || null;
+  const bucket = bucketId ? bucketsCache.find(b => b.id === bucketId) : null;
+  const container = document.getElementById(`kb-schedule-extra-${date}`);
+  if (container) container.innerHTML = scheduleRowExtraHtml(date, bucket);
+}
+
+function backToScheduleSelection() {
+  schedulePicks = null;
+  renderModePanel();
+}
+
+function clearScheduleSelection() {
+  scheduleSelectedDates = new Set();
+  schedulePicks = null;
+  renderCalendar();
+  renderModePanel();
+}
+
+async function confirmSchedule() {
+  const dates = Object.keys(schedulePicks || {}).filter(d => schedulePicks[d].bucketId);
+  if (dates.length === 0) { showStatusModal('Pick at least one bucket first.', 'error'); return; }
+  showStatusModal('Scheduling...', 'loading');
+  try {
+    for (const d of dates) {
+      const bucket = bucketsCache.find(b => b.id === schedulePicks[d].bucketId);
+      if (!bucket) continue;
+      const assigneeInput = document.getElementById(`kb-assignee-input-sched-${d}`);
+      const startInput = document.getElementById(`kb-schedule-start-${d}`);
+      const dueInput = document.getElementById(`kb-schedule-due-${d}`);
+      const assignee = assigneeInput ? assigneeInput.value.trim() : '';
+      const startTime = startInput ? startInput.value : '';
+      const dueTime = dueInput ? dueInput.value : '';
+      const res = await fetch('/api/kanboard-create-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: bucket.name, date: d, startTime, dueTime, assignee,
+          taskType: bucket.type, recurrence: { type: 'single' },
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
+    }
+    hideStatusModal();
+    scheduleSelectedDates = new Set();
+    schedulePicks = null;
+    await loadMonthTasks();
+    await loadPeople();
+    showSuccessThenClose(`Scheduled ${dates.length} day${dates.length > 1 ? 's' : ''}!`);
+  } catch (err) {
+    showStatusModal('Error: ' + err, 'error');
+  }
+}
+
 function planFormHtml(iso) {
   const existing = plannedMap[iso] || [];
   const holiday = holidaysByDate[iso];
@@ -320,15 +527,19 @@ function planFormHtml(iso) {
     ${existing.length > 0 ? `
       <p style="color:var(--color-text-muted); font-size:13px;">Already on this day:</p>
       <ul style="margin:0 0 12px; padding-left:18px; font-size:13px; color:var(--color-text-dim);">
-        ${existing.map(t => `<li>${t.done ? `<s>${escapeHtml(t.title)}</s>` : escapeHtml(t.title)}${t.assignee ? ` -- ${escapeHtml(t.assignee)}` : ''}</li>`).join('')}
+        ${existing.map(t => `<li>${t.type === 'event' ? '&#x1F389; ' : ''}${t.done ? `<s>${escapeHtml(t.title)}</s>` : escapeHtml(t.title)}${t.assignee ? ` -- ${escapeHtml(t.assignee)}` : ''}</li>`).join('')}
       </ul>
     ` : ''}
     <input
       type="text"
       id="kb-plan-title"
-      placeholder="Task name"
+      placeholder="Task or event name"
       style="width:100%; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px; margin-bottom:10px; box-sizing:border-box;"
     >
+    <div class="preview-row" style="flex-wrap:wrap;">
+      <label><input type="radio" name="kb-task-type" value="task" checked> Task</label>
+      <label><input type="radio" name="kb-task-type" value="event"> Event</label>
+    </div>
     <div style="margin-bottom:10px;">${assigneeComboHtml('plan', '')}</div>
     <div class="preview-row" style="flex-wrap:wrap;">
       <label>From <input type="time" id="kb-plan-start-time" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
@@ -377,8 +588,8 @@ function viewListHtml(iso) {
     ${holiday ? `<div class="day-holiday-badge">&#x1F389; ${escapeHtml(holiday)}</div>` : ''}
     ${tasks.length === 0 ? `<p class="meal-empty">No tasks this day.</p>` : tasks.map(t => `
       <div class="preview-row">
-        <span class="date" style="${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : ''}">
-          ${escapeHtml(t.title)}${t.assignee ? ` <span style="color:var(--color-text-muted); font-size:12px;">(${escapeHtml(t.assignee)})</span>` : ''}
+        <span class="date" style="${t.done ? 'text-decoration:line-through; color:var(--color-text-muted);' : (t.type === 'event' ? 'color:var(--color-event); font-weight:600;' : '')}">
+          ${t.type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(t.title)}${t.assignee ? ` <span style="color:var(--color-text-muted); font-size:12px;">(${escapeHtml(t.assignee)})</span>` : ''}
           ${timeRangeLabel(t) ? `<span style="color:var(--color-text-muted); font-size:12px;"> &middot; ${timeRangeLabel(t)}</span>` : ''}
         </span>
         <button class="btn small ${t.done ? '' : 'save'}" data-action="kb-toggle-done" data-id="${t.id}" data-done="${t.done ? '1' : '0'}">${t.done ? 'Reopen' : 'Mark Done'}</button>
@@ -400,6 +611,8 @@ function editListHtml(iso) {
       <div class="preview-row" style="flex-wrap:wrap;">
         <input type="text" id="kb-edit-title-${t.id}" value="${escapeHtml(t.title)}" style="flex:1; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
         <input type="date" id="kb-edit-date-${t.id}" value="${iso}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px;">
+        <label style="font-size:12px; color:var(--color-text-muted);"><input type="radio" name="kb-edit-type-${t.id}" value="task" ${t.type !== 'event' ? 'checked' : ''}> Task</label>
+        <label style="font-size:12px; color:var(--color-text-muted);"><input type="radio" name="kb-edit-type-${t.id}" value="event" ${t.type === 'event' ? 'checked' : ''}> Event</label>
         <label style="font-size:12px; color:var(--color-text-muted);">From <input type="time" id="kb-edit-start-time-${t.id}" value="${t.startTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
         <label style="font-size:12px; color:var(--color-text-muted);">Until <input type="time" id="kb-edit-due-time-${t.id}" value="${t.dueTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
         ${assigneeComboHtml(`edit-${t.id}`, t.assignee)}
@@ -475,6 +688,8 @@ async function submitPlan() {
   const dueTimeInput = document.getElementById('kb-plan-due-time');
   const startTime = startTimeInput ? startTimeInput.value : '';
   const dueTime = dueTimeInput ? dueTimeInput.value : '';
+  const taskTypeInput = document.querySelector('input[name="kb-task-type"]:checked');
+  const taskType = taskTypeInput ? taskTypeInput.value : 'task';
   const typeInput = document.querySelector('input[name="kb-recurrence"]:checked');
   const type = typeInput ? typeInput.value : 'single';
   const recurrence = { type };
@@ -492,7 +707,7 @@ async function submitPlan() {
     const res = await fetch('/api/kanboard-create-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, date: selectedIso, startTime, dueTime, assignee, recurrence })
+      body: JSON.stringify({ title, date: selectedIso, startTime, dueTime, assignee, recurrence, taskType })
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal(data.error || 'Failed to create.', 'error'); return; }
@@ -528,6 +743,8 @@ async function saveTaskEdit(taskId) {
   const startTimeInput = document.getElementById(`kb-edit-start-time-${taskId}`);
   const dueTimeInput = document.getElementById(`kb-edit-due-time-${taskId}`);
   const assigneeInput = document.getElementById(`kb-assignee-input-edit-${taskId}`);
+  const taskTypeInput = document.querySelector(`input[name="kb-edit-type-${taskId}"]:checked`);
+  const taskType = taskTypeInput ? taskTypeInput.value : 'task';
   const title = titleInput ? titleInput.value.trim() : '';
   const dateVal = dateInput ? dateInput.value : '';
   const startTime = startTimeInput ? startTimeInput.value : '';
@@ -539,7 +756,7 @@ async function saveTaskEdit(taskId) {
     const res = await fetch('/api/kanboard-update-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: taskId, title, date: dateVal, startTime, dueTime, assignee })
+      body: JSON.stringify({ id: taskId, title, date: dateVal, startTime, dueTime, assignee, taskType })
     });
     const data = await res.json();
     if (!res.ok) { showStatusModal(data.error || 'Failed to save.', 'error'); return; }
@@ -583,6 +800,8 @@ function wireDelegatedListeners() {
     if (handleCalSettingsClick(e, 'kanboard', renderCalendar)) return;
     if (e.target.closest('[data-action="kb-prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="kb-next-month"]')) return changeMonth(1);
+    const submodeBtn = e.target.closest('[data-action="kb-plan-submode"]');
+    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
     const dayEl = e.target.closest('.cal-day');
     if (dayEl) return onDayClick(dayEl.dataset.iso);
   });
@@ -625,12 +844,18 @@ function wireDelegatedListeners() {
       case 'kb-toggle-done': return toggleTaskDone(id, btn.dataset.done === '1');
       case 'kb-edit-save': return saveTaskEdit(id);
       case 'kb-delete-task': return deleteTask(id);
+      case 'kb-schedule-build': return buildSchedule();
+      case 'kb-schedule-clear-selection': return clearScheduleSelection();
+      case 'kb-schedule-back': return backToScheduleSelection();
+      case 'kb-schedule-confirm': return confirmSchedule();
     }
   });
   // Recurrence radios: enable each option's own number input only while
   // it's selected, and only show the occurrence-count field for a
   // recurring pick.
   panel.addEventListener('change', (e) => {
+    const bucketSelect = e.target.closest('[data-action="kb-schedule-bucket-select"]');
+    if (bucketSelect) return onScheduleBucketSelect(bucketSelect.dataset.date, bucketSelect.value);
     if (e.target.name !== 'kb-recurrence') return;
     const type = e.target.value;
     const intervalInput = document.getElementById('kb-interval-days');

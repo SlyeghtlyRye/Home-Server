@@ -70,6 +70,89 @@ zero, one, or several, so:
   #kb-mode-panel { ... }` selector groups are what actually keep the two
   *looking* identical without duplicating that CSS.
 
+## Task vs. Event -- reusing Kanboard's own color_id, not a new field
+
+A Plan/Edit toggle lets a task be created/edited as a "Task" (chores,
+errands) or an "Event" (date night, brunch -- anything the household
+wants to put on the shared calendar that isn't a chore). This is
+deliberately the lightest possible version: no new data model, no
+attendees/location, just a visual distinction between two kinds of
+calendar entry.
+
+Implemented entirely with Kanboard's own native `color_id` task field,
+which this project wasn't using before:
+- `scripts/kanboard_client.py`'s `EVENT_COLOR_ID = "purple"` -- a task
+  is left at Kanboard's own default color (never set explicitly); an
+  event gets `color_id` set to this on create/update.
+- `get_tasks_in_range()` reads it back as a derived `"type": "event"` or
+  `"type": "task"` field, so callers (the frontend, the `.ics` feed)
+  never need to know Kanboard's color internals, just the one string.
+- `create_task()`/`create_recurring_tasks()`/`update_task()` all take an
+  optional `task_type` ("task" by default). `update_task()` always sends
+  `color_id` explicitly (unlike create, which omits it for a plain
+  task) -- flipping an existing event back to a task needs an explicit
+  color change either way, there's no "leave it as whatever it already
+  was" case for an edit form that always submits full current values.
+- Shown with a small &#x1F389; marker and a distinct color
+  (`--color-event`) everywhere a task's title appears: the calendar grid,
+  the View/Plan/Edit panels, and the subscribable `.ics` feed's event
+  title (`_kanboard_task_event()` in `trigger_server.py`) -- so an event
+  stands out the same way in every place a task would otherwise look
+  identical to a chore.
+
+## Schedule -- a toggle inside Plan mode, for buckets
+
+Plan mode has a second way to work, switched with a Quick Add /
+Schedule toggle in the calendar header (`kb-plan-submode`, only shown
+while `calendarMode === 'plan'`): instead of filling in one task's
+details on one clicked day, Schedule drops a reusable **bucket**
+(Sweeping, Trash, Date Night -- anything created often enough to be
+worth not retyping) onto one or more days at once.
+
+- **Day selection is direct multi-select, not Mealie's week-block
+  mechanic.** Mealie's Plan mode adds a whole 7-day block per click
+  (tuned for "fill most of the week with meals"); Schedule just toggles
+  one day in or out per click (`scheduleSelectedDates`, a plain `Set`).
+  Chores/events are just as often "add one specific day" as "fill the
+  week" -- having to exclude six days to add one date night would be
+  backwards for this use case specifically.
+- **Two steps in the same panel**: select days -> "Schedule N Days" ->
+  one row per day with a bucket `<select>` (plus an assignee combo and
+  from/until time, pre-filled from the bucket's own defaults, once a
+  bucket's picked for that row) -> "Confirm & Create" calls the same
+  `/api/kanboard-create-task` endpoint Quick Add already uses, once per
+  day that got a bucket assigned. No new creation logic on the backend
+  at all -- buckets only ever pre-fill the existing create flow.
+  Choosing a bucket for one day patches just that row's extra-fields
+  container in place (`onScheduleBucketSelect()`/`kb-schedule-extra-${d}`)
+  rather than re-rendering the whole panel -- scheduling several days at
+  once means another row may already have a typed-in assignee or a
+  custom time, and a full re-render would silently wipe it the moment
+  any other day's bucket choice changed.
+- **Buckets have no assignee field** (`scripts/chore_buckets.py`) --
+  explicitly requested: a chore is general, not tied to one person
+  every time, so who's doing it is chosen fresh at placement time, the
+  same way Reroll never locks in a particular assignee either.
+- **No automatic cadence** -- a bucket is just name + type + optional
+  default time, not a recurrence rule. "Sweeping always wants Tue+Fri"
+  isn't handled yet; Schedule's manual day-picking covers that for now,
+  with auto-cadence left as a possible later layer on top of this.
+- Buckets are managed from the gear-icon Calendar Settings popover
+  (`js/calendar-settings.js`), a Kanboard-only section gated the same
+  `calendarKey === 'kanboard'` way `icalUrl()` already branches for its
+  own feed path -- add/remove, same list-with-a-delete-button pattern
+  this project already built once for Mealie's (since-removed)
+  recipe-suggestion source list.
+- The panel's visibility gate changed to accommodate this: it used to
+  hide whenever no single day was `selectedIso`'d; now it also stays
+  visible through all of Schedule's steps (`scheduling = calendarMode
+  === 'plan' && planSubMode === 'schedule'`), since Schedule's own
+  selection state is a `Set`, not a single `selectedIso`. Closing the
+  panel from inside Schedule exits back to Quick Add rather than just
+  clearing a `selectedIso` that was never set in the first place --
+  without that, the X button would appear to do nothing while
+  scheduling.
+
 ## Recurrence: pre-materialized real tasks, not Kanboard's recurrence plugin
 
 Kanboard's own recurring-task fields (`recurrence_status`/`trigger`/

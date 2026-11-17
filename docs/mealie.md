@@ -199,6 +199,34 @@ Recipe detail (ingredients/steps) is fetched by recipe ID via
 list (Mealie's detail endpoint is slug-keyed, not ID-keyed) before
 fetching the full recipe.
 
+## Schedule vs Quick Add -- a toggle inside Plan mode
+
+Plan mode has a second way to work, switched with a Schedule / Quick
+Add toggle in the calendar header (`plan-submode`, only shown while
+`calendarMode === 'plan'`), same style and placement as Kanboard's own
+Quick Add/Schedule toggle (see `docs/kanboard.md`) -- but the default
+is flipped.
+
+- **Schedule is the default**, and is simply Mealie's original
+  behavior under a new name: click a day to add a whole 7-day block,
+  click a day again to include/exclude it, then "Plan Selected Days"
+  builds the preview. Existing households' muscle memory (and every
+  screenshot/instruction given so far) assumes this is what clicking
+  the calendar does, so nothing changes unless the toggle is touched.
+- **Quick Add plans just one clicked day**, skipping the week-block
+  mechanic entirely -- for "I just want to swap in tonight's dinner"
+  without having to exclude six other days first. Rather than building
+  a second single-day flow from scratch, it reuses Edit mode's pick/
+  suggest/swap/save panel wholesale (`editSelectedIso`/`editPick`/
+  `editPanelBodyHtml()` and the `edit-*` actions), just reached from
+  Plan's toggle instead of switching to the separate Edit tab -- the
+  two are functionally identical, Quick Add is just a shortcut into the
+  same code path. The Edit tab itself is unchanged and still there.
+- Switching the toggle (`setPlanSubMode()`) clears both submodes'
+  in-progress state (`weekSelection`/`previewPicks` and
+  `editSelectedIso`/`editPick`) so nothing stale from one leaks into
+  the other on switch-back.
+
 ## No-repeat logic
 
 A recipe won't be picked again within 7 days of last use. History is tracked

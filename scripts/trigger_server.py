@@ -18,6 +18,7 @@ import holidays_client as hc
 import ical_builder
 import recipe_suggest
 import mealdb_client
+import chore_buckets
 
 sys.path.insert(0, "/root/audiobooks")
 import audiobook_lib as alib
@@ -67,7 +68,7 @@ def _kanboard_task_event(d, task):
     as a timed calendar event, 1 hour is just a reasonable default, not
     a meaningful commitment)."""
     uid = f"kanboard-task-{task['id']}"
-    title = task["title"]
+    title = ("\U0001F389 " + task["title"]) if task.get("type") == "event" else task["title"]
     start_time = _parse_hhmm(task.get("startTime"))
     due_time = _parse_hhmm(task.get("dueTime"))
     if start_time and due_time:
@@ -430,6 +431,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(200, {"categories": mealdb_client.list_categories()})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/data/chore-buckets":
+            self._send_json(200, {"buckets": chore_buckets.get_buckets()})
             return
 
         if parsed.path == "/data/holidays":
@@ -830,6 +835,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
+        if parsed.path == "/api/add-chore-bucket":
+            body = self._read_json_body()
+            name = (body.get("name") or "").strip()
+            if not name:
+                self._send_json(400, {"error": "missing name"})
+                return
+            try:
+                task_type = "event" if body.get("type") == "event" else "task"
+                bucket = chore_buckets.add_bucket(
+                    name, task_type=task_type,
+                    start_time=(body.get("startTime") or "").strip() or None,
+                    due_time=(body.get("dueTime") or "").strip() or None,
+                )
+                self._send_json(200, {"bucket": bucket, "buckets": chore_buckets.get_buckets()})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/remove-chore-bucket":
+            body = self._read_json_body()
+            bucket_id = (body.get("id") or "").strip()
+            if not bucket_id:
+                self._send_json(400, {"error": "missing id"})
+                return
+            chore_buckets.remove_bucket(bucket_id)
+            self._send_json(200, {"buckets": chore_buckets.get_buckets()})
+            return
+
         if parsed.path == "/api/kanboard-create-task":
             body = self._read_json_body()
             title = (body.get("title") or "").strip()
@@ -838,13 +871,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             start_time = _parse_hhmm(body.get("startTime"))
             due_time = _parse_hhmm(body.get("dueTime"))
             recurrence = body.get("recurrence") or {"type": "single"}
+            task_type = "event" if body.get("taskType") == "event" else "task"
             if not title or not date_s:
                 self._send_json(400, {"error": "missing title/date"})
                 return
             try:
                 start = date.fromisoformat(date_s)
                 if recurrence.get("type") == "single":
-                    created = [kbc.create_task(title, start, due_time=due_time, start_time=start_time, assignee=assignee)]
+                    created = [kbc.create_task(title, start, due_time=due_time, start_time=start_time, assignee=assignee, task_type=task_type)]
                 else:
                     interval_days = {
                         "interval": int(recurrence.get("days", 1)),
@@ -854,7 +888,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     count = int(recurrence.get("count", 8))
                     created = kbc.create_recurring_tasks(
                         title, interval_days, start, count,
-                        due_time=due_time, start_time=start_time, assignee=assignee,
+                        due_time=due_time, start_time=start_time, assignee=assignee, task_type=task_type,
                     )
                 self._send_json(200, {"created": created})
             except Exception as e:
@@ -876,6 +910,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 kbc.update_task(
                     task_id, title=title, due_date=due_date,
                     due_time=due_time, start_time=start_time, assignee=body.get("assignee"),
+                    task_type="event" if body.get("taskType") == "event" else "task",
                 )
                 self._send_json(200, {"status": "ok"})
             except Exception as e:

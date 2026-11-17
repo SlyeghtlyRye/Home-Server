@@ -205,6 +205,15 @@ server {
     location /data/mealdb-categories {
             proxy_pass http://172.17.0.1:9001/data/mealdb-categories?key=${TRIGGER_SECRET};
     }
+    location /data/chore-buckets {
+            proxy_pass http://172.17.0.1:9001/data/chore-buckets?key=${TRIGGER_SECRET};
+    }
+    location /api/add-chore-bucket {
+            proxy_pass http://172.17.0.1:9001/api/add-chore-bucket?key=${TRIGGER_SECRET};
+    }
+    location /api/remove-chore-bucket {
+            proxy_pass http://172.17.0.1:9001/api/remove-chore-bucket?key=${TRIGGER_SECRET};
+    }
     location /api/suggest-recipe-preview {
             proxy_pass http://172.17.0.1:9001/api/suggest-recipe-preview?key=${TRIGGER_SECRET};
     }

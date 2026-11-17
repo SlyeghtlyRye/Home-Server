@@ -90,6 +90,21 @@ const CALENDAR_MODES = ['plan', 'view', 'edit'];
 let calendarMode = CALENDAR_MODES.includes(localStorage.getItem('mealie_calendarMode')) ? localStorage.getItem('mealie_calendarMode') : 'plan';
 let viewSelectedIso = null;
 
+// A toggle inside Plan mode, same style/placement as Kanboard's Quick
+// Add/Schedule toggle (see js/kanboard.js) -- but the default is flipped:
+// Mealie's original "click adds a whole 7-day block" behavior is now
+// named 'schedule' and stays the default, since that's what every
+// existing household's muscle memory expects. 'quickadd' is the new
+// option, for planning just one day without the week-block mechanic --
+// rather than inventing a second single-day flow, it reuses Edit mode's
+// existing pick/suggest/swap/save panel wholesale (editSelectedIso/
+// editPick/editPanelBodyHtml and friends), just reachable from Plan's
+// toggle instead of switching to the separate Edit tab.
+const PLAN_SUBMODES = ['schedule', 'quickadd'];
+let planSubMode = PLAN_SUBMODES.includes(localStorage.getItem('mealie_planSubMode'))
+  ? localStorage.getItem('mealie_planSubMode')
+  : 'schedule';
+
 let editSelectedIso = null;
 let editPick = null;
 
@@ -202,6 +217,17 @@ function renderModeToggle() {
   `;
 }
 
+function setPlanSubMode(mode) {
+  if (planSubMode === mode) return;
+  planSubMode = mode;
+  localStorage.setItem('mealie_planSubMode', mode);
+  resetPlanSelection();
+  editSelectedIso = null;
+  editPick = null;
+  renderCalendar();
+  renderModePanel();
+}
+
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
   // Plan, View, and Edit all center on "the day I was just looking at" --
@@ -228,7 +254,12 @@ function setCalendarMode(mode) {
     editSelectedIso = carryIso;
     editPick = buildEditPick(carryIso);
   } else if (carryIso && mode === 'plan') {
-    weekSelection = buildWeekSelectionStartingAt(carryIso);
+    if (planSubMode === 'quickadd') {
+      editSelectedIso = carryIso;
+      editPick = buildEditPick(carryIso);
+    } else {
+      weekSelection = buildWeekSelectionStartingAt(carryIso);
+    }
     lastPlanClickedIso = carryIso;
     refreshShoppingPanel();
   }
@@ -265,6 +296,11 @@ function renderCalendar() {
         <button class="btn small" data-action="next-month">&rarr;</button>
       </div>
       ${weekSelection ? `<button class="btn small clear" data-action="clear-selection">Clear Selection (${Object.keys(weekSelection.days).length} days)</button>` : ''}
+      ${calendarMode === 'plan' ? `
+      <div class="mode-toggle">
+        <button data-action="plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
+        <button data-action="plan-submode" data-submode="quickadd" class="${planSubMode === 'quickadd' ? 'active' : ''}">Quick Add</button>
+      </div>` : ''}
       ${renderSettingsGearHtml('mealie')}
     </div>
     <div class="cal-grid">
@@ -287,6 +323,7 @@ function renderCalendar() {
     }
     if (calendarMode === 'view' && iso === viewSelectedIso) cls += ' view-selected';
     if (calendarMode === 'edit' && iso === editSelectedIso) cls += ' edit-selected';
+    if (calendarMode === 'plan' && planSubMode === 'quickadd' && iso === editSelectedIso) cls += ' edit-selected';
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
@@ -316,7 +353,12 @@ function renderModePanel() {
   let visible = false;
 
   if (calendarMode === 'plan') {
-    if (previewPicks) {
+    if (planSubMode === 'quickadd') {
+      if (editPick) {
+        contentHtml = editPanelBodyHtml();
+        visible = true;
+      }
+    } else if (previewPicks) {
       contentHtml = previewPanelBodyHtml();
       visible = true;
     } else if (weekSelection) {
@@ -368,8 +410,13 @@ function closeModePanel() {
   } else if (calendarMode === 'edit') {
     closeEditPanel();
   } else if (calendarMode === 'plan') {
-    if (previewPicks) cancelPreview();
-    else if (weekSelection) clearSelection();
+    if (planSubMode === 'quickadd') {
+      if (editPick) closeEditPanel();
+    } else if (previewPicks) {
+      cancelPreview();
+    } else if (weekSelection) {
+      clearSelection();
+    }
   }
 }
 
@@ -767,6 +814,10 @@ function onDayClick(iso) {
     return;
   }
   if (calendarMode === 'edit') {
+    return onEditDayClick(iso);
+  }
+  if (calendarMode === 'plan' && planSubMode === 'quickadd') {
+    lastPlanClickedIso = iso;
     return onEditDayClick(iso);
   }
   if (isCommitting) return;
@@ -1883,6 +1934,8 @@ function wireDelegatedListeners() {
     if (e.target.closest('[data-action="prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="next-month"]')) return changeMonth(1);
     if (e.target.closest('[data-action="clear-selection"]')) return clearSelection();
+    const submodeBtn = e.target.closest('[data-action="plan-submode"]');
+    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
     const dayEl = e.target.closest('.cal-day');
     if (dayEl && dayEl.dataset.iso) return onDayClick(dayEl.dataset.iso);
   });

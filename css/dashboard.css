@@ -16,6 +16,7 @@
       --color-bg: #1a1a1a;
       --color-surface: #2d2d2d;
       --color-accent: #64b5f6;
+      --color-event: #ba68c8;
       --color-text-muted: #888;
       --color-text-dim: #bbb;
       --color-border: #555;
@@ -262,6 +263,7 @@
     .cal-day.excluded { border-color: #a55; opacity: 0.5; text-decoration: line-through; }
     .cal-daynum { font-weight: bold; }
     .cal-meal { font-size: 10px; color: var(--color-text-dim); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cal-meal.cal-event { color: var(--color-event); font-weight: 600; }
     .cal-meal-extra { font-size: 9px; color: var(--color-text-muted); }
     .cal-holiday { font-size: 9px; color: var(--color-warning); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .day-holiday-badge { font-size: 12px; font-weight: 600; color: var(--color-warning); margin: 2px 0 8px; }

@@ -139,6 +139,20 @@ the value the other one sees too, with no extra wiring needed.
 (`${calendarKey}_showHolidays`), same pattern as `defaultExcludedWeekdays`
 -- it also decides whether the copyable feed URL includes `&holidays=1`.
 
+## Calendar-specific sections in an otherwise-shared popover
+
+The popover isn't *entirely* generic -- `icalUrl()` already branches on
+`calendarKey` for its own Mealie-vs-Kanboard feed path, and that same
+branch now also gates a **Kanboard-only "Schedule -- reusable buckets"
+section** (`bucketsSectionHtml()`): add/remove named presets (Sweeping,
+Date Night) that Kanboard's Schedule sub-flow (see `docs/kanboard.md`)
+picks from when dropping a bucket onto a day. Mealie has no equivalent
+concept, so this section never renders there. An earlier version of
+this same popover had a Mealie-only recipe-suggestion-source list in
+the mirror-image spot, since removed when that feature moved to
+TheMealDB -- this is the same calendarKey-gated-section pattern reused
+for a new purpose, not a new idea.
+
 ## Known gaps (intentional, for a later pass)
 
 - No way to subscribe from Google Calendar's own web UI without
