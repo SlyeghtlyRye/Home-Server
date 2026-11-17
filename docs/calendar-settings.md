@@ -143,10 +143,10 @@ the value the other one sees too, with no extra wiring needed.
 
 The popover isn't *entirely* generic -- `icalUrl()` already branches on
 `calendarKey` for its own Mealie-vs-Kanboard feed path, and that same
-branch now also gates a **Kanboard-only "Schedule -- reusable buckets"
-section** (`bucketsSectionHtml()`): add/remove named presets (Sweeping,
-Date Night) that Kanboard's Schedule sub-flow (see `docs/kanboard.md`)
-picks from when dropping a bucket onto a day. Mealie has no equivalent
+branch now also gates a **Kanboard-only "Saved tasks & events"
+section** (`bucketsSectionHtml()`; stored as chore buckets): add/remove
+named presets (Sweeping, Date Night) that Kanboard's Quick Add and
+Schedule name boxes suggest (see `docs/kanboard.md`). Mealie has no equivalent
 concept, so this section never renders there. An earlier version of
 this same popover had a Mealie-only recipe-suggestion-source list in
 the mirror-image spot, since removed when that feature moved to

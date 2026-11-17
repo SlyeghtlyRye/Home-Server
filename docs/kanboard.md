@@ -100,13 +100,23 @@ which this project wasn't using before:
   stands out the same way in every place a task would otherwise look
   identical to a chore.
 
-## Schedule -- a toggle inside Plan mode, for buckets
+## Schedule -- a toggle inside Plan mode, for several days at once
 
 Plan mode has a second way to work, switched with a Quick Add /
-Schedule toggle (`kb-plan-submode`): instead of filling in one task's
-details on one clicked day, Schedule drops a reusable **bucket**
-(Sweeping, Trash, Date Night -- anything created often enough to be
-worth not retyping) onto one or more days at once.
+Schedule toggle (`kb-plan-submode`). Both create the same thing -- a
+Task or an Event on a day, through the same `/api/kanboard-create-task`
+call. Quick Add is one day with the full options (repeat every N days,
+weekly...); Schedule spreads single items across several selected days.
+
+**Saved tasks & events** (stored as "chore buckets" by
+`scripts/chore_buckets.py` -- the data and API names stayed, only the
+people-facing name changed, since "bucket" read as a separate concept
+from a task) are names worth not retyping: Sweeping, Trash, Date Night.
+Both Quick Add's and Schedule's name boxes are the same type-ahead combo
+(`savedComboHtml()`): typing suggests saved items with their Task/Event
+tag; picking one fills in its type and any saved times (only into empty
+time boxes). Any other name can just be typed -- there's no need to save
+something first.
 
 **Lives in the floating mode panel's header row, not the calendar
 header.** The toggle only matters while Plan mode's panel is actually
@@ -123,27 +133,27 @@ Schedule/Quick Add toggle (`docs/mealie.md`).
   week" -- having to exclude six days to add one date night would be
   backwards for this use case specifically.
 - **Two steps in the same panel**: select days -> "Schedule N Days" ->
-  one row per day with a bucket `<select>` (plus an assignee combo and
-  from/until time, pre-filled from the bucket's own defaults, once a
-  bucket's picked for that row) -> "Confirm & Create" calls the same
-  `/api/kanboard-create-task` endpoint Quick Add already uses, once per
-  day that got a bucket assigned. No new creation logic on the backend
-  at all -- buckets only ever pre-fill the existing create flow.
-  Choosing a bucket for one day patches just that row's extra-fields
-  container in place (`onScheduleBucketSelect()`/`kb-schedule-extra-${d}`)
-  rather than re-rendering the whole panel -- scheduling several days at
-  once means another row may already have a typed-in assignee or a
-  custom time, and a full re-render would silently wipe it the moment
-  any other day's bucket choice changed.
-- **Buckets have no assignee field** (`scripts/chore_buckets.py`) --
+  one row per day (`scheduleRowHtml()`): name combo, Task/Event radios,
+  assignee combo, from/until times, and a "Save for next time" checkbox
+  (on by default) that only shows while the typed name isn't saved yet.
+  A blank name skips that day. "Confirm & Create" creates one task per
+  named day, then adds each new, ticked name to the saved list once (a
+  new name used on three days is saved once). A name that matches a
+  saved one case-insensitively is created with the saved spelling.
+- **Typed values survive re-renders.** Row state lives in
+  `schedulePicks[iso]`, and `snapshotScheduleFromDom()` copies the DOM
+  back into it at the top of every `renderModePanel()` and before
+  confirming -- so e.g. adding a saved item from the gear mid-schedule
+  redraws the rows without wiping what was typed on other days.
+- **Saved items have no assignee field** (`scripts/chore_buckets.py`) --
   explicitly requested: a chore is general, not tied to one person
   every time, so who's doing it is chosen fresh at placement time, the
   same way Reroll never locks in a particular assignee either.
-- **No automatic cadence** -- a bucket is just name + type + optional
+- **No automatic cadence** -- a saved item is just name + type + optional
   default time, not a recurrence rule. "Sweeping always wants Tue+Fri"
   isn't handled yet; Schedule's manual day-picking covers that for now,
   with auto-cadence left as a possible later layer on top of this.
-- Buckets are managed from the gear-icon Calendar Settings popover
+- Saved items can also be added/removed from the gear-icon Calendar Settings popover
   (`js/calendar-settings.js`), a Kanboard-only section gated the same
   `calendarKey === 'kanboard'` way `icalUrl()` already branches for its
   own feed path -- add/remove, same list-with-a-delete-button pattern

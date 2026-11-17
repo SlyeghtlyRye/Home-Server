@@ -52,7 +52,7 @@ let planSubMode = PLAN_SUBMODES.includes(localStorage.getItem('kanboard_planSubM
   ? localStorage.getItem('kanboard_planSubMode')
   : 'quick';
 let scheduleSelectedDates = new Set(); // ISO strings, only meaningful mid-selection
-let schedulePicks = null; // null until "Schedule Selected Days" clicked, then {iso: {bucketId}}
+let schedulePicks = null; // null until "Schedule N Days" clicked, then {iso: emptyPick()-shaped row state}
 
 // Mirrors mealie.js's modePanelHeight/Width/ShowModeSwitcher exactly (own
 // localStorage keys so the two tabs' panel sizes don't fight each other).
@@ -277,6 +277,7 @@ function renderModePanel() {
   // itself, since it only ever matters while planning. Mirrors mealie.js's
   // identical change to its own #mode-panel.
   const scheduling = calendarMode === 'plan' && planSubMode === 'schedule';
+  if (scheduling) snapshotScheduleFromDom(); // keep what's typed across the redraw
   const visible = calendarMode === 'plan' || !!selectedIso;
   if (!visible) {
     el.classList.remove('show');
@@ -412,20 +413,19 @@ function dayLabel(iso) {
 }
 
 function scheduleFormHtml() {
-  // One shared bucket list, owned by calendar-settings.js (the gear
-  // popover that adds/removes buckets) -- a separate copy here used to go
-  // stale, so buckets added from the gear never showed up in Schedule.
-  const bucketsCache = getChoreBuckets();
-  if (bucketsCache === null) {
+  // One shared saved-items list, owned by calendar-settings.js (the gear
+  // popover that manages them) -- a separate copy here used to go stale.
+  const savedList = getChoreBuckets();
+  if (savedList === null) {
     loadCalendarSettingsData().then(() => renderModePanel());
-    return `<h3 style="margin-top:0;">Schedule</h3><p style="color:var(--color-text-muted); font-size:13px;">Loading buckets...</p>`;
+    return `<h3 style="margin-top:0;">Schedule</h3><p style="color:var(--color-text-muted); font-size:13px;">Loading...</p>`;
   }
 
   if (!schedulePicks) {
     const dates = [...scheduleSelectedDates].sort();
     return `
       <h3 style="margin-top:0;">Schedule</h3>
-      <p style="color:var(--color-text-muted); font-size:13px;">Click days on the calendar to select them, then schedule a bucket onto each.</p>
+      <p style="color:var(--color-text-muted); font-size:13px;">Click days on the calendar to select them, then add a task or event to each.</p>
       ${dates.length > 0 ? `
         <ul style="margin:0 0 12px; padding-left:18px; font-size:13px; color:var(--color-text-dim);">
           ${dates.map(d => `<li>${dayLabel(d)}</li>`).join('')}
@@ -441,22 +441,8 @@ function scheduleFormHtml() {
   const dates = Object.keys(schedulePicks).sort();
   return `
     <h3 style="margin-top:0;">Schedule</h3>
-    <p style="color:var(--color-text-muted); font-size:13px;">Pick a bucket for each day, or leave it as "None" to skip that day.</p>
-    ${bucketsCache.length === 0 ? `<p class="meal-empty">No buckets yet -- add one from the gear icon's settings first.</p>` : ''}
-    ${dates.map(d => {
-      const pick = schedulePicks[d];
-      const bucket = pick.bucketId ? bucketsCache.find(b => b.id === pick.bucketId) : null;
-      return `
-      <div class="preview-row" style="flex-wrap:wrap;">
-        <span class="date">${dayLabel(d)}</span>
-        <select data-action="kb-schedule-bucket-select" data-date="${d}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;">
-          <option value="">-- None --</option>
-          ${bucketsCache.map(b => `<option value="${b.id}" ${pick.bucketId === b.id ? 'selected' : ''}>${b.type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(b.name)}</option>`).join('')}
-        </select>
-        <span id="kb-schedule-extra-${d}" style="display:contents;">${scheduleRowExtraHtml(d, bucket)}</span>
-      </div>
-      `;
-    }).join('')}
+    <p style="color:var(--color-text-muted); font-size:13px;">Type a name for each day, or pick one you've saved. Leave a day blank to skip it.</p>
+    ${dates.map(d => scheduleRowHtml(d, schedulePicks[d])).join('')}
     <div class="btn-stack" style="margin-top:12px;">
       <button class="btn save" data-action="kb-schedule-confirm">Confirm &amp; Create</button>
       <button class="btn cancel" data-action="kb-schedule-back">Back</button>
@@ -464,37 +450,169 @@ function scheduleFormHtml() {
   `;
 }
 
-// Split out from scheduleFormHtml()'s per-row markup so
-// onScheduleBucketSelect() can patch just one day's extra fields
-// in place (see its own comment for why that matters).
-function scheduleRowExtraHtml(d, bucket) {
-  if (!bucket) return '';
+const timeInputStyle = 'background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;';
+
+// One day's row: name (typed, or picked from saved items), Task/Event,
+// "Save for next time" (only shown for a name that isn't saved yet),
+// assignee, and times. Rendered from schedulePicks[d], which
+// snapshotScheduleFromDom() keeps current, so a full panel re-render
+// (e.g. a saved item added from the gear mid-schedule) doesn't wipe what
+// was already typed on other days.
+function scheduleRowHtml(d, pick) {
+  const isSaved = !!findSavedItemByName(pick.name);
   return `
-    ${assigneeComboHtml(`sched-${d}`, '')}
-    <label style="font-size:12px; color:var(--color-text-muted);">From <input type="time" id="kb-schedule-start-${d}" value="${bucket.startTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
-    <label style="font-size:12px; color:var(--color-text-muted);">Until <input type="time" id="kb-schedule-due-${d}" value="${bucket.dueTime || ''}" style="background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px;"></label>
+    <div class="preview-row kb-sched-row" style="flex-wrap:wrap;">
+      <span class="date">${dayLabel(d)}</span>
+      ${savedComboHtml(`sched-${d}`, pick.name, {
+        typeName: `kb-sched-type-${d}`, startId: `kb-schedule-start-${d}`,
+        dueId: `kb-schedule-due-${d}`, saveId: `kb-sched-save-wrap-${d}`,
+        placeholder: 'Task or event (blank = skip)',
+      })}
+      <span class="kb-type-pick">
+        <label><input type="radio" name="kb-sched-type-${d}" value="task" ${pick.type !== 'event' ? 'checked' : ''}> Task</label>
+        <label><input type="radio" name="kb-sched-type-${d}" value="event" ${pick.type === 'event' ? 'checked' : ''}> Event</label>
+      </span>
+      <label id="kb-sched-save-wrap-${d}" class="kb-save-next" ${!pick.name.trim() || isSaved ? 'hidden' : ''}>
+        <input type="checkbox" id="kb-sched-save-${d}" ${pick.save ? 'checked' : ''}> Save for next time
+      </label>
+      ${assigneeComboHtml(`sched-${d}`, pick.assignee)}
+      <label style="font-size:12px; color:var(--color-text-muted);">From <input type="time" id="kb-schedule-start-${d}" value="${escapeHtml(pick.startTime)}" style="${timeInputStyle}"></label>
+      <label style="font-size:12px; color:var(--color-text-muted);">Until <input type="time" id="kb-schedule-due-${d}" value="${escapeHtml(pick.dueTime)}" style="${timeInputStyle}"></label>
+    </div>
   `;
+}
+
+function emptyPick() {
+  return { name: '', type: 'task', save: true, assignee: '', startTime: '', dueTime: '' };
+}
+
+// Copies whatever's typed in the schedule rows back into schedulePicks.
+// Called before any re-render and before confirming.
+function snapshotScheduleFromDom() {
+  if (!schedulePicks) return;
+  for (const d of Object.keys(schedulePicks)) {
+    const nameEl = document.getElementById(`kb-saved-input-sched-${d}`);
+    if (!nameEl) continue; // rows not on screen
+    const typeEl = document.querySelector(`input[name="kb-sched-type-${d}"]:checked`);
+    const saveEl = document.getElementById(`kb-sched-save-${d}`);
+    schedulePicks[d] = {
+      name: nameEl.value,
+      type: typeEl ? typeEl.value : 'task',
+      save: saveEl ? saveEl.checked : true,
+      assignee: document.getElementById(`kb-assignee-input-sched-${d}`)?.value || '',
+      startTime: document.getElementById(`kb-schedule-start-${d}`)?.value || '',
+      dueTime: document.getElementById(`kb-schedule-due-${d}`)?.value || '',
+    };
+  }
 }
 
 function buildSchedule() {
   const picks = {};
-  for (const d of scheduleSelectedDates) picks[d] = { bucketId: null };
+  for (const d of scheduleSelectedDates) picks[d] = emptyPick();
   schedulePicks = picks;
   renderModePanel();
 }
 
-// Patches just this one day's extra-fields container instead of calling
-// renderModePanel() (which would redraw every row from scratch) --
-// scheduling several days at once means someone may have already typed
-// an assignee or a custom time for a different day; a full re-render
-// here would silently throw that away the moment any other day's
-// bucket choice changed.
-function onScheduleBucketSelect(date, bucketId) {
-  if (!schedulePicks || !schedulePicks[date]) return;
-  schedulePicks[date].bucketId = bucketId || null;
-  const bucket = bucketId ? (getChoreBuckets() || []).find(b => b.id === bucketId) : null;
-  const container = document.getElementById(`kb-schedule-extra-${date}`);
-  if (container) container.innerHTML = scheduleRowExtraHtml(date, bucket);
+// ---------- Saved tasks & events combo (type a new name, or pick a saved
+// one to fill in its type and times). Used by both Schedule's rows and
+// Quick Add's name box. Saved items are the "chore buckets" stored by
+// scripts/chore_buckets.py -- only the name shown to people changed. ----------
+
+function savedItems() {
+  return getChoreBuckets() || [];
+}
+
+function findSavedItemByName(name) {
+  const n = (name || '').trim().toLowerCase();
+  if (!n) return null;
+  return savedItems().find(b => b.name.trim().toLowerCase() === n) || null;
+}
+
+// opts: typeName (radio group to set), startId/dueId (time inputs to
+// pre-fill), saveId (optional "Save for next time" element to show only
+// for unsaved names), placeholder.
+function savedComboHtml(comboKey, value, opts) {
+  return `
+    <div class="combo-wrap">
+      <input
+        type="text"
+        id="kb-saved-input-${comboKey}"
+        class="recipe-combo saved-combo"
+        data-combo-key="${comboKey}"
+        data-type-name="${opts.typeName}"
+        data-start-id="${opts.startId}"
+        data-due-id="${opts.dueId}"
+        data-save-id="${opts.saveId || ''}"
+        autocomplete="off"
+        placeholder="${escapeHtml(opts.placeholder)}"
+        value="${escapeHtml(value || '')}"
+      >
+      <div class="combo-dropdown" id="kb-saved-dropdown-${comboKey}" style="display:none;"></div>
+    </div>
+  `;
+}
+
+function typeTagHtml(type) {
+  return type === 'event'
+    ? `<span class="kb-type-tag event">&#x1F389; Event</span>`
+    : `<span class="kb-type-tag">Task</span>`;
+}
+
+function renderSavedDropdownHtml(term) {
+  const t = (term || '').trim();
+  const tl = t.toLowerCase();
+  const list = savedItems();
+  const matches = tl ? list.filter(b => b.name.toLowerCase().includes(tl)) : list;
+  const exact = findSavedItemByName(t);
+  let html = matches.map(b =>
+    `<div class="combo-item" data-saved-id="${escapeHtml(b.id)}"><span>${escapeHtml(b.name)}</span>${typeTagHtml(b.type)}</div>`
+  ).join('');
+  if (t && !exact) {
+    html += `<div class="combo-item info">"${escapeHtml(t)}" is new -- pick Task or Event</div>`;
+  } else if (!list.length) {
+    html = `<div class="combo-item info">Nothing saved yet -- type a name</div>`;
+  }
+  return html;
+}
+
+function showSavedDropdown(inputEl) {
+  const dropdown = document.getElementById(`kb-saved-dropdown-${inputEl.dataset.comboKey}`);
+  if (!dropdown) return;
+  dropdown.innerHTML = renderSavedDropdownHtml(inputEl.value);
+  dropdown.style.display = 'block';
+}
+
+// Keeps the row in step with what's typed: an exact saved name sets its
+// type and hides "Save for next time"; a new name shows it.
+function syncSavedMatch(inputEl) {
+  const match = findSavedItemByName(inputEl.value);
+  if (match) {
+    const radio = document.querySelector(`input[name="${inputEl.dataset.typeName}"][value="${match.type === 'event' ? 'event' : 'task'}"]`);
+    if (radio) radio.checked = true;
+  }
+  const saveEl = inputEl.dataset.saveId && document.getElementById(inputEl.dataset.saveId);
+  if (saveEl) saveEl.hidden = !inputEl.value.trim() || !!match;
+}
+
+function selectSavedItem(comboKey, savedId, dropdown) {
+  const inputEl = document.getElementById(`kb-saved-input-${comboKey}`);
+  const item = savedItems().find(b => b.id === savedId);
+  dropdown.style.display = 'none';
+  if (!inputEl || !item) return;
+  inputEl.value = item.name;
+  // Saved times only fill empty boxes -- never overwrite a time already typed.
+  const startEl = document.getElementById(inputEl.dataset.startId);
+  const dueEl = document.getElementById(inputEl.dataset.dueId);
+  if (startEl && !startEl.value && item.startTime) startEl.value = item.startTime;
+  if (dueEl && !dueEl.value && item.dueTime) dueEl.value = item.dueTime;
+  syncSavedMatch(inputEl);
+}
+
+function onSavedComboBlur(comboKey) {
+  setTimeout(() => {
+    const dropdown = document.getElementById(`kb-saved-dropdown-${comboKey}`);
+    if (dropdown) dropdown.style.display = 'none';
+  }, 150);
 }
 
 function backToScheduleSelection() {
@@ -510,30 +628,39 @@ function clearScheduleSelection() {
 }
 
 async function confirmSchedule() {
-  const dates = Object.keys(schedulePicks || {}).filter(d => schedulePicks[d].bucketId);
-  if (dates.length === 0) { showStatusModal('Pick at least one bucket first.', 'error'); return; }
+  snapshotScheduleFromDom();
+  const dates = Object.keys(schedulePicks || {}).filter(d => schedulePicks[d].name.trim());
+  if (dates.length === 0) { showStatusModal('Type a task or event for at least one day first.', 'error'); return; }
   showStatusModal('Scheduling...', 'loading');
   try {
+    const savedNow = new Set(); // a new name used on several days is saved once
     for (const d of dates) {
-      const bucket = (getChoreBuckets() || []).find(b => b.id === schedulePicks[d].bucketId);
-      if (!bucket) continue;
-      const assigneeInput = document.getElementById(`kb-assignee-input-sched-${d}`);
-      const startInput = document.getElementById(`kb-schedule-start-${d}`);
-      const dueInput = document.getElementById(`kb-schedule-due-${d}`);
-      const assignee = assigneeInput ? assigneeInput.value.trim() : '';
-      const startTime = startInput ? startInput.value : '';
-      const dueTime = dueInput ? dueInput.value : '';
+      const pick = schedulePicks[d];
+      // Typed "brunch" for saved "Brunch"? Use the saved spelling.
+      const title = findSavedItemByName(pick.name)?.name || pick.name.trim();
       const res = await fetch('/api/kanboard-create-task', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: bucket.name, date: d, startTime, dueTime, assignee,
-          taskType: bucket.type, recurrence: { type: 'single' },
+          title, date: d, startTime: pick.startTime, dueTime: pick.dueTime,
+          assignee: pick.assignee.trim(), taskType: pick.type, recurrence: { type: 'single' },
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `server responded ${res.status}`);
+      const key = title.toLowerCase();
+      if (pick.save && !findSavedItemByName(title) && !savedNow.has(key)) {
+        savedNow.add(key);
+        // Saving is a convenience -- a failure here mustn't undo or block
+        // the tasks that were already created.
+        await fetch('/api/add-chore-bucket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: title, type: pick.type, startTime: pick.startTime, dueTime: pick.dueTime }),
+        }).catch(() => {});
+      }
     }
+    if (savedNow.size) await loadCalendarSettingsData();
     hideStatusModal();
     scheduleSelectedDates = new Set();
     schedulePicks = null;
@@ -557,12 +684,12 @@ function planFormHtml(iso) {
         ${existing.map(t => `<li>${t.type === 'event' ? '&#x1F389; ' : ''}${t.done ? `<s>${escapeHtml(t.title)}</s>` : escapeHtml(t.title)}${t.assignee ? ` -- ${escapeHtml(t.assignee)}` : ''}</li>`).join('')}
       </ul>
     ` : ''}
-    <input
-      type="text"
-      id="kb-plan-title"
-      placeholder="Task or event name"
-      style="width:100%; background:var(--color-bg); color:white; border:1px solid var(--color-border); padding:8px; border-radius:4px; margin-bottom:10px; box-sizing:border-box;"
-    >
+    <div style="margin-bottom:10px;">
+      ${savedComboHtml('plan', '', {
+        typeName: 'kb-task-type', startId: 'kb-plan-start-time', dueId: 'kb-plan-due-time',
+        placeholder: 'Task or event name -- or pick a saved one',
+      })}
+    </div>
     <div class="preview-row" style="flex-wrap:wrap;">
       <label><input type="radio" name="kb-task-type" value="task" checked> Task</label>
       <label><input type="radio" name="kb-task-type" value="event"> Event</label>
@@ -706,7 +833,7 @@ function onAssigneeComboBlur(comboKey) {
 // ---------- Actions ----------
 
 async function submitPlan() {
-  const titleInput = document.getElementById('kb-plan-title');
+  const titleInput = document.getElementById('kb-saved-input-plan');
   const title = titleInput ? titleInput.value.trim() : '';
   if (!title) { showStatusModal('Enter a task name first.', 'error'); return; }
   const assigneeInput = document.getElementById('kb-assignee-input-plan');
@@ -853,6 +980,11 @@ function wireDelegatedListeners() {
     if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
 
     const item = e.target.closest('.combo-item');
+    if (item && item.dataset.savedId) {
+      const dropdown = item.closest('.combo-dropdown');
+      const comboKey = dropdown.id.replace('kb-saved-dropdown-', '');
+      return selectSavedItem(comboKey, item.dataset.savedId, dropdown);
+    }
     if (item && item.dataset.personName) {
       const dropdown = item.closest('.combo-dropdown');
       const comboKey = dropdown.id.replace('kb-assignee-dropdown-', '');
@@ -881,8 +1013,6 @@ function wireDelegatedListeners() {
   // it's selected, and only show the occurrence-count field for a
   // recurring pick.
   panel.addEventListener('change', (e) => {
-    const bucketSelect = e.target.closest('[data-action="kb-schedule-bucket-select"]');
-    if (bucketSelect) return onScheduleBucketSelect(bucketSelect.dataset.date, bucketSelect.value);
     if (e.target.name !== 'kb-recurrence') return;
     const type = e.target.value;
     const intervalInput = document.getElementById('kb-interval-days');
@@ -894,12 +1024,18 @@ function wireDelegatedListeners() {
   });
   panel.addEventListener('focusin', (e) => {
     if (e.target.classList.contains('person-combo')) onAssigneeComboFocus(e.target.dataset.comboKey, e.target);
+    if (e.target.classList.contains('saved-combo')) showSavedDropdown(e.target);
   });
   panel.addEventListener('input', (e) => {
     if (e.target.classList.contains('person-combo')) onAssigneeComboType(e.target.dataset.comboKey, e.target);
+    if (e.target.classList.contains('saved-combo')) {
+      showSavedDropdown(e.target);
+      syncSavedMatch(e.target);
+    }
   });
   panel.addEventListener('focusout', (e) => {
     if (e.target.classList.contains('person-combo')) onAssigneeComboBlur(e.target.dataset.comboKey);
+    if (e.target.classList.contains('saved-combo')) onSavedComboBlur(e.target.dataset.comboKey);
   });
 }
 

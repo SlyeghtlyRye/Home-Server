@@ -105,20 +105,23 @@ function popoverBodyHtml(calendarKey) {
   `;
 }
 
-// Kanboard-only -- Schedule's reusable bucket presets. Mealie has no
+// Kanboard-only -- "Saved tasks & events" (stored as chore buckets by
+// scripts/chore_buckets.py; the people-facing name changed, the data
+// didn't), suggested by Quick Add and Schedule's name boxes. Mealie has no
 // equivalent concept, so this section only renders in Kanboard's
 // popover, the same calendarKey-branch icalUrl() above already uses for
 // its own Mealie-vs-Kanboard feed path.
 function bucketsSectionHtml() {
   return `
     <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border-soft);">
-      <div style="color:var(--color-text-muted); font-size:11px; margin-bottom:4px;">Schedule -- reusable buckets</div>
+      <div style="color:var(--color-text-muted); font-size:11px; margin-bottom:4px;">Saved tasks &amp; events</div>
       ${bucketsCache.map(b => `
         <div class="cal-settings-row" style="gap:6px;">
-          <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${b.type === 'event' ? '&#x1F389; ' : ''}${escapeHtml(b.name)}</span>
-          <button class="icon-btn-delete" data-action="remove-chore-bucket" data-id="${b.id}" title="Remove this bucket">&#x1F5D1;</button>
+          <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.name)}</span>
+          <span class="kb-type-tag ${b.type === 'event' ? 'event' : ''}">${b.type === 'event' ? '&#x1F389; Event' : 'Task'}</span>
+          <button class="icon-btn-delete" data-action="remove-chore-bucket" data-id="${b.id}" title="Remove from saved">&#x1F5D1;</button>
         </div>
-      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">No buckets yet -- add one below.</p>`}
+      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">Nothing saved yet. Add one here, or type a new name while scheduling.</p>`}
       <div class="cal-settings-row" style="gap:4px; margin-top:4px;">
         <input type="text" id="new-bucket-name" placeholder="e.g. Sweeping, Date Night" style="flex:1; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
         <select id="new-bucket-type" style="background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
