@@ -431,10 +431,11 @@ function scheduleFormHtml() {
           ${dates.map(d => `<li>${dayLabel(d)}</li>`).join('')}
         </ul>
       ` : `<p class="meal-empty">No days selected yet.</p>`}
-      <div class="btn-stack" style="margin-top:12px;">
-        ${dates.length > 0 ? `<button class="btn save" data-action="kb-schedule-build">Schedule ${dates.length} Day${dates.length > 1 ? 's' : ''}</button>` : ''}
-        ${dates.length > 0 ? `<button class="btn clear" data-action="kb-schedule-clear-selection">Clear Selection</button>` : ''}
-      </div>
+      ${dates.length > 0 ? `
+        <div class="round-actions">
+          ${roundBtn('stop', 'kb-schedule-clear-selection', ICON_CANCEL, 'Clear selection')}
+          ${roundBtn('go', 'kb-schedule-build', ICON_NEXT, `Schedule ${dates.length} day${dates.length > 1 ? 's' : ''}`)}
+        </div>` : ''}
     `;
   }
 
@@ -443,9 +444,9 @@ function scheduleFormHtml() {
     <h3 style="margin-top:0;">Schedule</h3>
     <p style="color:var(--color-text-muted); font-size:13px;">Type a name for each day, or pick one you've saved. Leave a day blank to skip it.</p>
     ${dates.map(d => scheduleRowHtml(d, schedulePicks[d])).join('')}
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn save" data-action="kb-schedule-confirm">Confirm &amp; Create</button>
-      <button class="btn cancel" data-action="kb-schedule-back">Back</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'kb-schedule-back', ICON_CANCEL, 'Back to picking days')}
+      ${roundBtn('go', 'kb-schedule-confirm', ICON_CONFIRM, 'Confirm and create')}
     </div>
   `;
 }
@@ -711,11 +712,22 @@ function planFormHtml(iso) {
     <div class="preview-row" id="kb-count-row" style="display:none;">
       <label>Create <input type="number" id="kb-occurrence-count" min="1" max="52" value="8" style="width:50px;"> occurrences</label>
     </div>
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn cancel" data-action="kb-panel-close">Cancel</button>
-      <button class="btn save" data-action="kb-plan-submit">Create</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Cancel')}
+      ${roundBtn('go', 'kb-plan-submit', ICON_CONFIRM, 'Create')}
     </div>
   `;
+}
+
+// Compact round icon buttons for the mode panel's actions, side by side:
+// green check = create, green play = next step, red X = cancel/back/close.
+// Icon-only, so the label goes in title (hover tooltip) and aria-label.
+// ︎ asks for the plain text glyph, not a colour emoji.
+const ICON_CONFIRM = '&#x2713;';
+const ICON_NEXT = '&#x25B6;&#xFE0E;';
+const ICON_CANCEL = '&#x2715;';
+function roundBtn(kind, action, icon, label) {
+  return `<button type="button" class="round-btn ${kind}" data-action="${action}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</button>`;
 }
 
 // Renders "2:00 PM - 4:00 PM" / "From 2:00 PM" / "Until 4:00 PM" / '' from
@@ -749,8 +761,8 @@ function viewListHtml(iso) {
         <button class="btn small ${t.done ? '' : 'save'}" data-action="kb-toggle-done" data-id="${t.id}" data-done="${t.done ? '1' : '0'}">${t.done ? 'Reopen' : 'Mark Done'}</button>
       </div>
     `).join('')}
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn cancel" data-action="kb-panel-close">Close</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Close')}
     </div>
   `;
 }
@@ -774,8 +786,8 @@ function editListHtml(iso) {
         <button class="icon-btn-delete" data-action="kb-delete-task" data-id="${t.id}" title="Delete this task">&#x1F5D1;</button>
       </div>
     `).join('')}
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn cancel" data-action="kb-panel-close">Close</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Close')}
     </div>
   `;
 }
