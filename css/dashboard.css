@@ -92,11 +92,14 @@
       /* Above the floating mode panel (200) and calendar settings popover
          (210), so they scroll under the header rather than over it. */
       z-index: 300;
+      /* Cancel body's padding so the bar runs edge to edge of the window
+         (the mobile media query below matches its smaller padding). */
+      margin: -15px -15px 0;
     }
     .app-header-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 12px 15px;
+      /* Full width: brand pinned left, nav pinned right on desktop,
+         rather than both squeezed into the 1200px content column. */
+      padding: 12px 24px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -750,6 +753,8 @@
 
     @media (max-width: 600px) {
       body { padding: 10px; }
+      #app-header { margin: -10px -10px 0; }
+      .app-header-inner { padding: 10px 12px; }
       h1 { font-size: 24px; margin-bottom: 20px; }
       .grid { grid-template-columns: 1fr; gap: 15px; }
       .cal-day { min-height: 50px; font-size: 10px; }
