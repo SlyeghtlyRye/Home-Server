@@ -45,20 +45,38 @@ const TIMEOUT_MS = 8000;
 let lastResults = null;
 let checking = false;
 
+// One fetch, reporting whether it produced usable JSON.
+async function tryJson(path, cache, signal) {
+  const res = await fetch(path, { cache, signal });
+  if (!res.ok) return { ok: false, status: res.status };
+  try {
+    await res.json();
+    return { ok: true };
+  } catch {
+    return { ok: false, status: res.status, notJson: true };
+  }
+}
+
 async function checkEndpoint({ path, label }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const started = performance.now();
   try {
-    const res = await fetch(path, { cache: 'no-store', signal: controller.signal });
+    // cache:'default' on purpose -- the same path through the browser's
+    // HTTP cache that the tabs' own code took before core.js forced
+    // no-store, so a stale cached copy shows up here instead of hiding
+    // behind a fresh network fetch.
+    const cached = await tryJson(path, 'default', controller.signal);
     const ms = Math.round(performance.now() - started);
-    if (!res.ok) return { label, path, ok: false, kind: 'server', detail: `Server error (HTTP ${res.status})`, ms };
-    try {
-      await res.json();
-    } catch {
-      return { label, path, ok: false, kind: 'server', detail: 'Got a non-JSON reply', ms };
+    if (cached.ok) return { label, path, ok: true, detail: `OK (${ms} ms)`, ms };
+    // Ask the server directly to tell "browser cache is wrong" apart from
+    // "server is wrong".
+    const live = await tryJson(path, 'no-store', controller.signal);
+    if (live.ok) {
+      return { label, path, ok: false, kind: 'stale', detail: 'Old copy stuck in browser cache' };
     }
-    return { label, path, ok: true, detail: `OK (${ms} ms)`, ms };
+    if (live.notJson) return { label, path, ok: false, kind: 'server', detail: 'Got a web page, not data' };
+    return { label, path, ok: false, kind: 'server', detail: `Server error (HTTP ${live.status})` };
   } catch (err) {
     if (err.name === 'AbortError') {
       return { label, path, ok: false, kind: 'timeout', detail: `No reply after ${TIMEOUT_MS / 1000}s` };
@@ -94,6 +112,9 @@ function diagnosis(results) {
   }
   const blocked = failed.filter(r => r.kind === 'blocked');
   const someOk = results.some(r => r.ok);
+  if (failed.every(r => r.kind === 'stale')) {
+    return 'The server is fine, but this browser cached an old, wrong copy of some data. Click "Refresh everything" to replace it.';
+  }
   if (blocked.length && someOk) {
     return 'The server is up, but this browser blocked some requests. Turn Brave Shields off for this site (lion icon in the address bar) or allow it in your ad blocker, then reload.';
   }
@@ -109,8 +130,11 @@ function diagnosis(results) {
 async function refreshEverything(btn) {
   btn.disabled = true;
   btn.textContent = 'Refreshing...';
-  // Overwrite stale HTTP-cache copies of the page's own files.
-  await Promise.all(ASSETS.map(url => fetch(url, { cache: 'reload' }).catch(() => {})));
+  // Overwrite stale HTTP-cache copies of the page's own files, and of the
+  // data endpoints (cache:'reload' replaces a cached entry with the fresh
+  // reply -- a stale HTML copy of /data/... included).
+  const urls = [...ASSETS, ...ENDPOINTS.map(e => e.path)];
+  await Promise.all(urls.map(url => fetch(url, { cache: 'reload' }).catch(() => {})));
   // Nothing here registers a service worker or uses Cache Storage today,
   // but a leftover one from an old version would serve stale files forever.
   try {
@@ -205,8 +229,12 @@ function init() {
     e.stopPropagation();
     togglePanel();
   });
+  // Clicks inside the panel never count as "outside" -- stopped here
+  // because renderPanel() swaps the clicked button out mid-click, so by the
+  // time the document listener runs, e.target is no longer in the panel.
+  panel.addEventListener('click', (e) => e.stopPropagation());
   document.addEventListener('click', (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== btn) togglePanel(false);
+    if (!panel.hidden && e.target !== btn) togglePanel(false);
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !panel.hidden) togglePanel(false);

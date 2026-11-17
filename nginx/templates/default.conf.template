@@ -37,6 +37,28 @@ server {
     location / {
         root /usr/share/nginx/html;
         try_files $uri $uri/ /index.html;
+        # Same reasoning as /js/ below: without it the dashboard page (and
+        # the index.html fallback for any unknown path) gets heuristically
+        # cached from its mtime.
+        add_header Cache-Control "no-cache";
+    }
+    # Catch-alls for data/API paths with no location of their own below
+    # (longer prefixes win, so every real endpoint still matches its own
+    # block). Without these, an unknown /data/... fell through to
+    # "location /" and got the dashboard's HTML with a 200 -- which a
+    # browser could cache and keep serving as that endpoint's "data" even
+    # after the real location was added (Brave did, for
+    # /data/chore-buckets). A JSON 404 that is never cached fails loudly
+    # instead, and the next request after a fix gets the real thing.
+    location /data/ {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 404 '{"error": "unknown data endpoint"}';
+    }
+    location /api/ {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 404 '{"error": "unknown api endpoint"}';
     }
     # Without this, nginx's default static-file serving sets no explicit
     # cache headers, so browsers fall back to heuristic caching based on

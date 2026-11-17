@@ -2,6 +2,27 @@
 // features register themselves via registerApp() so adding a new one
 // never requires editing this file.
 
+// Every /data/ and /api/ request goes to the network, never the browser's
+// HTTP cache, unless the caller explicitly picks a cache mode. Live data
+// should never be served from cache anyway, and a cached entry can be
+// actively wrong: when an endpoint's nginx location wasn't loaded yet, the
+// request fell through to the dashboard's HTML page, and a browser that
+// cached that kept handing it back ("Unexpected token '<'") long after the
+// server was fixed -- confirmed in Brave for /data/chore-buckets, which
+// left Kanboard's Schedule with no buckets. Patched here, in the first
+// module dashboard.html loads, so it's in place before any tab fetches.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const url = typeof input === 'string' ? input : input?.url || '';
+  const path = url.startsWith('/') ? url : (() => {
+    try { const u = new URL(url); return u.origin === location.origin ? u.pathname : ''; } catch { return ''; }
+  })();
+  if ((path.startsWith('/data/') || path.startsWith('/api/')) && !init.cache) {
+    init = { ...init, cache: 'no-store' };
+  }
+  return nativeFetch(input, init);
+};
+
 const apps = {};
 const cleanupHandlers = [];
 
