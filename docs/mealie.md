@@ -202,10 +202,20 @@ fetching the full recipe.
 ## Schedule vs Quick Add -- a toggle inside Plan mode
 
 Plan mode has a second way to work, switched with a Schedule / Quick
-Add toggle in the calendar header (`plan-submode`, only shown while
-`calendarMode === 'plan'`), same style and placement as Kanboard's own
-Quick Add/Schedule toggle (see `docs/kanboard.md`) -- but the default
-is flipped.
+Add toggle (`plan-submode`) -- same `.mode-toggle` look as Kanboard's
+own Quick Add/Schedule toggle (see `docs/kanboard.md`), but living in
+a different spot and with the default flipped.
+
+**Lives in the floating mode panel's header row, not the calendar
+header.** Unlike Kanboard's version, this toggle is only ever useful
+while Plan mode's panel is actually open, so it sits next to the
+`mode-panel-badge` there instead of on the calendar itself (which is
+also visible in View/Edit, where the toggle would mean nothing).
+Plan's panel is now always visible while `calendarMode === 'plan'`,
+even with nothing selected yet (`planIdleBodyHtml()` fills it with a
+one-line hint in that case) -- it used to only appear once a
+selection/pick existed, but the toggle needs to be reachable before
+that first click too.
 
 - **Schedule is the default**, and is simply Mealie's original
   behavior under a new name: click a day to add a whole 7-day block,

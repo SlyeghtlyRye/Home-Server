@@ -344,6 +344,9 @@
     .mode-panel-body::-webkit-scrollbar-thumb:hover { background: var(--color-border); }
     .mode-panel-body .vd-date { color: var(--color-text-muted); font-size: 13px; }
     .mode-panel-body .vd-meal { font-size: 16px; font-weight: bold; margin: 4px 0 8px; }
+    .mode-panel-top-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-right: 20px; }
+    .mode-panel-submode-toggle { padding: 2px; }
+    .mode-panel-submode-toggle button { padding: 5px 12px; font-size: 12px; }
     .mode-panel-badge {
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 11px; font-weight: bold; letter-spacing: .5px; text-transform: uppercase;

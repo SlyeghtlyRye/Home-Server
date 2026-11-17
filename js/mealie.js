@@ -296,11 +296,6 @@ function renderCalendar() {
         <button class="btn small" data-action="next-month">&rarr;</button>
       </div>
       ${weekSelection ? `<button class="btn small clear" data-action="clear-selection">Clear Selection (${Object.keys(weekSelection.days).length} days)</button>` : ''}
-      ${calendarMode === 'plan' ? `
-      <div class="mode-toggle">
-        <button data-action="plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
-        <button data-action="plan-submode" data-submode="quickadd" class="${planSubMode === 'quickadd' ? 'active' : ''}">Quick Add</button>
-      </div>` : ''}
       ${renderSettingsGearHtml('mealie')}
     </div>
     <div class="cal-grid">
@@ -353,17 +348,19 @@ function renderModePanel() {
   let visible = false;
 
   if (calendarMode === 'plan') {
+    // Plan's panel stays visible even with nothing selected yet (unlike
+    // View/Edit below), so the Schedule/Quick Add toggle in its header
+    // row is always reachable -- it belongs here, not on the calendar
+    // itself, since it only ever matters while planning.
+    visible = true;
     if (planSubMode === 'quickadd') {
-      if (editPick) {
-        contentHtml = editPanelBodyHtml();
-        visible = true;
-      }
+      contentHtml = editPick ? editPanelBodyHtml() : planIdleBodyHtml();
     } else if (previewPicks) {
       contentHtml = previewPanelBodyHtml();
-      visible = true;
     } else if (weekSelection) {
       contentHtml = actionPanelBodyHtml();
-      visible = true;
+    } else {
+      contentHtml = planIdleBodyHtml();
     }
   } else if (calendarMode === 'view') {
     if (viewSelectedIso) {
@@ -393,15 +390,32 @@ function renderModePanel() {
       </div>`
     : `<div class="mode-panel-badge mode-${calendarMode}" data-action="toggle-mode-switcher" title="Click to switch mode"><span class="mode-panel-dot"></span>${calendarMode} mode</div>`;
 
+  // Lives in the panel's own header row, not the calendar header -- this
+  // toggle is only ever relevant while Plan mode's panel is open.
+  const planSubmodeToggleHtml = calendarMode === 'plan' ? `
+    <div class="mode-toggle mode-panel-submode-toggle">
+      <button data-action="plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
+      <button data-action="plan-submode" data-submode="quickadd" class="${planSubMode === 'quickadd' ? 'active' : ''}">Quick Add</button>
+    </div>` : '';
+
   el.innerHTML = `
     <div class="mode-panel-inner" ${modePanelHeight ? `style="height:${modePanelHeight}px;"` : ''}>
       <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-curve"></span></div>
-      ${badgeHtml}
+      <div class="mode-panel-top-row">${badgeHtml}${planSubmodeToggleHtml}</div>
       <div class="mode-panel-body">${contentHtml}</div>
       <button class="vdf-close" data-action="close-mode-panel" title="Close">&#x2716;</button>
     </div>`;
   el.classList.add('show');
   el.style.width = modePanelWidth ? `${modePanelWidth}px` : '';
+}
+
+// Shown in Plan's panel before anything's selected yet -- it still has
+// to render something, since the panel (and its Schedule/Quick Add
+// toggle) stays visible the whole time Plan mode is active.
+function planIdleBodyHtml() {
+  return planSubMode === 'quickadd'
+    ? `<p style="color:var(--color-text-dim); font-size:14px; margin:0;">Click a day to plan just that one meal.</p>`
+    : `<p style="color:var(--color-text-dim); font-size:14px; margin:0;">Click a day to start a 7-day block. Click it again to include/exclude individual days.</p>`;
 }
 
 function closeModePanel() {
@@ -1934,8 +1948,6 @@ function wireDelegatedListeners() {
     if (e.target.closest('[data-action="prev-month"]')) return changeMonth(-1);
     if (e.target.closest('[data-action="next-month"]')) return changeMonth(1);
     if (e.target.closest('[data-action="clear-selection"]')) return clearSelection();
-    const submodeBtn = e.target.closest('[data-action="plan-submode"]');
-    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
     const dayEl = e.target.closest('.cal-day');
     if (dayEl && dayEl.dataset.iso) return onDayClick(dayEl.dataset.iso);
   });
@@ -1979,6 +1991,8 @@ function wireDelegatedListeners() {
   modePanel.addEventListener('click', (e) => {
     const modeSwitchBtn = e.target.closest('.mode-panel-mode-switch button');
     if (modeSwitchBtn) return setCalendarMode(modeSwitchBtn.dataset.mode);
+    const submodeBtn = e.target.closest('[data-action="plan-submode"]');
+    if (submodeBtn) return setPlanSubMode(submodeBtn.dataset.submode);
 
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
