@@ -266,8 +266,14 @@ function renderModePanel() {
   const el = document.getElementById('kb-mode-panel');
   if (!el) return;
 
+  // Plan's panel stays visible even with nothing selected yet (unlike
+  // View/Edit below), so the Quick Add/Schedule toggle in its header
+  // row is always reachable -- it belongs here, not on the calendar
+  // itself, since it only ever matters while planning. Mirrors mealie.js's
+  // identical change to its own #mode-panel.
   const scheduling = calendarMode === 'plan' && planSubMode === 'schedule';
-  if (!selectedIso && !scheduling) {
+  const visible = calendarMode === 'plan' || !!selectedIso;
+  if (!visible) {
     el.classList.remove('show');
     el.innerHTML = '';
     modePanelShowModeSwitcher = false;
@@ -275,7 +281,7 @@ function renderModePanel() {
   }
 
   const contentHtml = scheduling ? scheduleFormHtml()
-    : calendarMode === 'plan' ? planFormHtml(selectedIso)
+    : calendarMode === 'plan' ? (selectedIso ? planFormHtml(selectedIso) : planIdleBodyHtml())
     : calendarMode === 'view' ? viewListHtml(selectedIso)
     : editListHtml(selectedIso);
 
@@ -288,10 +294,16 @@ function renderModePanel() {
       </div>`
     : `<div class="mode-panel-badge mode-${calendarMode}" data-action="kb-toggle-mode-switcher" title="Click to switch mode"><span class="mode-panel-dot"></span>${calendarMode} mode</div>`;
 
+  const planSubmodeToggleHtml = calendarMode === 'plan' ? `
+    <div class="mode-toggle mode-panel-submode-toggle">
+      <button data-action="kb-plan-submode" data-submode="quick" class="${planSubMode === 'quick' ? 'active' : ''}">Quick Add</button>
+      <button data-action="kb-plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
+    </div>` : '';
+
   el.innerHTML = `
     <div class="mode-panel-inner" ${modePanelHeight ? `style="height:${modePanelHeight}px;"` : ''}>
       <div class="mode-panel-handle" title="Drag to resize"><span class="mode-panel-handle-curve"></span></div>
-      ${badgeHtml}
+      <div class="mode-panel-top-row">${badgeHtml}${planSubmodeToggleHtml}</div>
       <div class="mode-panel-body">${contentHtml}</div>
       <button class="vdf-close" data-action="kb-panel-close" title="Close">&#x2716;</button>
     </div>`;
