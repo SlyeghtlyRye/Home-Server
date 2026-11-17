@@ -18,8 +18,12 @@
         <button class="nav-link" data-nav="syncthing">Syncthing</button>
         <button class="nav-link" data-nav="docs">Docs</button>
         <button class="nav-link" data-nav="system">System</button>
+        <button id="health-btn" class="health-btn checking" type="button"
+                aria-label="Connection check" aria-haspopup="true" aria-expanded="false"
+                title="Checking connection...">!</button>
       </nav>
     </div>
+    <div id="health-panel" class="health-panel" hidden></div>
   </header>
   <div class="container">
     <div id="grid-view">
@@ -88,6 +92,7 @@
   <script type="module" src="js/docs.js"></script>
   <script type="module" src="js/system.js"></script>
   <script type="module" src="js/wizard.js"></script>
+  <script type="module" src="js/health-check.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
 </body>
 </html>
