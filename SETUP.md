@@ -118,6 +118,10 @@ a subfolder. This repo *is* the live working directory — every path in the
 config, Docker Compose file, and systemd service assumes it lives at
 `/root`.
 
+> **Moving from an old device or drive?** Stop after this step and follow
+> [docs/migration.md](docs/migration.md): `scripts/migrate.py import` restores
+> all your data and does everything Step 4 would.
+
 ## Step 4 — Run the installer
 
 ```bash
@@ -192,7 +196,9 @@ Two flags on `setup.sh` let you rehearse the reset/setup flow safely:
 ## Known issues / troubleshooting
 
 These are real problems hit during development — included here so you don't
-have to rediscover them.
+have to rediscover them. For the bigger ones written up as full debugging
+case studies (how each was tracked down, not just the fix), see
+`docs/dev-findings.md`.
 
 **`apt` fails with `getaddrinfo (16: Device or resource busy)`**
 Usually means `/etc/resolv.conf` is a dangling symlink to

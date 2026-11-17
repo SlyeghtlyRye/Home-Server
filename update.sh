@@ -9,12 +9,13 @@ set -e
 REPO_ROOT="/root"
 cd "$REPO_ROOT"
 
-# One "docker compose up -d --force-recreate" with no service name pulls
-# and extracts every container at once -- fine on a beefy machine, but on
-# a memory-constrained device (seen firsthand: 914Mi total RAM) that peak
-# contention has been enough to corrupt a container's image during
-# extraction, surfacing as a "bad marshal data" crash loop after a
-# routine update. Recreating one service at a time, with a pause between
+# One "docker compose up -d --force-recreate" with no service name
+# recreates every container at once -- fine on a beefy machine, but a lot
+# of simultaneous memory/IO on a 914Mi device. (The "bad marshal data"
+# crash loop this was originally blamed on turned out to be the USB root
+# drive returning corrupted bytes on read -- see
+# scripts/storage_watchdog.py -- but staggering is still gentler on this
+# hardware.) Recreating one service at a time, with a pause between
 # each, spreads the same work out instead of hitting it all
 # simultaneously -- same end state, far lower peak memory/IO pressure.
 # Order respects docker-compose.yml's depends_on (nginx depends on
@@ -28,9 +29,12 @@ restart_all_containers_staggered() {
     echo ""
     echo "== Restarting all containers (one at a time, not all at once) =="
     for service in syncthing pihole kanboard mealie nginx; do
-        echo "-- recreating $service --"
-        docker compose up -d --force-recreate "$service"
-        sleep 20
+        echo "-- recreating $service (waiting until healthy, max 5 min) --"
+        # --wait instead of a fixed sleep -- see updater.py's
+        # _schedule_background_restart() for the reasoning.
+        docker compose up -d --force-recreate --wait --wait-timeout 300 "$service" \
+            || echo "   WARNING: $service didn't report healthy in time -- continuing with the rest."
+
     done
 }
 
@@ -108,6 +112,7 @@ sys.path.insert(0, 'scripts')
 import reset_manager
 reset_manager.write_js_config(reset_manager.read_current_host_ip(), dry_run=False, log_lines=[])
 "
+python3 scripts/updater.py refresh-unit
 
 echo ""
 echo "== Restart plan =="
