@@ -242,6 +242,11 @@ server {
     location /api/remove-chore-bucket {
             proxy_pass http://172.17.0.1:9001/api/remove-chore-bucket?key=${TRIGGER_SECRET};
     }
+    # Exact match: as a prefix it would also catch .../update-chore-bucket-per-week
+    # if that block were ever removed, silently sending it to the wrong handler.
+    location = /api/update-chore-bucket {
+            proxy_pass http://172.17.0.1:9001/api/update-chore-bucket?key=${TRIGGER_SECRET};
+    }
     location /api/update-chore-bucket-per-week {
             proxy_pass http://172.17.0.1:9001/api/update-chore-bucket-per-week?key=${TRIGGER_SECRET};
     }

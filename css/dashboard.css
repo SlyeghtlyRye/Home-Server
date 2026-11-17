@@ -242,7 +242,11 @@
       background: var(--color-bg); color: white; border: 1px solid var(--color-border); font-size: 12px;
     }
     .auto-sched-toggle:hover { border-color: var(--color-accent); }
-    .auto-sched-summary { color: var(--color-text-muted); font-size: 11px; }
+    .auto-sched-summary, .saved-summary { color: var(--color-text-muted); font-size: 11px; }
+    .saved-edit-name { flex: 1; min-width: 0; }
+    .saved-edit-name, .saved-edit-type { transition: border-color 0.3s; }
+    .saved-edit-name.saved, .saved-edit-type.saved { border-color: var(--color-success-border) !important; }
+    .saved-edit-name.save-failed, .saved-edit-type.save-failed { border-color: var(--color-danger-border) !important; }
     .auto-sched-list { margin-top: 6px; }
     .auto-sched-hint { font-size: 11px; color: var(--color-text-muted); margin: 4px 0 6px; }
     .auto-sched-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--color-border-soft); font-size: 12px; }

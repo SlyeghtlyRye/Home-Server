@@ -24,6 +24,7 @@ let countriesCache = null; // [{code, name}], loaded once, shared by both calend
 let currentCountryCache = null; // the one global country code, or "" if unset
 let bucketsCache = null; // [{id, name, type, startTime, dueTime, perWeek?}], Kanboard-only
 let autoSettingsOpen = false; // Kanboard gear: Auto Schedule settings list expanded
+let savedListOpen = false; // Kanboard gear: Saved tasks & events editor expanded
 
 function showHolidaysStorageKey(calendarKey) {
   return `${calendarKey}_showHolidays`;
@@ -113,25 +114,46 @@ function popoverBodyHtml(calendarKey) {
 // popover, the same calendarKey-branch icalUrl() above already uses for
 // its own Mealie-vs-Kanboard feed path.
 function bucketsSectionHtml() {
+  const n = bucketsCache.length;
   return `
     <div style="margin-top:10px; padding-top:10px; border-top:1px solid var(--color-border-soft);">
-      <div style="color:var(--color-text-muted); font-size:11px; margin-bottom:4px;">Saved tasks &amp; events</div>
+      <button class="auto-sched-toggle" data-action="toggle-saved-items" aria-expanded="${savedListOpen}">
+        <span>&#x1F4CB;&#xFE0E; Saved tasks &amp; events</span>
+        <span class="saved-summary">${n ? n : ''} ${savedListOpen ? '&#x25B4;' : '&#x25BE;'}</span>
+      </button>
+      ${savedListOpen ? savedItemsEditorHtml() : ''}
+      ${n ? autoScheduleSettingsHtml() : ''}
+    </div>
+  `;
+}
+
+// Expanded "Saved tasks & events": rename, switch Task/Event, delete, add.
+// Each field saves on change (blur/Enter for the name), same no-re-render
+// approach as the Auto Schedule boxes so other rows keep their edits.
+function savedItemsEditorHtml() {
+  const fieldStyle = 'background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;';
+  return `
+    <div class="auto-sched-list">
+      <p class="auto-sched-hint">Edit a name or type and it saves right away. Tasks already on the calendar keep their old name.</p>
       ${bucketsCache.map(b => `
-        <div class="cal-settings-row" style="gap:6px;">
-          <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(b.name)}</span>
-          <span class="kb-type-tag ${b.type === 'event' ? 'event' : ''}">${b.type === 'event' ? '&#x1F389; Event' : 'Task'}</span>
-          <button class="icon-btn-delete" data-action="remove-chore-bucket" data-id="${b.id}" title="Remove from saved">&#x1F5D1;</button>
+        <div class="auto-sched-row">
+          <input type="text" class="saved-edit-name" data-action="saved-edit-name" data-id="${escapeHtml(b.id)}"
+                 value="${escapeHtml(b.name)}" aria-label="Name" maxlength="80" style="${fieldStyle}">
+          <select class="saved-edit-type" data-action="saved-edit-type" data-id="${escapeHtml(b.id)}" aria-label="${escapeHtml(b.name)}: type" style="${fieldStyle}">
+            <option value="task" ${b.type !== 'event' ? 'selected' : ''}>Task</option>
+            <option value="event" ${b.type === 'event' ? 'selected' : ''}>&#x1F389; Event</option>
+          </select>
+          <button class="icon-btn-delete" data-action="remove-chore-bucket" data-id="${escapeHtml(b.id)}" title="Remove from saved" aria-label="Remove ${escapeHtml(b.name)}">&#x1F5D1;</button>
         </div>
-      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">Nothing saved yet. Add one here, or type a new name while scheduling.</p>`}
-      <div class="cal-settings-row" style="gap:4px; margin-top:4px;">
-        <input type="text" id="new-bucket-name" placeholder="e.g. Sweeping, Date Night" style="flex:1; background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
-        <select id="new-bucket-type" style="background:var(--color-surface); color:white; border:1px solid var(--color-border); padding:6px; border-radius:4px; font-size:12px;">
+      `).join('') || `<p style="font-size:12px; color:var(--color-text-muted); margin:0 0 6px;">Nothing saved yet. Add one below, or type a new name while scheduling.</p>`}
+      <div class="cal-settings-row" style="gap:4px; margin-top:6px;">
+        <input type="text" id="new-bucket-name" placeholder="New, e.g. Sweeping" style="flex:1; min-width:0; ${fieldStyle}">
+        <select id="new-bucket-type" style="${fieldStyle}">
           <option value="task">Task</option>
           <option value="event">Event</option>
         </select>
         <button class="btn small" data-action="add-chore-bucket">Add</button>
       </div>
-      ${bucketsCache.length ? autoScheduleSettingsHtml() : ''}
     </div>
   `;
 }
@@ -140,11 +162,10 @@ function bucketsSectionHtml() {
 // happen (0 = not auto-scheduled). Settings only for now -- stored on
 // each saved item as perWeek for a future Auto Schedule button to use.
 function autoScheduleSettingsHtml() {
-  const setCount = bucketsCache.filter(b => (b.perWeek || 0) > 0).length;
   return `
     <button class="auto-sched-toggle" data-action="toggle-auto-schedule-settings" aria-expanded="${autoSettingsOpen}">
       <span>&#x23F1;&#xFE0E; Auto Schedule settings</span>
-      <span class="auto-sched-summary">${setCount ? `${setCount} set` : ''} ${autoSettingsOpen ? '&#x25B4;' : '&#x25BE;'}</span>
+      <span class="auto-sched-summary">${autoSettingsOpen ? '&#x25B4;' : '&#x25BE;'}</span>
     </button>
     ${autoSettingsOpen ? `
       <div class="auto-sched-list">
@@ -164,9 +185,50 @@ function autoScheduleSettingsHtml() {
   `;
 }
 
+// Saves one edited name or type from the Saved tasks & events editor.
+// The server keeps names unique (case-insensitive) and non-empty; on a
+// rejection the field goes back to its last saved value with the reason
+// as a tooltip. Also patches the matching Auto Schedule row in place.
+async function saveSavedField(el, field) {
+  const id = el.dataset.id;
+  const bucket = (bucketsCache || []).find(b => b.id === id);
+  if (!bucket) return;
+  const previous = field === 'name' ? bucket.name : (bucket.type === 'event' ? 'event' : 'task');
+  const value = field === 'name' ? el.value.trim() : el.value;
+  el.classList.remove('save-failed', 'saved');
+  el.title = '';
+  if (value === previous) { el.value = previous; return; }
+  try {
+    const res = await fetch('/api/update-chore-bucket', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, [field]: value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    bucket.name = data.bucket?.name ?? bucket.name;
+    bucket.type = data.bucket?.type ?? bucket.type;
+    el.value = field === 'name' ? bucket.name : bucket.type;
+    el.classList.add('saved');
+    setTimeout(() => el.classList.remove('saved'), 1200);
+    const autoRow = el.closest('.cal-settings-popover')
+      ?.querySelector(`.auto-sched-input[data-id="${CSS.escape(id)}"]`)?.closest('.auto-sched-row');
+    if (autoRow) {
+      autoRow.querySelector('.auto-sched-name').textContent = bucket.name;
+      const tag = autoRow.querySelector('.kb-type-tag');
+      tag.className = `kb-type-tag ${bucket.type === 'event' ? 'event' : ''}`;
+      tag.innerHTML = bucket.type === 'event' ? '&#x1F389; Event' : 'Task';
+    }
+  } catch (err) {
+    el.value = previous;
+    el.classList.add('save-failed');
+    el.title = `Couldn't save: ${err.message}`;
+  }
+}
+
 // Saves one Auto Schedule "times per week" box. Deliberately no full
 // re-render: other boxes may be mid-edit, and the input already shows the
-// value. Only the summary count ("2 set") is patched in place.
+// value.
 async function savePerWeek(input) {
   const id = input.dataset.id;
   const bucket = (bucketsCache || []).find(b => b.id === id);
@@ -189,11 +251,6 @@ async function savePerWeek(input) {
     input.value = previous;
     input.classList.add('save-failed');
     input.title = "Couldn't save -- check the connection and try again";
-  }
-  const summary = input.closest('.cal-settings-popover')?.querySelector('.auto-sched-summary');
-  if (summary) {
-    const setCount = (bucketsCache || []).filter(b => (b.perWeek || 0) > 0).length;
-    summary.innerHTML = `${setCount ? `${setCount} set` : ''} &#x25B4;`;
   }
 }
 
@@ -219,6 +276,12 @@ export function handleClick(e, calendarKey, rerender, onBucketsChanged = () => {
         // the text is still selected as a manual-copy fallback.
       });
     }
+    return true;
+  }
+  const savedToggle = e.target.closest('[data-action="toggle-saved-items"]');
+  if (savedToggle && calendarKey === 'kanboard') {
+    savedListOpen = !savedListOpen;
+    rerender();
     return true;
   }
   const autoToggle = e.target.closest('[data-action="toggle-auto-schedule-settings"]');
@@ -263,6 +326,16 @@ export function handleClick(e, calendarKey, rerender, onBucketsChanged = () => {
 }
 
 export function handleChange(e, calendarKey, rerender) {
+  const nameInput = e.target.closest('[data-action="saved-edit-name"]');
+  if (nameInput && calendarKey === 'kanboard') {
+    saveSavedField(nameInput, 'name');
+    return true;
+  }
+  const typeSelect = e.target.closest('[data-action="saved-edit-type"]');
+  if (typeSelect && calendarKey === 'kanboard') {
+    saveSavedField(typeSelect, 'type');
+    return true;
+  }
   const perWeekInput = e.target.closest('[data-action="auto-schedule-per-week"]');
   if (perWeekInput && calendarKey === 'kanboard') {
     savePerWeek(perWeekInput);

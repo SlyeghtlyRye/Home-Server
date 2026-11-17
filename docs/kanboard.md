@@ -157,7 +157,11 @@ Schedule/Quick Add toggle (`docs/mealie.md`).
   from it yet -- it's the input for a future Auto Schedule button in
   Schedule. Schedule's manual day-picking is still the only way to place
   items.
-- Saved items can also be added/removed from the gear-icon Calendar Settings popover
+- Saved items are managed in the gear popover's collapsible "Saved tasks
+  & events" section (`savedItemsEditorHtml()`): rename and switch
+  Task/Event in place (saved on change via `/api/update-chore-bucket`;
+  names stay unique case-insensitively, and tasks already created keep
+  their old title), delete, and add -- from the gear-icon Calendar Settings popover
   (`js/calendar-settings.js`), a Kanboard-only section gated the same
   `calendarKey === 'kanboard'` way `icalUrl()` already branches for its
   own feed path -- add/remove, same list-with-a-delete-button pattern

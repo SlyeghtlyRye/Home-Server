@@ -60,6 +60,29 @@ def add_bucket(name, task_type="task", start_time=None, due_time=None):
     return bucket
 
 
+def update_bucket(bucket_id, name=None, task_type=None):
+    """Rename a saved item and/or change its Task/Event type (from the
+    gear popover). Tasks already created from it keep their old title --
+    a saved item is only a preset. Names stay unique, case-insensitively,
+    since Quick Add/Schedule match typed names against them. Returns the
+    updated bucket, or None if no bucket has that id."""
+    buckets = _load()
+    bucket = next((b for b in buckets if b["id"] == bucket_id), None)
+    if bucket is None:
+        return None
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ValueError("name can't be empty")
+        if any(b["id"] != bucket_id and b["name"].strip().lower() == name.lower() for b in buckets):
+            raise ValueError(f'"{name}" is already saved')
+        bucket["name"] = name
+    if task_type is not None:
+        bucket["type"] = "event" if task_type == "event" else "task"
+    _save(buckets)
+    return bucket
+
+
 MAX_PER_WEEK = 7
 
 
