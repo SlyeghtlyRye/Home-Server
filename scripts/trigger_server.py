@@ -1392,13 +1392,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send_json(400, {"error": "missing name"})
                 return
             try:
-                resp = mwp.requests.post(f"{mwp.MEALIE_URL}/api/recipes", headers=mwp.get_headers(), json={"name": name})
-                resp.raise_for_status()
-                slug = resp.json()
-                detail = mwp.requests.get(f"{mwp.MEALIE_URL}/api/recipes/{slug}", headers=mwp.get_headers())
-                detail.raise_for_status()
-                data = detail.json()
-                self._send_json(200, {"id": data["id"], "name": data["name"]})
+                recipe_id, recipe_name = mwp.create_recipe(name)
+                self._send_json(200, {"id": recipe_id, "name": recipe_name})
+            except mwp.DuplicateRecipeError as e:
+                # 409 + the existing recipe, so the dashboard can use that
+                # one instead of making a copy.
+                self._send_json(409, {
+                    "error": str(e),
+                    "existing": {"id": e.existing["id"], "name": e.existing["name"]},
+                })
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

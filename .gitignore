@@ -15,6 +15,7 @@ docs/architecture-map.svg
 # Personal data - Mealie
 scripts/mealie_token.txt
 scripts/meal_history.json
+scripts/recipe_backups/
 
 # Personal data - Kanboard
 scripts/kanboard_token.txt

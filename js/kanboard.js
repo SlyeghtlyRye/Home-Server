@@ -19,7 +19,7 @@
 // panels (#mode-panel / #kb-mode-panel) share their CSS by selector
 // (css/dashboard.css), not by sharing one element, for the same reason.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
-         showConfirmModal, escapeHtml, isoOf } from './core.js';
+         showConfirmModal, escapeHtml, isoOf, modePanelMaxHeight } from './core.js';
 import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml, getChoreBuckets,
          handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- see the
@@ -357,7 +357,7 @@ function startModePanelResize(e) {
   const minWidth = 320;
   const maxWidth = window.innerWidth - 32;
   const minHeight = 160;
-  const maxHeight = window.innerHeight * (window.innerWidth <= 600 ? 0.9 : 0.7);
+  const maxHeight = modePanelMaxHeight(); // core.js -- keeps the handle below the header
 
   function onMove(ev) {
     const p = ev.touches ? ev.touches[0] : ev;

@@ -4,7 +4,7 @@
 // (calendar days, preview rows, dropdowns) re-render frequently.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf,
-         showProcessingBanner, hideProcessingBanner } from './core.js';
+         showProcessingBanner, hideProcessingBanner, modePanelMaxHeight } from './core.js';
 import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
          handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- that file
@@ -448,12 +448,10 @@ function startModePanelResize(e) {
   const minWidth = 320;
   const maxWidth = window.innerWidth - 32; // matches #mode-panel's CSS width cap: calc(100% - 32px)
   const minHeight = 160; // matches .mode-panel-inner's CSS min-height -- lower would be a no-op dead zone
-  // Matches .mode-panel-inner's CSS max-height, which raises its own cap
-  // the same way at the same breakpoint (a phone's calendar already
-  // fills most of a small screen, so 70vh of it is cramped for View
-  // mode's day detail -- 90vh on mobile leaves just enough room to see
-  // there's a calendar above it at all).
-  const maxHeight = window.innerHeight * (window.innerWidth <= 600 ? 0.9 : 0.7);
+  // Matches .mode-panel-inner's CSS max-height: never taller than the
+  // space below the sticky header, so the resize handle can't slide
+  // under it (see modePanelMaxHeight() in core.js).
+  const maxHeight = modePanelMaxHeight();
 
   function onMove(ev) {
     const p = ev.touches ? ev.touches[0] : ev;
@@ -664,7 +662,7 @@ function onEditComboFocus(inputEl) {
 function onEditComboType(inputEl) {
   const typedValue = inputEl.value;
   const hint = document.getElementById('edit-hint');
-  const match = allRecipes.find(r => r.name.toLowerCase() === typedValue.trim().toLowerCase());
+  const match = findRecipeByName(typedValue);
   if (match) {
     editPick.recipeId = match.id;
     editPick.recipeName = match.name;
@@ -1046,6 +1044,19 @@ function getFilteredRecipes(term) {
   return allRecipes.filter(r => r.name.toLowerCase().includes(t));
 }
 
+// Same rule as the backend's normalize_recipe_name(): case, extra spaces
+// and Mealie's " (N)" copy suffix don't make a different recipe. Typing a
+// name that's already in the library picks that recipe instead of
+// queueing a duplicate to be created.
+function normalizeRecipeName(name) {
+  return (name || '').replace(/\s*\(\d+\)\s*$/, '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function findRecipeByName(name) {
+  const key = normalizeRecipeName(name);
+  return key ? allRecipes.find(r => normalizeRecipeName(r.name) === key) : undefined;
+}
+
 function renderComboDropdownHtml(term) {
   const filtered = getFilteredRecipes(term);
   const t = (term || '').trim();
@@ -1107,7 +1118,7 @@ function onComboType(dateStr, inputEl) {
   const entry = previewPicks.find(p => p.date === dateStr);
   const hint = document.getElementById('hint-' + dateStr);
   if (entry) {
-    const match = allRecipes.find(r => r.name.toLowerCase() === typedValue.trim().toLowerCase());
+    const match = findRecipeByName(typedValue);
     if (match) {
       entry.recipeId = match.id;
       entry.recipeName = match.name;
@@ -1462,6 +1473,14 @@ async function resolveNewRecipes(picks) {
         body: JSON.stringify({ name: p.recipeName.trim() })
       });
       const data = await res.json();
+      if (res.status === 409 && data.existing) {
+        // Already in Mealie (the server refuses duplicates) -- use that one.
+        p.recipeId = data.existing.id;
+        p.recipeName = data.existing.name;
+        p.isNew = false;
+        if (!allRecipes.some(r => r.id === data.existing.id)) allRecipes.push(data.existing);
+        continue;
+      }
       if (!res.ok) throw new Error(`Failed to create "${p.recipeName}": ` + (data.error || res.status));
       p.recipeId = data.id;
       p.recipeName = data.name;

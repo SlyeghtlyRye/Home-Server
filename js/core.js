@@ -203,7 +203,60 @@ function updateActiveNav(appKey) {
   });
 }
 
+// ---------- Header height + mobile auto-hide ----------
+//
+// The floating mode panels (#mode-panel / #kb-mode-panel) are fixed to
+// the bottom of the screen and drag-resized from their top-right corner.
+// They used to cap at a flat 90vh on phones, which (with the sticky
+// header wrapping to two rows, and mobile browser chrome eating into vh)
+// let the panel's top -- and its resize handle -- end up underneath the
+// header, so it couldn't be dragged back down. The cap is now "whatever's
+// visible below the header": the header's live height is published as
+// --app-header-h for the CSS max-height, and modePanelMaxHeight() gives
+// the matching number for the JS drag clamp.
+
+const PANEL_BOTTOM_OFFSET = 16; // #mode-panel's CSS bottom
+const PANEL_TOP_GAP = 12;       // breathing room under the header
+
+function headerHeight() {
+  const header = document.getElementById('app-header');
+  return header ? header.offsetHeight : 0;
+}
+
+export function modePanelMaxHeight() {
+  const viewport = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const belowHeader = viewport - headerHeight() - PANEL_BOTTOM_OFFSET - PANEL_TOP_GAP;
+  // Desktop keeps its 70vh cap so a good chunk of the calendar stays visible.
+  const cap = window.innerWidth <= 600 ? belowHeader : Math.min(belowHeader, viewport * 0.7);
+  return Math.max(160, Math.round(cap));
+}
+
+function publishHeaderHeight() {
+  document.documentElement.style.setProperty('--app-header-h', headerHeight() + 'px');
+}
+
+// Phones only (matches the 600px breakpoint in dashboard.css): scrolling
+// down slides the header away, scrolling up brings it back. Always shown
+// near the top of the page.
+function initHeaderAutoHide() {
+  const header = document.getElementById('app-header');
+  if (!header) return;
+  let lastY = window.scrollY;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    const delta = y - lastY;
+    if (Math.abs(delta) < 6) return; // ignore jitter / momentum noise
+    const hide = window.innerWidth <= 600 && delta > 0 && y > header.offsetHeight;
+    header.classList.toggle('header-hidden', hide);
+    lastY = y;
+  }, { passive: true });
+}
+
 function initShellListeners() {
+  publishHeaderHeight();
+  new ResizeObserver(publishHeaderHeight).observe(document.getElementById('app-header'));
+  initHeaderAutoHide();
+
   document.querySelectorAll('#grid-view .card').forEach(card => {
     const appKey = card.dataset.app;
     card.addEventListener('click', () => showDetail(appKey));

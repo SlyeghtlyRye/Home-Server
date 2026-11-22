@@ -40,7 +40,37 @@ def list_name_for(start):
     return f"Week of {start.isoformat()}"
 
 
+# Mealie never refuses a recipe whose name is already taken -- it just
+# saves it under a new slug and shows it as "Name (1)", "Name (2)", ...
+# That's how the library ended up with eight copies of Instant Pot Chili.
+# So duplicates are caught here instead: names are compared with that
+# " (N)" suffix stripped, case and whitespace ignored.
+_COPY_SUFFIX = re.compile(r"\s*\(\d+\)\s*$")
+
+
+def normalize_recipe_name(name):
+    return " ".join(_COPY_SUFFIX.sub("", name or "").split()).casefold()
+
+
+class DuplicateRecipeError(ValueError):
+    def __init__(self, existing):
+        self.existing = existing
+        super().__init__(f'"{existing["name"]}" is already in your recipes.')
+
+
+def find_recipe_by_name(name, summaries=None):
+    key = normalize_recipe_name(name)
+    if summaries is None:
+        summaries = get_recipe_summaries()
+    return next((r for r in summaries if normalize_recipe_name(r["name"]) == key), None)
+
+
 def create_recipe(name):
+    """Raises DuplicateRecipeError instead of creating a second copy of a
+    recipe that's already in the library."""
+    existing = find_recipe_by_name(name)
+    if existing:
+        raise DuplicateRecipeError(existing)
     resp = requests.post(f"{MEALIE_URL}/api/recipes", headers=get_headers(), json={"name": name})
     resp.raise_for_status()
     slug = resp.json()
@@ -95,7 +125,7 @@ def create_recipe_from_structured(name, ingredient_lines, instruction_steps, org
 
 
 def get_recipe_summaries():
-    resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=get_headers(), params={"perPage": 100})
+    resp = requests.get(f"{MEALIE_URL}/api/recipes", headers=get_headers(), params={"perPage": -1})
     resp.raise_for_status()
     return resp.json()["items"]
 

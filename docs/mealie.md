@@ -32,7 +32,12 @@ The Mealie tab renders, top to bottom:
    (blue/green/amber) names the active mode, and a grip handle in its
    top-right corner lets you drag it taller (persisted across sessions via
    `localStorage`); a close button, or each mode's own Cancel action,
-   dismisses it.
+   dismisses it. The panel can never grow taller than the space below
+   the sticky header (`modePanelMaxHeight()` in `core.js`, mirrored by
+   `--app-header-h` in the CSS max-height) -- a flat 90vh cap on phones
+   used to push the resize handle under the header where it couldn't be
+   grabbed. On phones the header also slides away while scrolling down
+   and comes back on scroll up.
    - *Plan* is the original flow -- click a day to select a 7-day block,
      which opens the panel showing selection controls (avoid-repeats,
      default-excluded weekday chips, a stacked Plan/Cancel/Clear button
@@ -236,6 +241,31 @@ that first click too.
   in-progress state (`weekSelection`/`previewPicks` and
   `editSelectedIso`/`editPick`) so nothing stale from one leaks into
   the other on switch-back.
+
+## No duplicate recipes
+
+Mealie itself never refuses a recipe whose name is taken -- it saves it
+under a new slug as "Name (1)", "Name (2)", ... (the library once had
+eight copies of Instant Pot Chili). The dashboard refuses instead:
+`normalize_recipe_name()` in `scripts/mealie_weekly_plan.py` compares
+names with that " (N)" suffix stripped and case/whitespace ignored.
+
+- `create_recipe()` raises `DuplicateRecipeError` for a name already in
+  the library; `/api/create-recipe` turns that into a 409 carrying the
+  existing recipe, and the Plan/Edit save flow (`resolveNewRecipes()`)
+  just uses that one.
+- Typing a name in a recipe field matches existing recipes with the same
+  rule (`findRecipeByName()` in `js/mealie.js`), so it picks the existing
+  recipe rather than showing "will be created as new".
+- Suggest never previews a TheMealDB meal whose name is already in the
+  library, and `confirm_meal()` reuses the existing recipe if one shows
+  up between preview and confirm.
+
+`scripts/recipe_cleanup.py` removes duplicates already in the library
+(dry run by default, `--apply` to delete, `--remove NAME` for entries
+that aren't meals). It keeps the copy on the meal plan, moves plan
+entries off copies it deletes, and backs every deleted recipe's JSON up
+to `scripts/recipe_backups/` first.
 
 ## No-repeat logic
 

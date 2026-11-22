@@ -47,12 +47,23 @@ def _save_suggested_ids(ids):
         json.dump(sorted(ids), f, indent=2)
 
 
-def _pick_random(suggested_ids, apply_dinner_filter):
+def _library_names():
+    """Normalized names of every recipe already in Mealie, so Suggest
+    never offers a meal the library already has (it would just be a
+    duplicate -- see mwp.normalize_recipe_name())."""
+    return {mwp.normalize_recipe_name(r["name"]) for r in mwp.get_recipe_summaries()}
+
+
+def _in_library(name, library_names):
+    return mwp.normalize_recipe_name(name) in library_names
+
+
+def _pick_random(suggested_ids, apply_dinner_filter, library_names):
     meal = None
     candidate = None
     for _ in range(MAX_ATTEMPTS_PER_SUGGEST):
         candidate = mealdb_client.fetch_random_meal()
-        already_seen = candidate["idMeal"] in suggested_ids
+        already_seen = candidate["idMeal"] in suggested_ids or _in_library(candidate["strMeal"], library_names)
         wrong_meal_type = apply_dinner_filter and candidate.get("strCategory") in NON_DINNER_CATEGORIES
         if not already_seen and not wrong_meal_type:
             meal = candidate
@@ -60,7 +71,7 @@ def _pick_random(suggested_ids, apply_dinner_filter):
     return meal or candidate
 
 
-def _pick_filtered(area, category, suggested_ids, apply_dinner_filter):
+def _pick_filtered(area, category, suggested_ids, apply_dinner_filter, library_names):
     """filter.php only accepts one parameter per call, so area+category
     together are resolved as the exact INTERSECTION of both filters' own
     id lists (two cheap summary calls) rather than filtering by one and
@@ -82,6 +93,9 @@ def _pick_filtered(area, category, suggested_ids, apply_dinner_filter):
         if not summaries:
             raise RuntimeError("TheMealDB has no meals matching that filter.")
 
+    summaries = [s for s in summaries if not _in_library(s["strMeal"], library_names)]
+    if not summaries:
+        raise RuntimeError("Every meal matching that filter is already in your recipes -- try a different filter.")
     unseen = [s for s in summaries if s["idMeal"] not in suggested_ids]
     pool = unseen if unseen else summaries
     random.shuffle(pool)
@@ -119,10 +133,11 @@ def pick_meal(dinners_only=False, area=None, category=None, exclude_id=None):
     if exclude_id:
         suggested_ids = suggested_ids | {exclude_id}
     apply_dinner_filter = dinners_only and not category
+    library_names = _library_names()
 
     if area or category:
-        return _pick_filtered(area, category, suggested_ids, apply_dinner_filter)
-    return _pick_random(suggested_ids, apply_dinner_filter)
+        return _pick_filtered(area, category, suggested_ids, apply_dinner_filter, library_names)
+    return _pick_random(suggested_ids, apply_dinner_filter, library_names)
 
 
 def confirm_meal(meal_id):
@@ -132,6 +147,12 @@ def confirm_meal(meal_id):
     "server, not client-held state, is the source of truth" reasoning
     used everywhere else in this codebase. Returns (recipe_id, name)."""
     meal = mealdb_client.lookup_meal(meal_id)
+
+    # Already in the library (e.g. picked by hand since the preview was
+    # shown): use that recipe rather than creating a duplicate.
+    existing = mwp.find_recipe_by_name(meal["strMeal"])
+    if existing:
+        return existing["id"], existing["name"]
 
     ingredient_lines = [
         f"{measure} {ingredient}".strip()
