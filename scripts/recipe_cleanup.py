@@ -4,6 +4,7 @@ recipe_cleanup.py -- one-off tidy-up of the Mealie recipe library.
   python3 scripts/recipe_cleanup.py                      # dry run: show the plan
   python3 scripts/recipe_cleanup.py --apply              # actually delete
   python3 scripts/recipe_cleanup.py --remove "Name" ...  # also drop these
+  POST /api/recipe-cleanup {"apply": bool, "remove": [names]}  # same, over HTTP
 
 Two things get removed:
 
@@ -86,15 +87,16 @@ def build_plan(recipes, entries, remove_names):
     return deletes, repoints, skipped, missing
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--apply", action="store_true", help="actually delete (default is a dry run)")
-    ap.add_argument("--remove", nargs="*", default=[], metavar="NAME", help="also delete every copy of these recipes")
-    args = ap.parse_args()
+def run(apply=False, remove_names=()):
+    """Does the cleanup and returns its log as a list of lines. Also
+    exposed as POST /api/recipe-cleanup (trigger_server.py), so it can be
+    run from the dashboard host without SSH."""
+    lines = []
+    print = lines.append  # noqa: A001 -- collect output instead of printing
 
     recipes = mwp.get_recipe_summaries()
     entries = all_mealplan_entries()
-    deletes, repoints, skipped, missing = build_plan(recipes, entries, args.remove)
+    deletes, repoints, skipped, missing = build_plan(recipes, entries, remove_names)
 
     print(f"{len(recipes)} recipes, {len(entries)} meal plan entries.")
     for r, why in sorted(deletes, key=lambda x: x[0]["name"].lower()):
@@ -107,11 +109,11 @@ def main():
         print(f"  ??      --remove \"{key}\" matched no recipe")
     print(f"{len(deletes)} to delete, {len(recipes) - len(deletes)} left.")
 
-    if not args.apply:
+    if not apply:
         print("Dry run -- nothing changed. Re-run with --apply to do it.")
-        return
+        return lines
     if not deletes:
-        return
+        return lines
 
     for e, keeper in repoints:
         mwp.delete_mealplan_entry(e["id"])
@@ -135,6 +137,16 @@ def main():
             failed += 1
             print(f"  FAILED deleting {r['name']}: {resp.status_code} {resp.text[:200]}")
     print(f"Deleted {len(deletes) - failed} recipes" + (f", {failed} failed." if failed else "."))
+    return lines
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true", help="actually delete (default is a dry run)")
+    ap.add_argument("--remove", nargs="*", default=[], metavar="NAME", help="also delete every copy of these recipes")
+    args = ap.parse_args()
+    for line in run(apply=args.apply, remove_names=args.remove):
+        print(line)
 
 
 if __name__ == "__main__":

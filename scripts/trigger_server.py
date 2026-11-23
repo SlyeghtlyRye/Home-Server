@@ -17,6 +17,7 @@ import kanboard_client as kbc
 import holidays_client as hc
 import ical_builder
 import recipe_suggest
+import recipe_cleanup
 import mealdb_client
 import chore_buckets
 
@@ -818,6 +819,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "thumb": meal.get("strMealThumb") or "",
                     "sourceUrl": meal.get("strSource") or meal.get("strYoutube") or "",
                 })
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
+        if parsed.path == "/api/recipe-cleanup":
+            # Dry run unless {"apply": true} -- see scripts/recipe_cleanup.py.
+            body = self._read_json_body()
+            try:
+                log = recipe_cleanup.run(
+                    apply=bool(body.get("apply")),
+                    remove_names=[n for n in (body.get("remove") or []) if isinstance(n, str) and n.strip()],
+                )
+                self._send_json(200, {"log": log})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return

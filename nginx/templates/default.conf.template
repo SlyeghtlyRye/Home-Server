@@ -250,6 +250,10 @@ server {
     location /api/update-chore-bucket-per-week {
             proxy_pass http://172.17.0.1:9001/api/update-chore-bucket-per-week?key=${TRIGGER_SECRET};
     }
+    location = /api/recipe-cleanup {
+            proxy_pass http://172.17.0.1:9001/api/recipe-cleanup?key=${TRIGGER_SECRET};
+            proxy_read_timeout 300s;
+    }
     location /api/suggest-recipe-preview {
             proxy_pass http://172.17.0.1:9001/api/suggest-recipe-preview?key=${TRIGGER_SECRET};
     }
