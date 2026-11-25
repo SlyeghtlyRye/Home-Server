@@ -190,6 +190,20 @@ export function escapeHtml(s) {
   return div.innerHTML;
 }
 
+// Round icon action buttons for the Mealie and Kanboard mode panels, side
+// by side in a .round-actions row: green check = save/create, green play =
+// next step, red X = cancel/back/close, red trash = delete. Icon-only, so
+// the label goes in title (hover tooltip) and aria-label. extraAttrs is
+// raw markup (e.g. 'disabled', 'data-date="..."').
+// &#xFE0E; asks for the plain text glyph, not a colour emoji.
+export const ICON_CONFIRM = '&#x2713;';
+export const ICON_NEXT = '&#x25B6;&#xFE0E;';
+export const ICON_CANCEL = '&#x2715;';
+export const ICON_DELETE = '&#x1F5D1;&#xFE0E;';
+export function roundBtn(kind, action, icon, label, extraAttrs = '') {
+  return `<button type="button" class="round-btn ${kind}" data-action="${action}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" ${extraAttrs}>${icon}</button>`;
+}
+
 export function isoOf(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');

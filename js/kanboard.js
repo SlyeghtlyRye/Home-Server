@@ -6,10 +6,9 @@
 // same -- but simpler where Kanboard's shape allows it:
 //   - A day can have zero, several, or many tasks (plannedMap[iso] is a
 //     LIST), unlike Mealie's one-meal-per-day assumption.
-//   - All three modes center on "the one day you clicked" -- there's no
-//     Mealie-style multi-day week selection in Plan mode here, so a
-//     single shared `selectedIso` works for all three modes with no
-//     carry-over logic needed when switching modes.
+//   - Quick Add, View, and Edit center on "the one day you clicked" (a
+//     single shared `selectedIso`); only Plan's Schedule sub-mode selects
+//     days in Mealie's 7-day blocks (see scheduleDays).
 //   - Recurrence is pre-materialized as independent real Kanboard tasks
 //     at Plan time (no native Kanboard recurrence, no series linkage) --
 //     see docs/kanboard.md for why.
@@ -19,7 +18,8 @@
 // panels (#mode-panel / #kb-mode-panel) share their CSS by selector
 // (css/dashboard.css), not by sharing one element, for the same reason.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
-         showConfirmModal, escapeHtml, isoOf, modePanelMaxHeight } from './core.js';
+         showConfirmModal, escapeHtml, isoOf, modePanelMaxHeight,
+         roundBtn, ICON_CONFIRM, ICON_NEXT, ICON_CANCEL } from './core.js';
 import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml, getChoreBuckets,
          handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- see the
@@ -43,15 +43,15 @@ let selectedIso = null;
 // A toggle inside Plan mode, not a separate mode tab -- Quick Add (the
 // existing single-day form above) is unchanged; Schedule is a second
 // way to use Plan mode, for dropping reusable buckets (Sweeping, Date
-// Night) onto one or more days at once. Direct multi-select, not
-// Mealie's "click adds a whole week block" mechanic -- chores/events
-// are just as often "add one specific day" as "fill the week", and
-// having to exclude six days to add one date night would be backwards.
+// Night) onto several days at once. Same selection as Mealie's Schedule:
+// a click starts a 7-day block, a click outside it adds another block,
+// and a click inside it includes/excludes that day. Adding just one day
+// is what Quick Add is for.
 const PLAN_SUBMODES = ['quick', 'schedule'];
 let planSubMode = PLAN_SUBMODES.includes(localStorage.getItem('kanboard_planSubMode'))
   ? localStorage.getItem('kanboard_planSubMode')
   : 'quick';
-let scheduleSelectedDates = new Set(); // ISO strings, only meaningful mid-selection
+let scheduleDays = null; // null, or {iso: included?} -- the 7-day block(s) clicked so far
 let schedulePicks = null; // null until "Schedule N Days" clicked, then {iso: emptyPick()-shaped row state}
 
 // Mirrors mealie.js's modePanelHeight/Width/ShowModeSwitcher exactly (own
@@ -59,9 +59,30 @@ let schedulePicks = null; // null until "Schedule N Days" clicked, then {iso: em
 let modePanelHeight = parseInt(localStorage.getItem('kanboard_modePanelHeight'), 10) || null;
 let modePanelWidth = parseInt(localStorage.getItem('kanboard_modePanelWidth'), 10) || null;
 let modePanelShowModeSwitcher = false;
+// Set by the panel's X: hides the whole panel (even Plan's always-on
+// one) until the next day click or mode switch. Same as mealie.js.
+let modePanelDismissed = false;
+
+function includedScheduleDates() {
+  return scheduleDays ? Object.keys(scheduleDays).filter(d => scheduleDays[d]).sort() : [];
+}
+
+// Adds the 7 days starting at iso to the selection (days already in it
+// keep their included/excluded state).
+function addScheduleBlock(iso) {
+  if (!scheduleDays) scheduleDays = {};
+  const start = new Date(iso + 'T00:00:00');
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    const key = isoOf(d);
+    if (!(key in scheduleDays)) scheduleDays[key] = true;
+  }
+}
 
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
+  modePanelDismissed = false;
   calendarMode = mode;
   localStorage.setItem('kanboard_calendarMode', mode);
   modePanelShowModeSwitcher = false;
@@ -72,10 +93,18 @@ function setCalendarMode(mode) {
 
 function onDayClick(iso) {
   modePanelShowModeSwitcher = false;
+  modePanelDismissed = false;
   if (calendarMode === 'plan' && planSubMode === 'schedule') {
-    if (schedulePicks) return; // already past day-selection -- Clear/Back first
-    if (scheduleSelectedDates.has(iso)) scheduleSelectedDates.delete(iso);
-    else scheduleSelectedDates.add(iso);
+    snapshotScheduleFromDom(); // keep what's typed in step 2's rows
+    if (scheduleDays && iso in scheduleDays) scheduleDays[iso] = !scheduleDays[iso];
+    else addScheduleBlock(iso);
+    // Mid step 2, keep the rows in sync with the calendar instead of
+    // blocking the click: drop rows for excluded days, add blank ones.
+    if (schedulePicks) {
+      const picks = {};
+      for (const d of includedScheduleDates()) picks[d] = schedulePicks[d] || emptyPick();
+      schedulePicks = Object.keys(picks).length ? picks : null;
+    }
     renderCalendar();
     renderModePanel();
     return;
@@ -89,7 +118,7 @@ function setPlanSubMode(mode) {
   if (planSubMode === mode) return;
   planSubMode = mode;
   localStorage.setItem('kanboard_planSubMode', mode);
-  scheduleSelectedDates = new Set();
+  scheduleDays = null;
   schedulePicks = null;
   selectedIso = null;
   renderCalendar();
@@ -101,9 +130,12 @@ function setPlanSubMode(mode) {
 // Add and Schedule now keep their panel open (idle) when there's nothing
 // selected, same as Mealie's equivalent, so closing one no longer needs
 // to borrow the other's "nothing to show" state just to disappear.
-function closePanel() {
+// The X also hides the panel itself (modePanelDismissed); the in-panel
+// Cancel/Close buttons only reset (closePanel(false)).
+function closePanel(dismiss = true) {
+  if (dismiss) modePanelDismissed = true;
   selectedIso = null;
-  scheduleSelectedDates = new Set();
+  scheduleDays = null;
   schedulePicks = null;
   modePanelShowModeSwitcher = false;
   renderCalendar();
@@ -246,7 +278,9 @@ function renderCalendar() {
     if (iso === todayIso) cls += ' today';
     if (tasks.length > 0) cls += ' planned';
     if (iso === selectedIso) cls += ' kb-selected';
-    if (calendarMode === 'plan' && planSubMode === 'schedule' && scheduleSelectedDates.has(iso)) cls += ' kb-selected';
+    if (calendarMode === 'plan' && planSubMode === 'schedule' && scheduleDays && iso in scheduleDays) {
+      cls += scheduleDays[iso] ? ' included' : ' excluded';
+    }
     html += `
       <div class="${cls}" data-iso="${iso}">
         <div class="cal-daynum">${d.getDate()}</div>
@@ -279,7 +313,7 @@ function renderModePanel() {
   const scheduling = calendarMode === 'plan' && planSubMode === 'schedule';
   if (scheduling) snapshotScheduleFromDom(); // keep what's typed across the redraw
   const visible = calendarMode === 'plan' || !!selectedIso;
-  if (!visible) {
+  if (!visible || modePanelDismissed) {
     el.classList.remove('show');
     el.innerHTML = '';
     modePanelShowModeSwitcher = false;
@@ -303,8 +337,8 @@ function renderModePanel() {
 
   const planSubmodeToggleHtml = calendarMode === 'plan' ? `
     <div class="mode-toggle mode-panel-submode-toggle">
-      <button data-action="kb-plan-submode" data-submode="quick" class="${planSubMode === 'quick' ? 'active' : ''}">Quick Add</button>
       <button data-action="kb-plan-submode" data-submode="schedule" class="${planSubMode === 'schedule' ? 'active' : ''}">Schedule</button>
+      <button data-action="kb-plan-submode" data-submode="quick" class="${planSubMode === 'quick' ? 'active' : ''}">Quick Add</button>
     </div>` : '';
 
   el.innerHTML = `
@@ -422,10 +456,10 @@ function scheduleFormHtml() {
   }
 
   if (!schedulePicks) {
-    const dates = [...scheduleSelectedDates].sort();
+    const dates = includedScheduleDates();
     return `
       <h3 style="margin-top:0;">Schedule</h3>
-      <p style="color:var(--color-text-muted); font-size:13px;">Click days on the calendar to select them, then add a task or event to each.</p>
+      <p style="color:var(--color-text-muted); font-size:13px;">Click a day to start a 7-day block. Click a day outside it to add another block, or a selected day to include/exclude it. To add just one day, use Quick Add.</p>
       ${dates.length > 0 ? `
         <ul style="margin:0 0 12px; padding-left:18px; font-size:13px; color:var(--color-text-dim);">
           ${dates.map(d => `<li>${dayLabel(d)}</li>`).join('')}
@@ -509,7 +543,7 @@ function snapshotScheduleFromDom() {
 
 function buildSchedule() {
   const picks = {};
-  for (const d of scheduleSelectedDates) picks[d] = emptyPick();
+  for (const d of includedScheduleDates()) picks[d] = emptyPick();
   schedulePicks = picks;
   renderModePanel();
 }
@@ -622,7 +656,7 @@ function backToScheduleSelection() {
 }
 
 function clearScheduleSelection() {
-  scheduleSelectedDates = new Set();
+  scheduleDays = null;
   schedulePicks = null;
   renderCalendar();
   renderModePanel();
@@ -663,7 +697,7 @@ async function confirmSchedule() {
     }
     if (savedNow.size) await loadCalendarSettingsData();
     hideStatusModal();
-    scheduleSelectedDates = new Set();
+    scheduleDays = null;
     schedulePicks = null;
     await loadMonthTasks();
     await loadPeople();
@@ -713,22 +747,12 @@ function planFormHtml(iso) {
       <label>Create <input type="number" id="kb-occurrence-count" min="1" max="52" value="8" style="width:50px;"> occurrences</label>
     </div>
     <div class="round-actions">
-      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Cancel')}
+      ${roundBtn('stop', 'kb-panel-reset', ICON_CANCEL, 'Cancel')}
       ${roundBtn('go', 'kb-plan-submit', ICON_CONFIRM, 'Create')}
     </div>
   `;
 }
 
-// Compact round icon buttons for the mode panel's actions, side by side:
-// green check = create, green play = next step, red X = cancel/back/close.
-// Icon-only, so the label goes in title (hover tooltip) and aria-label.
-// ︎ asks for the plain text glyph, not a colour emoji.
-const ICON_CONFIRM = '&#x2713;';
-const ICON_NEXT = '&#x25B6;&#xFE0E;';
-const ICON_CANCEL = '&#x2715;';
-function roundBtn(kind, action, icon, label) {
-  return `<button type="button" class="round-btn ${kind}" data-action="${action}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</button>`;
-}
 
 // Renders "2:00 PM - 4:00 PM" / "From 2:00 PM" / "Until 4:00 PM" / '' from
 // a task's optional startTime/dueTime ("HH:MM" 24h strings, or null/''
@@ -762,7 +786,7 @@ function viewListHtml(iso) {
       </div>
     `).join('')}
     <div class="round-actions">
-      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Close')}
+      ${roundBtn('stop', 'kb-panel-reset', ICON_CANCEL, 'Close')}
     </div>
   `;
 }
@@ -787,7 +811,7 @@ function editListHtml(iso) {
       </div>
     `).join('')}
     <div class="round-actions">
-      ${roundBtn('stop', 'kb-panel-close', ICON_CANCEL, 'Close')}
+      ${roundBtn('stop', 'kb-panel-reset', ICON_CANCEL, 'Close')}
     </div>
   `;
 }
@@ -1008,6 +1032,7 @@ function wireDelegatedListeners() {
     const id = btn.dataset.id;
     switch (btn.dataset.action) {
       case 'kb-panel-close': return closePanel();
+      case 'kb-panel-reset': return closePanel(false);
       case 'kb-toggle-mode-switcher':
         modePanelShowModeSwitcher = !modePanelShowModeSwitcher;
         return renderModePanel();

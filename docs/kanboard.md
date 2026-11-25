@@ -125,13 +125,15 @@ the calendar itself (visible in View/Edit too, where the toggle would
 mean nothing) -- same change, same reasoning, as Mealie's identical
 Schedule/Quick Add toggle (`docs/mealie.md`).
 
-- **Day selection is direct multi-select, not Mealie's week-block
-  mechanic.** Mealie's Plan mode adds a whole 7-day block per click
-  (tuned for "fill most of the week with meals"); Schedule just toggles
-  one day in or out per click (`scheduleSelectedDates`, a plain `Set`).
-  Chores/events are just as often "add one specific day" as "fill the
-  week" -- having to exclude six days to add one date night would be
-  backwards for this use case specifically.
+- **Day selection uses Mealie's week-block mechanic.** A click starts a
+  7-day block, a click outside the selection adds another block, and a
+  click on a selected day includes/excludes it (`scheduleDays`, an
+  `{iso: included}` map, the same shape as Mealie's `weekSelection.days`,
+  drawn with the same `.included`/`.excluded` day classes). This replaced
+  an earlier one-day-per-click multi-select: adding a single day is
+  Quick Add's job, matching Mealie's Schedule/Quick Add split.
+  Clicking days during step 2 keeps the rows in sync (excluded days drop
+  their row, newly included ones get a blank row) instead of being ignored.
 - **Two steps in the same panel**: select days -> "Schedule N Days" ->
   one row per day (`scheduleRowHtml()`): name combo, Task/Event radios,
   assignee combo, from/until times, and a "Save for next time" checkbox
@@ -170,7 +172,7 @@ Schedule/Quick Add toggle (`docs/mealie.md`).
 - **The panel now stays visible the whole time Plan mode is active**,
   even with nothing selected in either sub-mode -- it used to hide
   whenever no single day was `selectedIso`'d, which already couldn't
-  work for Schedule (`scheduleSelectedDates` is a `Set`, not a single
+  work for Schedule (its selection is several days, not a single
   `selectedIso`), so Schedule was already special-cased to stay open
   via `scheduling = calendarMode === 'plan' && planSubMode ===
   'schedule'`. Quick Add now gets the same treatment for the toggle's
@@ -178,10 +180,18 @@ Schedule/Quick Add toggle (`docs/mealie.md`).
   `planIdleBodyHtml()` filling the panel with a one-line hint
   ("Click a day...") whenever there's nothing selected yet. Closing
   the panel (`closePanel()`) resets whichever sub-mode's in-progress
-  state exists (`selectedIso`, or `scheduleSelectedDates`/
+  state exists (`selectedIso`, or `scheduleDays`/
   `schedulePicks`) but no longer forces a switch back to Quick Add --
   an earlier version of this had to, since only Quick Add's empty
   state used to hide the panel; now both sub-modes idle in place.
+- **The panel's X hides the whole panel**, same as Mealie's:
+  `closePanel()` sets `modePanelDismissed`, which `renderModePanel()`
+  checks before anything else, and the next day click or mode switch
+  clears it. The in-panel Cancel/Close round buttons call
+  `closePanel(false)`, which only resets the selection.
+- **Shared round buttons**: `roundBtn()` and the `ICON_*` glyphs live in
+  `js/core.js`, so Mealie's mode-panel actions use the same
+  ✓ / ▶ / ✕ / 🗑 buttons as Kanboard's.
 
 ## Recurrence: pre-materialized real tasks, not Kanboard's recurrence plugin
 

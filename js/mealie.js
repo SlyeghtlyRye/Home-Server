@@ -4,7 +4,8 @@
 // (calendar days, preview rows, dropdowns) re-render frequently.
 import { registerApp, showStatusModal, hideStatusModal, showSuccessThenClose,
          showErrorBanner, clearErrorBanner, showConfirmModal, escapeHtml, isoOf,
-         showProcessingBanner, hideProcessingBanner, modePanelMaxHeight } from './core.js';
+         showProcessingBanner, hideProcessingBanner, modePanelMaxHeight,
+         roundBtn, ICON_CONFIRM, ICON_NEXT, ICON_CANCEL, ICON_DELETE } from './core.js';
 import { shouldShowHolidays, loadCalendarSettingsData, renderSettingsGearHtml,
          handleClick as handleCalSettingsClick, handleChange as handleCalSettingsChange } from './calendar-settings.js';
 // Read as a global, not a static `import` from config.js -- that file
@@ -590,10 +591,10 @@ function editPanelBodyHtml() {
       <input type="date" id="edit-swap-target">
       <button class="btn small" data-action="edit-swap">Swap</button>
     </div>
-    <div class="btn-stack" style="margin-top:12px;">
-      <button class="btn cancel" data-action="edit-cancel">Cancel</button>
-      ${plannedMap[editPick.date] ? `<button class="btn clear" data-action="edit-delete">Delete Meal</button>` : ''}
-      <button class="btn save" data-action="edit-save">Save</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'edit-cancel', ICON_CANCEL, 'Cancel')}
+      ${plannedMap[editPick.date] ? roundBtn('stop', 'edit-delete', ICON_DELETE, 'Delete meal') : ''}
+      ${roundBtn('go', 'edit-save', ICON_CONFIRM, 'Save')}
     </div>
   `;
 }
@@ -967,10 +968,10 @@ function actionPanelBodyHtml() {
       Always skip these days (remembered on this device, applies to future weeks too):
     </p>
     ${weekdayChipsHtml()}
-    <div class="btn-stack">
-      <button class="btn save" data-action="plan-selected">Plan Selected Days</button>
-      <button class="btn cancel" data-action="cancel-selection">Cancel Selection</button>
-      <button class="btn clear" data-action="clear-selected-days">Clear Selected Days</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'cancel-selection', ICON_CANCEL, 'Cancel selection')}
+      ${roundBtn('stop', 'clear-selected-days', ICON_DELETE, 'Clear meals on selected days')}
+      ${roundBtn('go', 'plan-selected', ICON_NEXT, `Plan ${included.length} day${included.length === 1 ? '' : 's'}`)}
     </div>
   `;
 }
@@ -1218,9 +1219,9 @@ function previewPanelBodyHtml() {
       </div>
     `;
     }).join('')}
-    <div class="btn-grid" style="margin-top:15px;">
-      <button class="btn save" data-action="commit" ${confirmCancelDisabled}>Confirm & Save</button>
-      <button class="btn cancel" data-action="cancel-preview" ${confirmCancelDisabled}>Cancel</button>
+    <div class="round-actions">
+      ${roundBtn('stop', 'cancel-preview', ICON_CANCEL, 'Cancel', confirmCancelDisabled)}
+      ${roundBtn('go', 'commit', ICON_CONFIRM, 'Confirm and save', confirmCancelDisabled)}
     </div>
   `;
 }
