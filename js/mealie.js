@@ -89,6 +89,9 @@ try {
 const CALENDAR_MODES = ['plan', 'view', 'edit'];
 let calendarMode = CALENDAR_MODES.includes(localStorage.getItem('mealie_calendarMode')) ? localStorage.getItem('mealie_calendarMode') : 'plan';
 let viewSelectedIso = null;
+// Set by the panel's X: hides the whole panel (even Plan's always-on
+// one) until the next day click or mode switch brings it back.
+let modePanelDismissed = false;
 
 // A toggle inside Plan mode, same style/placement as Kanboard's Quick
 // Add/Schedule toggle (see js/kanboard.js) -- but the default is flipped:
@@ -230,6 +233,7 @@ function setPlanSubMode(mode) {
 
 function setCalendarMode(mode) {
   if (calendarMode === mode) return;
+  modePanelDismissed = false;
   // Plan, View, and Edit all center on "the day I was just looking at" --
   // switching between any two of them hands that day across rather than
   // forcing it to be reselected, so every switch tries to land on some
@@ -338,7 +342,8 @@ function renderCalendar() {
 // block or centered modal -- which body renders is decided purely by
 // which piece of state is currently set (previewPicks/weekSelection for
 // Plan, viewSelectedIso for View, editPick for Edit). Closing the panel
-// (the X, or its own Cancel button) always clears exactly that state.
+// (the X, or its own Cancel button) always clears exactly that state;
+// the X also hides the panel itself (see modePanelDismissed).
 
 function renderModePanel() {
   const el = document.getElementById('mode-panel');
@@ -374,7 +379,7 @@ function renderModePanel() {
     }
   }
 
-  if (!visible) {
+  if (!visible || modePanelDismissed) {
     el.classList.remove('show');
     el.innerHTML = '';
     modePanelShowModeSwitcher = false;
@@ -419,6 +424,7 @@ function planIdleBodyHtml() {
 }
 
 function closeModePanel() {
+  modePanelDismissed = true;
   if (calendarMode === 'view') {
     closeViewDayDetail();
   } else if (calendarMode === 'edit') {
@@ -432,6 +438,7 @@ function closeModePanel() {
       clearSelection();
     }
   }
+  renderModePanel();
 }
 
 function startModePanelResize(e) {
@@ -806,6 +813,7 @@ function buildWeekSelectionStartingAt(iso) {
 
 function onDayClick(iso) {
   modePanelShowModeSwitcher = false;
+  modePanelDismissed = false;
   if (calendarMode === 'view') {
     const wasSelected = viewSelectedIso === iso;
     viewSelectedIso = wasSelected ? null : iso;
