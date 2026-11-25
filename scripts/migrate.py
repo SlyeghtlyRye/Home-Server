@@ -4,6 +4,7 @@ archive, and import it onto a fresh install (new drive, new board, or a
 rebuild after a factory reset).
 
     python3 scripts/migrate.py export /mnt/backup/home-server.tar.gz
+    python3 scripts/migrate.py export --from-root /mnt/old /mnt/backup/home-server.tar.gz
     python3 scripts/migrate.py verify /mnt/backup/home-server.tar.gz
     python3 scripts/migrate.py import /root/home-server.tar.gz [--host-ip 192.168.0.50]
     python3 scripts/migrate.py prepare-drive /dev/sdb   # new drive becomes a self-installing replacement
@@ -165,6 +166,36 @@ def compose_volumes():
     return volumes
 
 
+def volumes_from_root(mount, project="root"):
+    """Like compose_volumes(), but for an old root drive mounted at `mount`
+    (read-only, Docker not running on it). Compose names volumes
+    <project>_<name>; anonymous (hash-named) volumes are skipped."""
+    base = os.path.join(mount, "var/lib/docker/volumes")
+    if not os.path.isdir(base):
+        raise MigrateError(f"{base} doesn't exist -- is the old root drive mounted at {mount}?")
+    prefix = project + "_"
+    volumes = {}
+    for full_name in sorted(os.listdir(base)):
+        data = os.path.join(base, full_name, "_data")
+        if full_name.startswith(prefix) and os.path.isdir(data):
+            volumes[full_name[len(prefix):]] = data
+    if not volumes:
+        raise MigrateError(f"no {prefix}* volumes found under {base}")
+    return volumes
+
+
+def _env_value_at(root, key, default):
+    try:
+        with open(os.path.join(root, ".env")) as f:
+            for line in f:
+                k, sep, v = line.strip().partition("=")
+                if sep and k.strip() == key:
+                    return v.strip().strip("\"\'")
+    except OSError:
+        pass
+    return default
+
+
 # ------------------------------------------------------- verified reading
 
 def _evict(fd, offset, length):
@@ -226,12 +257,14 @@ class VerifiedReader(io.RawIOBase):
 
 # ----------------------------------------------------------------- export
 
-def _export_plan(exclude_volumes):
-    volumes = {k: v for k, v in compose_volumes().items() if k not in exclude_volumes}
-    files = [p for p in PERSONAL_PATHS if os.path.lexists(os.path.join(ROOT, p))]
+def _export_plan(exclude_volumes, from_root=None):
+    src_root = os.path.join(from_root, "root") if from_root else ROOT
+    all_volumes = volumes_from_root(from_root) if from_root else compose_volumes()
+    volumes = {k: v for k, v in all_volumes.items() if k not in exclude_volumes}
+    files = [p for p in PERSONAL_PATHS if os.path.lexists(os.path.join(src_root, p))]
     sizes = {f"volume {k}": _tree_size(v) for k, v in volumes.items()}
-    sizes.update({f"file {p}": _tree_size(os.path.join(ROOT, p)) for p in files})
-    return volumes, files, sizes
+    sizes.update({f"file {p}": _tree_size(os.path.join(src_root, p)) for p in files})
+    return volumes, files, sizes, src_root
 
 
 def _add_tree(tar, src, arc_prefix, manifest, stats):
@@ -298,16 +331,19 @@ def cmd_export(args):
     if not os.path.isdir(dest_dir):
         raise MigrateError(f"destination directory {dest_dir} doesn't exist (is the backup drive mounted?)")
 
-    volumes, files, sizes = _export_plan(set(args.exclude_volume or []))
+    from_root = getattr(args, "from_root", None)
+    if from_root:
+        from_root = os.path.abspath(from_root)
+    volumes, files, sizes, src_root = _export_plan(set(args.exclude_volume or []), from_root)
     total = sum(sizes.values())
     print("Will export:")
     for label, size in sizes.items():
         print(f"  {label:45s} {_human(size)}")
     print(f"  {'TOTAL (before compression)':45s} {_human(total)}")
 
-    same_drive = os.stat(dest_dir).st_dev == os.stat(ROOT).st_dev
+    same_drive = os.stat(dest_dir).st_dev == os.stat(src_root).st_dev
     if same_drive:
-        msg = (f"{dest_dir} is on the same drive as {ROOT} -- the drive you're "
+        msg = (f"{dest_dir} is on the same drive as {src_root} -- the drive you're "
                f"presumably trying to get off of. Plug in a separate USB stick and "
                f"export there instead.")
         if not args.allow_same_drive:
@@ -319,22 +355,36 @@ def cmd_export(args):
     if free < total:
         raise MigrateError(f"only {_human(free)} free at {dest_dir}, need up to {_human(total)}")
 
+    if args.dry_run and from_root:
+        print(f"\n[dry-run] would write the archive above from {from_root} to {dest}, then verify it.")
+        return
     if args.dry_run:
         print("\n[dry-run] would stop the stack, write the archive above to "
               f"{dest}, restart the stack, then verify the archive.")
         return
 
-    print("\nStopping containers and the trigger service for a consistent snapshot "
-          "(databases must not be written mid-copy)...")
-    _run(["systemctl", "stop", "mealie-trigger.service"], check=False)
-    _run(["docker", "compose", "stop"], check=False)
-    _run(["sync"], check=False)
+    if from_root:
+        # Old drive mounted on another machine: nothing runs on it, so
+        # there's no stack to stop for a consistent snapshot.
+        try:
+            with open(os.path.join(from_root, "etc/hostname")) as f:
+                hostname = f.read().strip() or "unknown"
+        except OSError:
+            hostname = "unknown"
+        host_ip = _env_value_at(src_root, "HOST_IP", "192.168.0.201")
+    else:
+        hostname, host_ip = socket.gethostname(), reset_manager.read_current_host_ip()
+        print("\nStopping containers and the trigger service for a consistent snapshot "
+              "(databases must not be written mid-copy)...")
+        _run(["systemctl", "stop", "mealie-trigger.service"], check=False)
+        _run(["docker", "compose", "stop"], check=False)
+        _run(["sync"], check=False)
 
     manifest = {
         "format": FORMAT_VERSION,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
-        "hostname": socket.gethostname(),
-        "host_ip": reset_manager.read_current_host_ip(),
+        "hostname": hostname,
+        "host_ip": host_ip,
         "volumes": sorted(volumes),
         "personal_paths": files,
         "files": {},
@@ -351,7 +401,7 @@ def cmd_export(args):
                 _add_tree(tar, mountpoint, f"volumes/{name}", manifest, stats)
             for rel in files:
                 print(f"  file {rel} ...", flush=True)
-                _add_tree(tar, os.path.join(ROOT, rel), f"files/{rel}", manifest, stats)
+                _add_tree(tar, os.path.join(src_root, rel), f"files/{rel}", manifest, stats)
             data = json.dumps(manifest, indent=1, sort_keys=True).encode()
             ti = tarfile.TarInfo(MANIFEST_NAME)
             ti.size, ti.mtime, ti.mode = len(data), int(time.time()), 0o600
@@ -363,9 +413,10 @@ def cmd_export(args):
             os.remove(tmp)
         raise
     finally:
-        print("Restarting the stack...")
-        _run(["docker", "compose", "start"], check=False)
-        _run(["systemctl", "start", "mealie-trigger.service"], check=False)
+        if not from_root:
+            print("Restarting the stack...")
+            _run(["docker", "compose", "start"], check=False)
+            _run(["systemctl", "start", "mealie-trigger.service"], check=False)
 
     os.replace(tmp, dest)
     os.chmod(dest, 0o600)  # contains .env secrets and API tokens
@@ -1052,6 +1103,9 @@ def main():
                    help="skip a volume, e.g. syncthing_data if its folders can re-sync from peers (repeatable)")
     p.add_argument("--allow-same-drive", action="store_true",
                    help="allow writing the archive onto the root drive itself")
+    p.add_argument("--from-root", metavar="MOUNT",
+                   help="export from an old root drive mounted at MOUNT (read-only is fine) "
+                        "instead of this device's running stack")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_export)
 

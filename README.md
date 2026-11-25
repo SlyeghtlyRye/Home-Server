@@ -2,7 +2,9 @@
 
 A self-hosted home dashboard combining network ad-blocking, meal planning,
 task management, and a custom media player — designed to run on genuinely
-low-resource hardware (built and tested on a device with 1GB RAM).
+low-resource hardware (built and tested on a device with 1GB RAM). Since
+November 2026 it runs on an Intel N5105 mini PC with 8 GB of RAM and Debian 13.
+See [docs/dev-findings.md](docs/dev-findings.md) #7 for the move.
 
 New here? Start with [SETUP.md](./SETUP.md) for the full step-by-step
 install guide. Quick summary of what that involves:

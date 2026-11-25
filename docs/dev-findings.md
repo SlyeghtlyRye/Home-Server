@@ -201,6 +201,72 @@ force the failure path, not just the happy path.
   restart could silently pull a new version. All images are now pinned
   to exact versions in `docker-compose.yml`.
 
+## 7. The board died: moving to an x86 mini PC (Nov 2026)
+
+**What happened.** On 2026-11-24 the La Frite (Libre Computer AML-S805X,
+1 GB RAM, booting from a USB stick) stopped working. Its data was all on
+the root drive, a 16 GB SanDisk Cruzer Glide.
+
+**How it was moved.** The server was rebuilt on a mini PC with a fresh
+Debian 13 install. `migrate.py export` assumed it would run *on* the old
+device with its Docker stack running, which wasn't possible with a dead
+board. So it gained `export --from-root <mount>`, which reads volumes and
+personal files from the old drive mounted **read-only** on the new
+machine (see `migration.md`, "When the old device is dead"). The export
+read 1,252 files (2.3 GiB) with no inconsistent reads. Import verified
+every checksum, every SQLite database passed its integrity check, and all
+five containers came up healthy. Tailscale's state and the icecast2
+config were copied off the old drive too, so the Tailscale node kept its
+identity. The server took over the old address, **192.168.0.201**,
+through a router DHCP reservation. Every device that pointed at the old
+server, including the router's DNS setting for Pi-hole, worked again
+with no changes.
+
+**Gotchas hit along the way.**
+- *The mini PC lives somewhere with no monitor.* Wi-Fi and SSH were set up
+  first, at the console, before it was moved. `wpa_passphrase` reads the
+  password from stdin and hashes it, which avoids quoting problems in
+  `/etc/network/interfaces`. Ethernet is `allow-hotplug`, not `auto`, so
+  booting without a cable doesn't hang. A typo there (`/ etc/...`)
+  showed up in the error as a path with a space in it, which made it
+  easy to spot.
+- *Changing the IP over SSH.* The DHCP renew (`dhcpcd -k enp1s0;
+  dhcpcd enp1s0`) was run over the Wi-Fi address, so dropping the
+  Ethernet address didn't cut the session. After the IP changed,
+  `HOST_IP` in `.env`, `js/config.js` and the TLS cert were regenerated
+  through `reset_manager`, then the stack was recreated.
+- *"Remote host identification has changed"* for .201 was expected: the
+  client still had the old board's host key for that address. Before
+  trusting the new key, check that the fingerprint matches the one seen
+  when you first connected over Wi-Fi.
+- *The 256 GB M.2 inside the mini PC* ignored writes during the install,
+  so Debian went onto a 2.5" SATA drive instead. The M.2 is unused.
+
+**What the new hardware improves.**
+
+| | La Frite (old) | Mini PC (new) |
+|---|---|---|
+| CPU | 4× Cortex-A53, ARM | Intel Celeron N5105, 4 cores, x86-64 |
+| RAM | 1 GB (914 MiB usable) plus swap on the flaky drive | 8 GB. About 1.2 GB used with everything running, so it never touches swap |
+| Boot/data drive | 16 GB USB flash stick that silently returned wrong bytes (#1) | 500 GB 2.5" SATA hard drive. Not USB, not flash, and SMART can monitor it |
+| Free space | About 6 GB | About 425 GB |
+| Clock | No RTC battery, so it booted with the wrong date until NTP synced (#6) | Real-time clock with battery |
+| Network | Ethernet only | Gigabit Ethernet plus Wi-Fi (both up, so one is a fallback) |
+
+In practice the main problems this project fought are gone. The
+storage-corruption crash loops (#1, #2) and the memory tuning for a
+1 GB board (Mealie pinned to one worker, tight container memory limits,
+the swap file) were all limits of the old hardware. The tuning still
+works, so it was left alone. It's now headroom you can relax later if
+you want. Mealie, the heaviest service, uses about 280 MiB.
+
+**Lesson.** Having a migration tool that checksums everything turned a
+dead board into a routine rebuild instead of data recovery. The one
+assumption the tool got wrong was that the source machine would be
+alive. A backup or migration path should also work from the drive
+alone, because "the machine won't boot" is the most likely reason
+you'll need it.
+
 ## Toolkit: commands used above
 
 | Question | Command |

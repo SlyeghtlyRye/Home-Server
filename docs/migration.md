@@ -159,6 +159,40 @@ kind of device:
    `/root`). Skip `setup.sh`.
 3. `python3 /root/scripts/migrate.py import /mnt/backup/home-server.tar.gz --host-ip <ip>`
 
+## When the old device is dead (export from its drive)
+
+If the old device won't boot but its root drive is fine, plug that drive
+into the new machine and export straight from it. Docker doesn't need to
+be running on it:
+
+```bash
+mkdir -p /mnt/old
+mount -o ro,noload /dev/disk/by-label/armbi_root /mnt/old   # read-only; noload skips ext4 journal replay
+python3 /root/scripts/migrate.py export --from-root /mnt/old /srv/migrate/home-server.tar.gz
+python3 /root/scripts/migrate.py import /srv/migrate/home-server.tar.gz --host-ip <new-ip>
+```
+
+`--from-root` reads the volumes from `<mount>/var/lib/docker/volumes/root_*`,
+reads the personal files from `<mount>/root`, and takes the old host IP
+from that drive's `.env`. It doesn't stop or start any containers. The
+same verified double reads and manifest apply. `--dry-run` shows the plan.
+
+The import doesn't carry Tailscale or icecast2, but you can copy them
+from the old drive the same way `firstboot.sh` does. With
+`/var/lib/tailscale` copied over, the node keeps its identity and needs
+no re-login:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl stop tailscaled
+cp -a /mnt/old/var/lib/tailscale/. /var/lib/tailscale/ && systemctl start tailscaled
+apt-get install -y icecast2 && cp -a /mnt/old/etc/icecast2/. /etc/icecast2/
+chown root:icecast /etc/icecast2/icecast.xml && systemctl restart icecast2
+```
+
+This is how the server moved from the La Frite to the mini PC in
+November 2026. See dev-findings.md, #7.
+
 ## Keeping it in sync
 
 `PERSONAL_PATHS` in `scripts/migrate.py` mirrors the "Personal data"
